@@ -8,7 +8,7 @@
      aleatorio por subida → el contenido de una ruta nunca cambia.
    Firefox 78 (Mypal) lo soporta; en orígenes http no seguros el registro
    falla en main.js y la app sigue funcionando sin SW. */
-const SHELL_CACHE = 'foxinix-shell-v88';  // W54b: Ajustes como pestaña móvil
+const SHELL_CACHE = 'foxinix-shell-v89';  // W54b: Ajustes como pestaña móvil
 /* W50: el caché de medios y las descargas explícitas viven en cachés
    SEPARADAS del shell. Así una actualización de la app no borra los
    archivos ya vistos/descargados. El de medios se poda por tamaño; el de
