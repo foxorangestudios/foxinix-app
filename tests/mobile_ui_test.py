@@ -7,7 +7,8 @@ pantalla de teléfono:
   1. Aparece la barra inferior Chats / Personas / Ajustes.
   2. La lista usa el app bar móvil (sin el pie de usuario de escritorio).
   3. El chat oculta el sidebar y deja las llamadas dentro del menú ⋮.
-  4. Personas y Ajustes ocupan la pantalla de forma coherente.
+  4. Personas ocupa la pantalla y Ajustes se comporta como pestaña
+     de la barra inferior (sin X y sin ocultar la navegación).
   5. En escritorio (1280px) no aparece ninguna pieza exclusiva de móvil.
 
 Uso: server/.venv/bin/python tests/mobile_ui_test.py [--base http://127.0.0.1:8899]
@@ -115,7 +116,9 @@ def main():
             ev="JSON.stringify({tabs:getComputedStyle(document.querySelector('.mobile-tabs')).display,"
                "people:getComputedStyle(document.querySelector('.side-people')).display,"
                "user:getComputedStyle(document.querySelector('.user-panel')).display,"
-               "title:document.querySelector('.side-title').textContent})",
+               "title:document.querySelector('.side-title').textContent,"
+               "plus:getComputedStyle(document.querySelector('.side-new')).backgroundColor,"
+               "avatar:Math.round(document.querySelector('.mobile-me .avatar').getBoundingClientRect().width)})",
             wait=1000)
         print("paso1 lista:", ev)
         if not ok or not isinstance(ev, dict) or ev.get("tabs") != "flex":
@@ -124,6 +127,10 @@ def main():
         state = ev
         if state["people"] != "none" or state["user"] != "none":
             raise SystemExit("✗ quedaron piezas de escritorio en la lista móvil")
+        if state["plus"] not in ("rgba(0, 0, 0, 0)", "transparent"):
+            raise SystemExit(f"✗ el botón ＋ conserva fondo: {state['plus']}")
+        if state["avatar"] != 40:
+            raise SystemExit(f"✗ el avatar no mide lo mismo que el botón: {state['avatar']}")
 
         # 2) Chat: sidebar fuera, llamadas en el menú ⋮, cabecera a 390px.
         js_chat = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
@@ -192,7 +199,7 @@ def main():
         if st["head"] != "Personas" or not st["on"]:
             raise SystemExit(f"✗ cabecera de Personas incorrecta: {st}")
 
-        # 5) Ajustes: pantalla completa y sin barra inferior encima.
+        # 5) Ajustes: pestaña de abajo; la barra sigue visible y activa.
         js_set = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
                   "let t=Date.now();"
                   "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
@@ -200,8 +207,14 @@ def main():
                   "await s(800);"
                   "const m=document.querySelector('.modal.settings');"
                   "const r=m.getBoundingClientRect();"
+                  "const nav=document.querySelector('.mobile-tabs');"
+                  "const on=document.querySelector('.mobile-tabs .mt-btn.on .mt-label');"
+                  "const close=document.querySelector('.modal.settings > header .icon-btn');"
                   "return JSON.stringify({w:Math.round(r.width),h:Math.round(r.height),"
-                  "tabs:!!document.querySelector('.mobile-tabs')})})()")
+                  "tabs:getComputedStyle(nav).display,active:on?on.textContent.trim():'',"
+                  "close:close?getComputedStyle(close).display:'',"
+                  "navZ:getComputedStyle(nav).zIndex,"
+                  "veilZ:getComputedStyle(document.querySelector('.settings-veil')).zIndex})})()")
         ok, js_res, _, log = run_shot(
             f"{a.base}/?v=mobile-settings", SHOTS / "mov-5-ajustes.png",
             js=js_set, wait=700)
@@ -210,8 +223,39 @@ def main():
             print(log[-1600:])
             raise SystemExit("✗ no abrió Ajustes en móvil")
         st = js_res
-        if st["w"] != 390 or st["h"] != 844 or st["tabs"]:
+        if st["w"] != 390 or st["h"] != 844:
             raise SystemExit(f"✗ Ajustes no ocupa la pantalla: {st}")
+        if st["tabs"] != "flex" or st["active"] != "Ajustes":
+            raise SystemExit(f"✗ Ajustes no se comporta como pestaña: {st}")
+        if st["close"] != "none":
+            raise SystemExit(f"✗ la X de Ajustes sigue visible en móvil: {st}")
+        if int(st["navZ"]) <= int(st["veilZ"]):
+            raise SystemExit(f"✗ la barra inferior quedó debajo de Ajustes: {st}")
+
+        # 5b) Desde Ajustes se puede volver a Chats con la barra de abajo.
+        js_back = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+                   "let t=Date.now();"
+                   "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
+                   "document.querySelector('.mobile-tabs .mt-btn:nth-child(3)').click();"
+                   "await s(600);"
+                   "const opened=!!document.querySelector('.settings-veil');"
+                   "document.querySelector('.mobile-tabs .mt-btn:nth-child(1)').click();"
+                   "await s(700);"
+                   "const on=document.querySelector('.mobile-tabs .mt-btn.on .mt-label');"
+                   "return JSON.stringify({opened:opened,"
+                   "closed:!document.querySelector('.settings-veil'),"
+                   "active:on?on.textContent.trim():'',"
+                   "title:document.querySelector('.side-title').textContent})})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-settings-back", SHOTS / "mov-5b-vuelta.png",
+            js=js_back, wait=500)
+        print("paso5b vuelta:", js_res)
+        if not ok or not js_res:
+            print(log[-1600:])
+            raise SystemExit("✗ no se pudo volver desde Ajustes")
+        st = js_res
+        if not st["opened"] or not st["closed"] or st["active"] != "Chats":
+            raise SystemExit(f"✗ la barra no navega desde Ajustes: {st}")
 
         # 6) Escritorio: nada exclusivo de móvil.
         ok, js_res, ev, log = run_shot(

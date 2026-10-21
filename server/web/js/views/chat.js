@@ -5864,6 +5864,7 @@ export const ChatShell = {
       return (p && p.received) ? p.received.length : 0;
     });
     const goPeople = function () {
+      store.settingsOpen = false;
       store.peopleTab = 'active';
       if (isNarrow.value) {
         if (store.activeChatId) closeChat();
@@ -5878,6 +5879,7 @@ export const ChatShell = {
        (Chats / Personas / Ajustes) en vez de la fila "Personas" y el panel
        de usuario del sidebar de escritorio. */
     const mobileChats = function () {
+      store.settingsOpen = false;
       store.peopleMobile = false;
       if (store.activeChatId) closeChat();
     };
@@ -6893,14 +6895,14 @@ export const ChatShell = {
          la vista: dentro de una conversación manda el chat a pantalla
          completa (se vuelve con la flecha). */
       '<nav class="mobile-tabs" v-if="!store.activeChatId && !store.wallPanelOpen && ' +
-        '!store.settingsOpen && !store.meProfileOpen && !store.newChatOpen && !store.profile" ' +
+        '!store.meProfileOpen && !store.newChatOpen && !store.profile" ' +
         ':aria-label="t(\'Navegación principal\')">' +
-        '<button class="mt-btn" type="button" :class="{ on: !store.peopleMobile }" ' +
+        '<button class="mt-btn" type="button" :class="{ on: !store.peopleMobile && !store.settingsOpen }" ' +
           '@click="mobileChats">' +
           '<svg class="ic"><use href="#i-chat"></use></svg>' +
           '<span class="mt-label">{{ t(\'Chats\') }}</span>' +
         '</button>' +
-        '<button class="mt-btn" type="button" :class="{ on: store.peopleMobile }" ' +
+        '<button class="mt-btn" type="button" :class="{ on: store.peopleMobile && !store.settingsOpen }" ' +
           '@click="goPeople">' +
           '<span class="mt-ic-wrap">' +
             '<svg class="ic"><use href="#i-users"></use></svg>' +
@@ -6908,7 +6910,8 @@ export const ChatShell = {
           '</span>' +
           '<span class="mt-label">{{ t(\'Personas\') }}</span>' +
         '</button>' +
-        '<button class="mt-btn" type="button" @click="openSettings()">' +
+        '<button class="mt-btn" type="button" :class="{ on: store.settingsOpen }" ' +
+          '@click="openSettings()">' +
           '<svg class="ic"><use href="#i-gear"></use></svg>' +
           '<span class="mt-label">{{ t(\'Ajustes\') }}</span>' +
         '</button>' +
