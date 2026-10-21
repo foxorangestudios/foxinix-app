@@ -3065,7 +3065,9 @@ body { font-size: calc(15px * var(--fs)); }
 }
 .lightbox .lb-img {
   max-width: 96vw;
-  max-height: 92vh;
+  /* W54c: deja libres los botones de arriba y la pista de abajo
+     también en escritorio; antes una foto alta se metía debajo. */
+  max-height: calc(100vh - 120px);
   user-select: none;
   -moz-user-select: none;
   touch-action: none;
@@ -3287,6 +3289,15 @@ body { font-size: calc(15px * var(--fs)); }
   background: rgba(0, 0, 0, .35);
 }
 .lb-dl:hover { background: rgba(0, 0, 0, .55); color: #fff; }
+/* W54c: con la foto ampliada los controles solo estorban; vuelven al
+   ajustar (o al reducir la pinza hasta 1x). */
+.lightbox .lb-close,
+.lightbox .lb-dl { transition: opacity .12s ease-out; }
+.lightbox.lb-zoomed .lb-close,
+.lightbox.lb-zoomed .lb-dl {
+  opacity: 0;
+  pointer-events: none;
+}
 
 /* ---------------- W13 ---------------- */
 
@@ -4577,14 +4588,6 @@ body { font-size: calc(15px * var(--fs)); }
     padding-right: calc(10px + env(safe-area-inset-right, 0px));
   }
   /* Al ampliar, los controles se apartan y dejan ver la foto completa. */
-  .lightbox.lb-zoomed .lb-close,
-  .lightbox.lb-zoomed .lb-dl {
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .12s ease-out;
-  }
-  .lightbox .lb-close,
-  .lightbox .lb-dl { transition: opacity .12s ease-out; }
 
   /* W54c: editor de foto grande y gestual. Sin barra de zoom ni botón
      Girar: se usan dos dedos, como en una app de verdad. */
