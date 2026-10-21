@@ -74,7 +74,7 @@ Carga `https://chat.foxinix.qzz.io/` en una ventana nativa (se puede cambiar con
 - **Fedora:** `.rpm` x86_64.
 - **Arch Linux y otras:** `.AppImage` x86_64.
 - **Windows 10/11:** instalador NSIS `.exe` x64 (requiere WebView2; en Windows 7/8 no hay soporte oficial, usar la web/PWA).
-- **Android 7+:** APK arm64 firmado, probado en emulador Android 15.
+- **Android 7+:** APKs arm64 y armv7 (32 bits) firmados, probados en emulador Android 15.
 
 El icono SVG fuente y los detalles de compilación están en `desktop/README.md`.
 

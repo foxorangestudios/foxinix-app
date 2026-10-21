@@ -12,7 +12,7 @@ WebView de Android y recibe las actualizaciones del servidor sin reinstalar.
 | Fedora | `.rpm` x86_64 | `webkit2gtk4.1`, GTK 3, librsvg |
 | Arch Linux y otras | `.AppImage` x86_64 | `webkit2gtk-4.1`; FUSE 2; el AppImage ya incluye GStreamer |
 | Windows 10/11 | instalador NSIS `.exe` x64 | WebView2 (lo instala el instalador si falta) |
-| Android 7+ | APK arm64 | WebView moderno del sistema |
+| Android 7+ | APK arm64 / armv7 (32 bits) | WebView moderno del sistema |
 
 Windows 7/8 y macOS no se publican por ahora. Windows 7/8 no tienen
 WebView2 oficial; en esos equipos se puede usar la web/PWA. macOS requiere
@@ -21,8 +21,8 @@ compilar en macOS.
 Para ejecutar el AppImage en Arch Linux:
 
 ```bash
-chmod +x Foxinix-0.1.2-linux-x86_64.AppImage
-./Foxinix-0.1.2-linux-x86_64.AppImage
+chmod +x Foxinix-0.1.3-linux-x86_64.AppImage
+./Foxinix-0.1.3-linux-x86_64.AppImage
 ```
 
 Los paquetes `.deb` y `.rpm` recomiendan los plugins de GStreamer para
@@ -88,7 +88,7 @@ un keystore guardado en secretos (`ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`,
 
 - La app carga la misma web remota por HTTPS; no incrusta una copia de la
   interfaz ni del servidor.
-- Se publica un APK **arm64** para celulares modernos (Android 7 o superior).
+- Se publican APKs **arm64** y **armv7 (32 bits)** para Android 7 o superior.
   La pantalla de login se probó en un emulador Android 15 x86_64 con un APK
   compilado desde el mismo código.
 - Pide permiso de micrófono y cámara solo cuando la web los usa (notas de

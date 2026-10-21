@@ -116,8 +116,18 @@ jobs:
           if-no-files-found: error
 
   android:
-    name: Android (APK arm64)
+    name: Android (${{ matrix.arch }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64
+            arch: arm64
+            rust: aarch64-linux-android
+          - target: armv7
+            arch: armv7
+            rust: armv7-linux-androideabi
     steps:
       - uses: actions/checkout@v4
 
@@ -159,7 +169,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: ${{ matrix.rust }}
 
       - name: Preparar proyecto Android
         working-directory: desktop
@@ -186,26 +196,27 @@ jobs:
 
       - name: Compilar APK
         working-directory: desktop
-        run: npx tauri android build --apk --target aarch64
+        run: npx tauri android build --apk --target ${{ matrix.target }}
 
       - name: Preparar artefacto Android
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${FOXINIX_VERSION#v}"
+          ARCH="${{ matrix.arch }}"
           mkdir -p dist
           APK="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' | sort | head -1)"
           test -n "$APK"
-          cp "$APK" "dist/Foxinix-${VERSION}-android-arm64.apk"
+          cp "$APK" "dist/Foxinix-${VERSION}-android-${ARCH}.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort | tail -1)"
-          "$APKSIGNER" verify --print-certs "dist/Foxinix-${VERSION}-android-arm64.apk"
+          "$APKSIGNER" verify --print-certs "dist/Foxinix-${VERSION}-android-${ARCH}.apk"
           ls -lh dist
         working-directory: desktop
 
       - name: Subir artefacto Android
         uses: actions/upload-artifact@v4
         with:
-          name: foxinix-android
+          name: foxinix-android-${{ matrix.arch }}
           path: desktop/dist/*
           if-no-files-found: error
 
@@ -239,16 +250,17 @@ jobs:
             - **Fedora:** `Foxinix-*-fedora-x86_64.rpm`
             - **Arch Linux y otras distribuciones:** `Foxinix-*-linux-x86_64.AppImage`
             - **Windows 10/11:** `Foxinix-*-windows-x64-setup.exe`
-            - **Android 7 o superior:** `Foxinix-*-android-arm64.apk`
+            - **Android 7 o superior (64 bits):** `Foxinix-*-android-arm64.apk`
+            - **Android 7 o superior (32 bits):** `Foxinix-*-android-armv7.apk`
 
             La app usa la misma interfaz web y el mismo cifrado E2E que
-            https://chat.foxinix.qzz.io/. El APK de Android está firmado y
-            es para dispositivos arm64.
+            https://chat.foxinix.qzz.io/. Los APK de Android están firmados
+            y cubren dispositivos arm64 y armv7 (32 bits).
 
             ## Notas
             - El AppImage incluye GStreamer para reproducir audio y video; los
               paquetes `.deb`/`.rpm` recomiendan esos plugins.
-            - El AppImage se descarga sin permiso de ejecución: usá
+            - El AppImage se descarga sin permiso de ejecución: usa
               `chmod +x Foxinix-*.AppImage` antes de abrirlo.
             - Windows puede mostrar SmartScreen porque el instalador no tiene
               firma comercial.
