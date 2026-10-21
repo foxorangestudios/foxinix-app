@@ -133,10 +133,22 @@ jobs:
       - name: Instalar SDK y NDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;27.0.12077973"
+          for attempt in 1 2 3; do
+            if sdkmanager --install \
+              "platforms;android-36" \
+              "build-tools;36.0.0" \
+              "ndk;27.0.12077973"; then
+              break
+            fi
+            echo "Descarga de SDK/NDK falló (intento $attempt); reintentando..."
+            rm -rf "$ANDROID_HOME/ndk/27.0.12077973" \
+              "$ANDROID_HOME/.temp" "$HOME/.android/cache"
+            sleep 10
+            if [ "$attempt" = 3 ]; then
+              echo "No se pudo instalar el SDK/NDK después de 3 intentos" >&2
+              exit 1
+            fi
+          done
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
