@@ -109,3 +109,41 @@ if 'android:windowSoftInputMode="adjustResize"' not in manifest:
 
 MANIFEST.write_text(manifest, encoding="utf-8")
 print("AndroidManifest.xml listo")
+
+# W54d: con edge-to-edge (Android 15+) adjustResize no achica el WebView.
+# Aplicamos el inset del teclado al contenedor para que la página reciba
+# un viewport más bajo y el composer quede arriba del teclado.
+main_activity = next(ROOT.glob("app/src/main/java/**/MainActivity.kt"), None)
+if main_activity:
+    activity = main_activity.read_text(encoding="utf-8")
+    if "WindowInsetsCompat.Type.ime()" not in activity:
+        activity = activity.replace(
+            "import androidx.activity.enableEdgeToEdge",
+            "import android.view.View\n"
+            "import androidx.activity.enableEdgeToEdge\n"
+            "import androidx.core.view.ViewCompat\n"
+            "import androidx.core.view.WindowInsetsCompat",
+            1,
+        )
+        marker = "    super.onCreate(savedInstanceState)\n"
+        if marker not in activity:
+            print("Aviso: no se encontró onCreate en MainActivity.kt")
+        else:
+            inset_code = (
+                "    val content = findViewById<View>(android.R.id.content)\n"
+                "    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->\n"
+                "      val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom\n"
+                "      if (view.paddingBottom != ime) {\n"
+                "        view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, ime)\n"
+                "      }\n"
+                "      insets\n"
+                "    }\n"
+                "    ViewCompat.requestApplyInsets(content)\n"
+            )
+            activity = activity.replace(marker, marker + inset_code, 1)
+            main_activity.write_text(activity, encoding="utf-8")
+            print("Inset del teclado agregado a MainActivity.kt")
+    else:
+        print("El inset del teclado ya estaba presente")
+else:
+    print("Aviso: no se encontró MainActivity.kt para ajustar el teclado")
