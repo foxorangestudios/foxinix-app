@@ -2723,7 +2723,7 @@ const SettingsModal = {
     };
   },
   template: `
-    <div class="modal-veil" @click.self="close">
+    <div class="modal-veil settings-veil" @click.self="close">
       <div class="modal settings" role="dialog" :aria-label="t('Ajustes')">
         <header>{{ t('Ajustes') }}
           <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
@@ -5874,6 +5874,50 @@ export const ChatShell = {
     };
     const closePeople = function () { store.peopleMobile = false; };
 
+    /* W54: navegación móvil. En el teléfono la app usa una barra inferior
+       (Chats / Personas / Ajustes) en vez de la fila "Personas" y el panel
+       de usuario del sidebar de escritorio. */
+    const mobileChats = function () {
+      store.peopleMobile = false;
+      if (store.activeChatId) closeChat();
+    };
+
+    /* W54: en la cabecera del chat, en pantalla chica, las llamadas y
+       "agregar miembros" viven en un menú ⋮ para no aplastar el nombre
+       del chat. En escritorio siguen como botones directos. */
+    const chatMore = function (e) {
+      const c = activeChat.value;
+      if (!c) return;
+      const items = [];
+      if (canCall.value) {
+        items.push({
+          label: 'Llamar', icon: 'i-phone',
+          fn: function () { doCall(false); },
+        });
+        items.push({
+          label: 'Videollamada', icon: 'i-video',
+          fn: function () { doCall(true); },
+        });
+      }
+      if (c.type === 'group') {
+        items.push({
+          label: 'Agregar miembros', icon: 'i-userplus',
+          fn: function () { openAddMember(); },
+        });
+      }
+      items.push({
+        label: c.pinned ? 'Desfijar chat' : 'Fijar chat',
+        icon: c.pinned ? 'i-x' : 'i-pin',
+        fn: function () { setPinned(c.id, !c.pinned); },
+      });
+      items.push({
+        label: c.muted ? 'Activar notificaciones' : 'Silenciar notificaciones',
+        icon: c.muted ? 'i-bell' : 'i-bell-off',
+        fn: function () { setMuted(c.id, !c.muted); },
+      });
+      openCtx(e, items, null, 'chat-more');
+    };
+
     /* ---------- W13: buscar dentro del chat ---------- */
 
     const searchOpen = Vue.ref(false);
@@ -6454,6 +6498,8 @@ export const ChatShell = {
       toggleSide, unfoldSide,
       /* W27c: "Personas" en el panel de chats (sidebar) */
       goPeople, closePeople, peopleActive, reqCount,
+      /* W54: barra inferior y menú ⋮ de la cabecera en móvil */
+      mobileChats, chatMore,
     };
   },
   template:
@@ -6463,10 +6509,21 @@ export const ChatShell = {
          sidebar en desktop; en celular CSS lo convierte en hoja inferior */
       '<aside class="sidebar" v-if="!store.wallPanelOpen">' +
         '<header class="side-head">' +
-          '<img class="side-logo" src="/static/logo.svg" alt="Foxinix" />' +
+          '<img class="side-logo side-logo-word" src="/static/logo.svg" alt="Foxinix" />' +
+          '<img class="side-logo-mark" src="/static/icon.svg" alt="" />' +
+          '<span class="side-title">{{ t(\'Chats\') }}</span>' +
           '<span class="ws-dot" v-if="store.ws !== \'on\'" :title="wsLabel"></span>' +
-          '<button class="icon-btn" type="button" :title="t(\'Nuevo chat\')" @click="startNewChat">' +
+          '<button class="icon-btn side-new" type="button" :title="t(\'Nuevo chat\')" @click="startNewChat">' +
             '<svg class="ic"><use href="#i-plus"></use></svg>' +
+          '</button>' +
+          /* W54: perfil a mano en móvil (el panel de usuario de abajo se
+             oculta para dejarle el lugar a la barra inferior). */
+          '<button class="icon-btn mobile-me" type="button" :title="t(\'Tu perfil\')" ' +
+            '@click="store.meProfileOpen = true">' +
+            '<span class="avatar av30">' +
+              '<img v-if="store.user && store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">' +
+              '<span v-else>{{ store.user ? (store.user.display_name || store.user.username).charAt(0).toUpperCase() : \'?\' }}</span>' +
+            '</span>' +
           '</button>' +
           /* W19: contraer el sidebar (el hamburger del chat lo devuelve).
              Va DESPUÉS del ＋: los tests (y el ojo) dan por sentado que el
@@ -6585,20 +6642,26 @@ export const ChatShell = {
             '<svg class="ic"><use href="#i-search"></use></svg>' +
           '</button>' +
           /* W28h: llamadas 1:1 (solo DM; si ya hay una, el .callbox manda) */
-          '<button class="icon-btn" v-if="canCall" type="button" ' +
+          '<button class="icon-btn call-action" v-if="canCall" type="button" ' +
             ':title="t(\'Llamar\')" @click="doCall(false)">' +
             '<svg class="ic"><use href="#i-phone"></use></svg>' +
           '</button>' +
-          '<button class="icon-btn" v-if="canCall" type="button" ' +
+          '<button class="icon-btn call-action" v-if="canCall" type="button" ' +
             ':title="t(\'Videollamada\')" @click="doCall(true)">' +
             '<svg class="ic"><use href="#i-video"></use></svg>' +
           '</button>' +
           /* W34b: "Agregar miembros" ocupa el primer slot de la derecha
              y la info del chat/usuario queda en el último (donde antes
              estaba el +). W36f: el icono lleva "+" (añadir personas). */
-          '<button class="icon-btn" v-if="activeChat.type === \'group\'" type="button" ' +
+          '<button class="icon-btn add-member-action" v-if="activeChat.type === \'group\'" type="button" ' +
             ':title="t(\'Agregar miembros\')" @click="openAddMember">' +
             '<svg class="ic"><use href="#i-userplus"></use></svg>' +
+          '</button>' +
+          /* W54: en móvil estas acciones se juntan en un menú ⋮ para
+             que el nombre del chat tenga espacio. */
+          '<button class="icon-btn chat-more" type="button" ' +
+            ':title="t(\'Más acciones\')" @click.stop="chatMore($event)">' +
+            '<svg class="ic"><use href="#i-dots"></use></svg>' +
           '</button>' +
           /* W7: botón del panel derecho (info del chat / miembros) */
           '<button class="icon-btn" :class="{ on: store.infoOpen }" type="button" ' +
@@ -6809,6 +6872,9 @@ export const ChatShell = {
       /* W27: sin chat abierto, el centro muestra Personas (Activos +
          Solicitudes); la lista de chats vive siempre en el sidebar */
       '<main class="chat-pane people-pane" v-else>' +
+        /* W54: título de pantalla en móvil (en escritorio Personas vive
+           en el centro y no necesita app bar propia). */
+        '<header class="mobile-page-head"><b>{{ t(\'Personas\') }}</b></header>' +
         /* W19: sin chat abierto también se puede devolver el sidebar */
         '<button class="icon-btn side-open" type="button" :title="t(\'Mostrar chats\')" ' +
           '@click="unfoldSide">' +
@@ -6822,6 +6888,31 @@ export const ChatShell = {
         '</button>' +
         '<people-panel></people-panel>' +
       '</main>' +
+
+      /* W54: barra inferior estilo app. Solo con la lista o Personas a
+         la vista: dentro de una conversación manda el chat a pantalla
+         completa (se vuelve con la flecha). */
+      '<nav class="mobile-tabs" v-if="!store.activeChatId && !store.wallPanelOpen && ' +
+        '!store.settingsOpen && !store.meProfileOpen && !store.newChatOpen && !store.profile" ' +
+        ':aria-label="t(\'Navegación principal\')">' +
+        '<button class="mt-btn" type="button" :class="{ on: !store.peopleMobile }" ' +
+          '@click="mobileChats">' +
+          '<svg class="ic"><use href="#i-chat"></use></svg>' +
+          '<span class="mt-label">{{ t(\'Chats\') }}</span>' +
+        '</button>' +
+        '<button class="mt-btn" type="button" :class="{ on: store.peopleMobile }" ' +
+          '@click="goPeople">' +
+          '<span class="mt-ic-wrap">' +
+            '<svg class="ic"><use href="#i-users"></use></svg>' +
+            '<i class="mt-badge" v-if="reqCount > 0">{{ reqCount > 9 ? \'9+\' : reqCount }}</i>' +
+          '</span>' +
+          '<span class="mt-label">{{ t(\'Personas\') }}</span>' +
+        '</button>' +
+        '<button class="mt-btn" type="button" @click="openSettings()">' +
+          '<svg class="ic"><use href="#i-gear"></use></svg>' +
+          '<span class="mt-label">{{ t(\'Ajustes\') }}</span>' +
+        '</button>' +
+      '</nav>' +
 
       /* W37c: todos los modales animan apertura Y cierre (fade de la
          velada + scale del cuadro). */

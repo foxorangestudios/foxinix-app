@@ -4202,3 +4202,247 @@ body { font-size: calc(15px * var(--fs)); }
 /* W36: la barra flotante del mensaje vive FUERA de la burbuja (encima):
    la lista respira 40px arriba para que nunca quede recortada. */
 .msgs { padding-top: 40px; }
+
+/* ============================================================
+   W54: cáscara móvil tipo app
+   La web de escritorio sigue igual. En el teléfono (la misma web que
+   carga el APK de Tauri) la barra superior se convierte en un app bar,
+   la navegación principal baja a una barra inferior y el chat ocupa la
+   pantalla completa. Sin features modernas: media queries, flex y
+   posiciones fijas nomás (Mypal 78 sigue entrando por acá).
+   ============================================================ */
+.side-logo-mark,
+.side-title,
+.mobile-me,
+.mobile-page-head,
+.mobile-tabs,
+.chat-more { display: none; }
+
+.avatar.av30 { width: 30px; height: 30px; font-size: 12.5px; }
+
+.mt-ic-wrap { position: relative; display: flex; align-items: center; justify-content: center; }
+
+@media (max-width: 760px) {
+  /* ---------- app bar de la lista ---------- */
+  .side-head {
+    height: 56px;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(14px + env(safe-area-inset-left, 0px));
+    padding-right: calc(6px + env(safe-area-inset-right, 0px));
+  }
+  .side-logo-word { display: none; }
+  .side-logo-mark {
+    display: block;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    border-radius: 9px;
+  }
+  .side-title {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    margin-left: 9px;
+    color: var(--t0);
+    font-size: 19px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .side-head > .icon-btn { width: 40px; height: 40px; }
+  .side-head > .icon-btn + .icon-btn { margin-left: 4px; }
+  .side-new {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  .side-new:hover { background: var(--accent-hover); color: var(--on-accent); }
+  .mobile-me { display: inline-flex; }
+  .mobile-me .avatar { border: 1px solid rgba(255, 255, 255, .18); }
+
+  .side-search { padding: 8px 12px; }
+  .search-pill {
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 12px;
+  }
+  .search-pill input { font-size: 15px; }
+
+  /* En el teléfono "Personas" y el perfil viven en la barra inferior /
+     el app bar. El sidebar no necesita el pie de escritorio. */
+  .side-people { display: none; }
+  .user-panel { display: none; }
+  .sidebar {
+    padding-bottom: 58px;
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
+  .chat-list { padding: 4px 8px 12px; }
+  .chat-item { padding: 10px 8px; border-radius: 12px; }
+  .chat-item > * + * { margin-left: 11px; }
+  .ci-name { font-size: 16px; }
+  .ci-prev { font-size: 14px; }
+  .ci-menu { width: 32px; height: 32px; }
+
+  /* ---------- app bar del chat ---------- */
+  .chat-head {
+    height: 56px;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(6px + env(safe-area-inset-left, 0px));
+    padding-right: calc(6px + env(safe-area-inset-right, 0px));
+  }
+  .chat-head > * + * { margin-left: 4px; }
+  .chat-head > .back { margin-left: -2px; margin-right: 2px; }
+  .chat-head .icon-btn { width: 40px; height: 40px; }
+  .chat-head .ch-name { font-size: 16px; }
+  .chat-head .ch-status { font-size: 12.5px; }
+  .chat-head .avatar.av36 { width: 38px; height: 38px; font-size: 15px; }
+  .chat-more { display: inline-flex; }
+  .call-action,
+  .add-member-action { display: none; }
+
+  /* Personas: app bar propio en vez de una flecha suelta de web. */
+  .mobile-page-head {
+    display: flex;
+    align-items: center;
+    flex: none;
+    height: 56px;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 16px 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .mobile-page-head b {
+    color: var(--t0);
+    font-size: 19px;
+    font-weight: 700;
+  }
+  .people-pane .ppl-back-btn { display: none; }
+
+  /* ---------- barra inferior ---------- */
+  .mobile-tabs {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    height: 58px;
+    height: calc(58px + env(safe-area-inset-bottom, 0px));
+    padding: 4px 8px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, .18);
+  }
+  .mt-btn {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: var(--t2);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mt-btn::before {
+    content: '';
+    position: absolute;
+    top: 1px;
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--accent);
+    opacity: 0;
+  }
+  .mt-btn.on { color: var(--accent); }
+  .mt-btn.on::before { opacity: 1; }
+  .mt-btn .ic { width: 24px; height: 24px; }
+  .mt-label { margin-top: 2px; line-height: 1; }
+  .mt-badge {
+    position: absolute;
+    top: -3px;
+    right: -8px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #c62828;
+    color: #fff;
+    font-size: 10px;
+    font-style: normal;
+    line-height: 16px;
+    text-align: center;
+  }
+  .app-shell.show-chat .mobile-tabs { display: none; }
+
+  /* Personas con barra inferior: que el final de la lista no quede
+     debajo de la barra. */
+  .app-shell.show-people .people-pane {
+    padding-bottom: 58px;
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* En el celular el composer necesita aire y blancos táctiles más
+     grandes (16px además evita el zoom automático de WebView). */
+  .composer-input {
+    font-size: 16px;
+    min-height: 44px;
+    border-radius: 22px;
+  }
+  .composer .icon-btn { width: 42px; height: 42px; }
+  .send-btn { width: 44px; height: 44px; }
+  .bubble { border-radius: 16px; }
+
+  /* Ajustes ocupa la pantalla como una sección de la app, no como una
+     ventanita de navegador. */
+  .settings-veil { padding: 0; }
+  .modal.settings {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+  .modal.settings > header {
+    height: 56px;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding: 0 8px 0 16px;
+    padding-top: env(safe-area-inset-top, 0px);
+    font-size: 18px;
+  }
+  .modal.settings .m-tabs { padding-top: 6px; }
+
+  /* ---------- login/registro a pantalla completa ---------- */
+  .auth-wrap {
+    min-height: 100vh;
+    align-items: stretch;
+    padding: 0;
+  }
+  .auth-card {
+    width: 100%;
+    max-width: none;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 34px 22px 26px;
+    padding-bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .auth-logo { margin-bottom: 20px; }
+  .auth-logo-img { height: 64px; }
+  .auth-title { font-size: 25px; }
+  .auth-sub { margin-bottom: 24px; }
+}

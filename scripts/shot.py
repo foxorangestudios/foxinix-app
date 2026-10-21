@@ -4,6 +4,7 @@
 Uso:
   server/.venv/bin/python scripts/shot.py <url> <out.png> [--eval 'js'] [--wait 300]
   server/.venv/bin/python scripts/shot.py <url> <out.png> --js 'js'   # ejecuta y espera
+  server/.venv/bin/python scripts/shot.py <url> <out.png> --width 390 --height 844 --viewport
 
 Espera a que la app quede "ready" (sin el estado .boot), captura e imprime
 los errores de JS registrados (log.entryAdded level=error).
@@ -164,6 +165,16 @@ async def run(a):
             else:
                 ctx = contexts[0]["context"]
 
+            if a.viewport:
+                try:
+                    await b.send("browsingContext.setViewport", {
+                        "context": ctx,
+                        "viewport": {"width": a.width, "height": a.height},
+                        "devicePixelRatio": 1,
+                    })
+                except RuntimeError as e:
+                    b.logs.append(f"[shot] no se pudo fijar viewport: {e}")
+
             await b.send("browsingContext.navigate",
                          {"context": ctx, "url": a.url, "wait": "complete"})
 
@@ -282,6 +293,8 @@ def main():
     ap.add_argument("--timeout", type=float, default=8.0, help="segundos máx de espera")
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=860)
+    ap.add_argument("--viewport", action="store_true",
+                    help="usar --width/--height como viewport exacto")
     a = ap.parse_args()
     sys.exit(asyncio.run(run(a)))
 

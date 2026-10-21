@@ -301,6 +301,8 @@ const EN = {
 
   /* ---------- ajustes ---------- */
   'Ajustes': 'Settings',
+  'Navegación principal': 'Main navigation',
+  'Más acciones': 'More actions',
   'Preferencias': 'Preferences',
   'Cuenta': 'Account',
   'Chat': 'Chat',
