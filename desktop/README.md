@@ -10,13 +10,25 @@ WebView de Android y recibe las actualizaciones del servidor sin reinstalar.
 |---|---|---|
 | Debian/Ubuntu | `.deb` amd64 | `webkit2gtk-4.1`, GTK 3, librsvg |
 | Fedora | `.rpm` x86_64 | `webkit2gtk4.1`, GTK 3, librsvg |
-| Arch Linux y otras | `.AppImage` x86_64 | `webkit2gtk-4.1`; FUSE 2 para ejecutar el AppImage |
+| Arch Linux y otras | `.AppImage` x86_64 | `webkit2gtk-4.1`; FUSE 2; el AppImage ya incluye GStreamer |
 | Windows 10/11 | instalador NSIS `.exe` x64 | WebView2 (lo instala el instalador si falta) |
 | Android 7+ | APK arm64 | WebView moderno del sistema |
 
 Windows 7/8 y macOS no se publican por ahora. Windows 7/8 no tienen
 WebView2 oficial; en esos equipos se puede usar la web/PWA. macOS requiere
 compilar en macOS.
+
+Para ejecutar el AppImage en Arch Linux:
+
+```bash
+chmod +x Foxinix-0.1.1-linux-x86_64.AppImage
+./Foxinix-0.1.1-linux-x86_64.AppImage
+```
+
+Los paquetes `.deb` y `.rpm` recomiendan los plugins de GStreamer para
+audio/video; en Arch el AppImage los incluye. En Debian/Ubuntu, si el
+reproductor no anda, instalá `gstreamer1.0-plugins-good`,
+`gstreamer1.0-plugins-bad` y `gstreamer1.0-libav`.
 
 ## Icono y descripción
 
