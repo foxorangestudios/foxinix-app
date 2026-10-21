@@ -66,7 +66,15 @@ npm run dev       # desarrollo
 npm run build     # instaladores en src-tauri/target/release/bundle/
 ```
 
-Carga `https://chat.foxinix.qzz.io/` en una ventana nativa (se puede cambiar con `FOXINIX_URL` para probar un servidor local). No reescribe la UI: la app web sigue siendo la única interfaz. Los instaladores Linux (AppImage, `.deb` y `.rpm`) se publican en la sección **Releases** del repositorio; no se versionan los binarios. Requiere WebView2 en Windows 10/11; en Windows 7/8 no hay soporte oficial de WebView2 (usar la web/PWA). Más detalles en `desktop/README.md`.
+Carga `https://chat.foxinix.qzz.io/` en una ventana nativa (se puede cambiar con `FOXINIX_URL` para probar un servidor local). No reescribe la UI: la app web sigue siendo la única interfaz. Los instaladores se publican en la sección **Releases** del repositorio; no se versionan los binarios:
+
+- **Debian/Ubuntu:** `.deb` amd64.
+- **Fedora:** `.rpm` x86_64.
+- **Arch Linux y otras:** `.AppImage` x86_64.
+- **Windows 10/11:** instalador NSIS `.exe` x64 (requiere WebView2; en Windows 7/8 no hay soporte oficial, usar la web/PWA).
+- **Android 7+:** APK arm64 firmado.
+
+El icono SVG fuente y los detalles de compilación están en `desktop/README.md`.
 
 ## Servidor
 

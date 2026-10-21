@@ -2,7 +2,7 @@
   "name": "foxinix-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Foxinix para escritorio (Tauri)",
+  "description": "Foxinix para escritorio y Android (Tauri)",
   "type": "module",
   "scripts": {
     "tauri": "tauri",

@@ -15,15 +15,39 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "Foxinix",
+    "copyright": "Copyright © 2026 Foxinix",
+    "license": "Apache-2.0",
+    "licenseFile": "../../LICENSE",
+    "homepage": "https://chat.foxinix.qzz.io/",
     "category": "SocialNetworking",
     "shortDescription": "Mensajería Foxinix",
-    "longDescription": "Cliente de escritorio de Foxinix: la misma app web, en una ventana propia.",
+    "longDescription": "Cliente de escritorio y móvil de Foxinix: la misma app web, en una ventana propia.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "android": {
+      "minSdkVersion": 24,
+      "versionCode": 1
+    },
+    "linux": {
+      "deb": {
+        "section": "net",
+        "files": {
+          "/usr/share/doc/foxinix/copyright": "../../LICENSE",
+          "/usr/share/doc/foxinix/NOTICE": "../../NOTICE"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/licenses/foxinix/LICENSE": "../../LICENSE",
+          "/usr/share/licenses/foxinix/NOTICE": "../../NOTICE"
+        }
+      }
+    }
   }
 }
