@@ -38,7 +38,11 @@ de `tauri icon`: usa ese SVG para escritorio y `android-fg.svg`/`android-bg.svg`
 para el icono adaptativo de Android, con el logo al 60 % para que respire
 dentro de las máscaras circular, cuadrada y rounded. El comando
 `tauri icon src-tauri/icons/icon.json` regenera los PNG, ICO, ICNS y los
-iconos de Android. La descripción, editorial, copyright y licencia se
+iconos de Android. En Android, el proyecto debe existir primero
+(`tauri android init --ci`): si `gen/android/app/src/main/res` ya está,
+`tauri icon` escribe ahí los mipmaps; si se ejecuta antes, quedan en
+`src-tauri/icons/android` y el APK conserva el icono de Tauri. La
+descripción, editorial, copyright y licencia se
 declaran en `src-tauri/tauri.conf.json`; Linux usa esos datos para el
 `.desktop` y los paquetes `.deb`/`.rpm`, y Windows para las propiedades del
 instalador.

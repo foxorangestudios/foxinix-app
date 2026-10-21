@@ -170,8 +170,12 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npx tauri icon src-tauri/icons/icon.json
+          # El proyecto Android debe existir primero: tauri icon escribe los
+          # mipmaps directamente en gen/android/app/src/main/res cuando esa
+          # carpeta existe. Si se ejecuta antes de android init, el APK se
+          # queda con el icono por defecto de Tauri.
           npx tauri android init --ci
+          npx tauri icon src-tauri/icons/icon.json
           echo "$ANDROID_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/foxinix-release.jks"
           cat > src-tauri/gen/android/keystore.properties <<EOF
           keyAlias=${ANDROID_KEY_ALIAS}
