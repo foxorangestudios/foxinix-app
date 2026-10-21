@@ -4953,6 +4953,21 @@ export const ChatShell = {
       if (el) el.scrollTop = el.scrollHeight;
     };
 
+    /* W54d: al abrir el teclado el alto cambia después de la animación
+       del sistema; bajamos la conversación para que el último mensaje
+       quede a la vista junto al composer. */
+    const keepComposerVisible = function () {
+      setTimeout(function () {
+        if (document.activeElement === input.value) scrollBottom();
+      }, 280);
+    };
+    const onKeyboardViewport = function () {
+      if (document.activeElement !== input.value) return;
+      setTimeout(function () {
+        if (document.activeElement === input.value) scrollBottom();
+      }, 80);
+    };
+
     /* La imagen crece el layout al terminar de cargar: si estábamos
        pegados al final, volver a scrollear. */
     const onImgLoad = async function () {
@@ -5168,15 +5183,20 @@ export const ChatShell = {
           audio: store.micDev ? { deviceId: { exact: store.micDev } } : true,
         });
       } catch (e) {
+        let lastErr = e;
         if (store.micDev) {
           try {
             recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           } catch (e2) {
-            toast('No se pudo acceder al micrófono', 'err');
-            return;
+            lastErr = e2;
+            recStream = null;
           }
-        } else {
-          toast('No se pudo acceder al micrófono', 'err');
+        }
+        if (!recStream) {
+          toast(lastErr && (lastErr.name === 'NotAllowedError' ||
+            lastErr.name === 'SecurityError')
+            ? 'Permiso de micrófono bloqueado. Actívalo en Ajustes de Android > Foxinix > Permisos.'
+            : 'No se pudo acceder al micrófono', 'err');
           return;
         }
       }
@@ -5546,6 +5566,11 @@ export const ChatShell = {
       initInfoPanel();                            // W7: info por defecto si hay lugar
       document.addEventListener('click', onDocClick);
       window.addEventListener('keydown', onEsc);
+      /* W54d: teclado de Android (resize del WebView o viewport visual) */
+      window.addEventListener('resize', onKeyboardViewport);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', onKeyboardViewport);
+      }
       /* W11: pegar (Ctrl+V) + arrastrar y soltar archivos */
       document.addEventListener('paste', onPasteEv);
       const root = rootEl.value;
@@ -5564,6 +5589,10 @@ export const ChatShell = {
       clearRec();
       stopWS();
       window.removeEventListener('resize', onPickResize);   // W29g
+      window.removeEventListener('resize', onKeyboardViewport);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', onKeyboardViewport);
+      }
       document.removeEventListener('click', onDocClick);
       window.removeEventListener('keydown', onEsc);
       document.removeEventListener('paste', onPasteEv);
@@ -6571,6 +6600,7 @@ export const ChatShell = {
       peerOn, statusLine,
       avatarOf, initialsOf, previewText, listTime, titleOf: chatTitle,
       onScroll, send, onInput, onAttach, onImgLoad,
+      keepComposerVisible,   /* W54d: teclado de Android */
       stick, scrollBottom,   /* W44: botón "ir hacia abajo" */
       replyTo, replySender, replyPreview, startReply, cancelReply, onReact,
       e2ePendBar,   /* W30d: aviso de cifrado pendiente */
@@ -6867,6 +6897,7 @@ export const ChatShell = {
             '</label>' +
             '<textarea class="composer-input" ref="input" rows="1" v-model="draft" ' +
               ':placeholder="t(\'Mensaje\')" @input="onInput" @click="updAc" ' +
+              '@focus="keepComposerVisible" ' +
               '@keydown="onComposerKey" @keydown.esc="cancelReply"></textarea>' +
             /* W7: selector de emojis para escribir en el mensaje */
             '<button class="icon-btn comp-emo" :class="{ on: emoOpen }" type="button" ' +

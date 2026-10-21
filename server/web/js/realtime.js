@@ -6,7 +6,7 @@ import { hooks, loadChats, loadMembers, loadPeople, loadBlocks,
   onIncomingMessage, catchUpChat } from './actions.js';
 import { t } from './i18n.js';
 /* W37a: los avisos y las citas muestran el texto DESCIFRADO (igual que
-   el chat); si no hay clave, queda el marcador "[Mensaje cifrado]". */
+   el chat); si no hay clave, el aviso usa un texto neutro. */
 import { decryptInto } from './e2e.js';
 /* W28h: la señalización de llamadas WebRTC reutiliza este socket */
 import { initCall, handleCallEvent } from './call.js';
@@ -202,8 +202,11 @@ function previewBody(m) {
   if (m.kind === 'image') return t('Imagen');
   if (m.kind === 'file') return t('Archivo adjunto');
   /* W37a: con E2E el aviso muestra el texto DESCIFRADO (el mismo que
-     ve el usuario en el chat); si no hubo clave, queda el marcador. */
+     ve el usuario en el chat). W54d: si todavía no hay clave, NUNCA
+     mostramos el marcador interno del servidor; un texto neutro evita
+     que la notificación parezca un error. */
   if (m._plain != null) return m._plain;
+  if (m.e2e) return t('Nuevo mensaje');
   return m.body || '';
 }
 
@@ -256,7 +259,7 @@ function notifyIncoming(m) {
   if (document.hidden) {
     /* W37a: con cifrado E2E se espera a descifrar (si hay clave) para
        avisar con el texto real — igual que en el chat. Sin clave
-       (aún) se notifica con el marcador del server. */
+       (aún) se avisa con un texto neutro, nunca con el marcador. */
     if (m.e2e && m._plain == null) {
       Promise.resolve(decryptInto(m)).then(function () {
         browserNotify(m);

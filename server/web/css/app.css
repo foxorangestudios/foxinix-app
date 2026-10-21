@@ -4621,3 +4621,21 @@ body { font-size: calc(15px * var(--fs)); }
   .av-ed-rotate { display: none; }
   .mp-edit.is-cropping .mp-body { padding: 10px 12px 4px; }
 }
+
+/* W54d: teclado de Android. boot.js detecta el viewport visual más
+   chico y deja --app-h con el alto libre. La app se ajusta para que el
+   composer no quede debajo del teclado; la barra inferior no se
+   superpone porque desaparece mientras se escribe. */
+@media (max-width: 760px) {
+  html.kb-open,
+  html.kb-open body,
+  html.kb-open #app {
+    height: var(--app-h, 100%);
+    min-height: 0;
+  }
+  html.kb-open body { overflow: hidden; }
+  html.kb-open .mobile-tabs { display: none; }
+  html.kb-open .composer { padding-bottom: 8px; }
+  html.kb-open .sidebar { padding-bottom: 8px; }
+  html.kb-open .auth-wrap { min-height: var(--app-h, 100%); }
+}

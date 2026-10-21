@@ -1,6 +1,6 @@
 [package]
 name = "foxinix-desktop"
-version = "0.1.3"
+version = "0.1.4"
 description = "Foxinix para escritorio y Android"
 authors = ["Foxinix"]
 license = "Apache-2.0"

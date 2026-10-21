@@ -169,6 +169,35 @@ def main():
         if st["head"] != 390:
             raise SystemExit(f"✗ el chat no ocupa el ancho del teléfono: {st['head']}")
 
+        # 2b) Teclado: con --app-h la app se achica, el composer queda
+        # arriba del teclado y la barra inferior no se superpone.
+        js_kb = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+                 "let t=Date.now();"
+                 "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))"
+                 "await s(120);"
+                 "document.querySelector('.chat-list .chat-item').click();"
+                 "await s(900);"
+                 "const root=document.documentElement;"
+                 "root.style.setProperty('--app-h','500px');"
+                 "root.classList.add('kb-open');"
+                 "await s(120);"
+                 "const shell=document.querySelector('.app-shell');"
+                 "const comp=document.querySelector('.composer');"
+                 "const out={shell:Math.round(shell.getBoundingClientRect().height),"
+                 "compBottom:Math.round(comp.getBoundingClientRect().bottom)};"
+                 "root.classList.remove('kb-open');"
+                 "root.style.removeProperty('--app-h');"
+                 "return JSON.stringify(out)})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-keyboard", SHOTS / "mov-2b-teclado.png",
+            js=js_kb, wait=500)
+        print("paso2b teclado:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1600:])
+            raise SystemExit("✗ no se pudo probar el ajuste del teclado")
+        if js_res.get("shell") != 500 or js_res.get("compBottom", 999) > 500:
+            raise SystemExit(f"✗ el composer no queda sobre el teclado: {js_res}")
+
         # 3) Menú ⋮ del chat (bottom sheet) con llamadas y acciones.
         js_more = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
                    "let t=Date.now();"

@@ -259,12 +259,15 @@ const EN = {
   'No se pudo editar el mensaje': 'Could not edit the message',
   'Tu navegador no soporta notas de voz': 'Your browser does not support voice messages',
   'No se pudo acceder al micrófono': 'Could not access the microphone',
+  'Permiso de micrófono bloqueado. Actívalo en Ajustes de Android > Foxinix > Permisos.':
+    'Microphone permission is blocked. Enable it in Android Settings > Foxinix > Permissions.',
   'No se pudo iniciar la grabación': 'Could not start recording',
   'Máximo 15 MB por archivo': '15 MB maximum per file',
   'El archivo está vacío': 'The file is empty',
   'No se pudo abrir el chat': 'Could not open the chat',
 
   /* ---------- lista de chats y búsqueda ---------- */
+  'Nuevo mensaje': 'New message',
   'Nuevo chat': 'New chat',
   'Nuevo grupo': 'New group',
   'Agregar al grupo': 'Add to group',

@@ -75,6 +75,10 @@ manifest = MANIFEST.read_text(encoding="utf-8")
 for permission in (
     "android.permission.INTERNET",
     "android.permission.RECORD_AUDIO",
+    # W54d: Wry pide este permiso junto con RECORD_AUDIO al conceder el
+    # micrófono al WebView. Si no está declarado, Android rechaza el
+    # paquete de permisos y la nota de voz queda sin acceso.
+    "android.permission.MODIFY_AUDIO_SETTINGS",
     "android.permission.CAMERA",
 ):
     if permission not in manifest:
@@ -87,6 +91,21 @@ for permission in (
         else:
             sys.exit("AndroidManifest.xml no tiene cierre </manifest>")
         print(f"Permiso agregado: {permission}")
+
+# W54d: el WebView ocupa toda la pantalla y el teclado debe reducir la
+# ventana en vez de tapar el composer. Sin esto Android elige adjustPan
+# y el campo de mensaje queda debajo del teclado.
+if 'android:windowSoftInputMode="adjustResize"' not in manifest:
+    activity_name = 'android:name=".MainActivity"'
+    if activity_name in manifest:
+        manifest = manifest.replace(
+            activity_name,
+            activity_name + '\n            android:windowSoftInputMode="adjustResize"',
+            1,
+        )
+        print("windowSoftInputMode=adjustResize agregado")
+    else:
+        print("Aviso: no se encontró MainActivity para ajustar el teclado")
 
 MANIFEST.write_text(manifest, encoding="utf-8")
 print("AndroidManifest.xml listo")

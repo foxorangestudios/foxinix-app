@@ -67,3 +67,44 @@
   document.addEventListener('mousedown', kbOff, true);
   document.addEventListener('touchstart', kbOff, true);
 })();
+
+/* W54d: en Android el teclado puede superponerse al WebView. Si el
+   viewport visual se achica (y no es un zoom), ajustamos el alto de la
+   app para que el composer quede justo encima del teclado. Los
+   navegadores viejos (Mypal 78) no tienen visualViewport: ahí manda
+   windowSoftInputMode=adjustResize de Android. */
+(function () {
+  if (!window.matchMedia) return;
+  var root = document.documentElement;
+  var mq = window.matchMedia('(max-width: 760px)');
+  var timer = 0;
+  var update = function () {
+    var vv = window.visualViewport;
+    if (!mq.matches || !vv || vv.scale > 1.05) {
+      root.classList.remove('kb-open');
+      root.style.removeProperty('--app-h');
+      return;
+    }
+    var diff = window.innerHeight - vv.height;
+    if (diff > 90 && vv.height > 0) {
+      root.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+      root.classList.add('kb-open');
+    } else {
+      root.classList.remove('kb-open');
+      root.style.removeProperty('--app-h');
+    }
+  };
+  var schedule = function () {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(function () { timer = 0; update(); }, 60);
+  };
+  window.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', schedule);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', schedule);
+    window.visualViewport.addEventListener('scroll', schedule);
+  }
+  if (mq.addEventListener) mq.addEventListener('change', schedule);
+  else if (mq.addListener) mq.addListener(schedule);
+  update();
+})();
