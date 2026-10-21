@@ -69,6 +69,8 @@ un keystore guardado en secretos (`ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`,
 - La app carga la misma web remota por HTTPS; no incrusta una copia de la
   interfaz ni del servidor.
 - Se publica un APK **arm64** para celulares modernos (Android 7 o superior).
+  La pantalla de login se probó en un emulador Android 15 x86_64 con un APK
+  compilado desde el mismo código.
 - Pide permiso de micrófono y cámara solo cuando la web los usa (notas de
   voz, adjuntos). El cifrado E2E de los chats individuales sigue activo.
 - Para actualizar hay que conservar el mismo keystore. Sin esa clave Android
