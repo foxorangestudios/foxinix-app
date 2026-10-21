@@ -1,0 +1,4204 @@
+/* Foxinix web — base W1 (auth) + tokens de tema.
+   Presupuesto de rendimiento (Atom N455 / Mypal 78):
+   - sin backdrop-filter, blur ni sombras grandes
+   - animaciones SOLO con transform/opacity
+   - sin :has(), aspect-ratio, dvh, :focus-visible (FF78-safe) */
+
+/* W9: paleta base Discord (medida sobre sus superficies): capas grises
+   #1e1f22 → #2b2d31 → #313338 → #383a40, con el naranja Foxinix como
+   único acento de marca (los colores semánticos son de Discord). */
+:root {
+  --bg: #1e1f22;          /* fondo profundo (rail, velo de modales) */
+  --panel: #2b2d31;       /* sidebar, modales */
+  --panel2: #383a40;      /* elevado: hover, inputs, chips */
+  --header: #2b2d31;
+  --border: #3f4147;
+  --t0: #f2f3f5;          /* encabezados (header-primary) */
+  --t1: #dbdee1;          /* cuerpo (text-normal) */
+  --t2: #949ba4;          /* meta/muted */
+  --accent: #ff751f;
+  --accent-d: #b85416;        /* fondo de burbuja propia (blanco encima) */
+  --accent-hover: #ff8a3d;    /* hover de botones (texto oscuro encima) */
+  --on-accent: #1c0e03;       /* W45: texto oscuro sobre naranja brillante */
+  --accent-wash: rgba(255, 117, 31, .18);  /* tinte suave (W9) */
+  --err: #f23f43;
+  --err-bg: #35222a;
+  --ok: #00a8fc;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+  --radius: 8px;
+  --float: #111214;       /* popovers flotantes (background-float) */
+  /* chat (W2) */
+  --chat-bg: #313338;
+  --bubble-you: #2b2d31;
+  --bubble-me: var(--accent-d);
+  --sel: #4e5058;
+  --row-hover: rgba(78, 80, 88, .3);  /* hover de filas (Discord) */
+  /* estados del puntito: valores Discord (W9) — en línea #23a55a,
+     ausente #f0b232, no molestar #f23f43, invisible/offline #80848e */
+  --online: #23a55a;
+  --st-busy: #f0b232;
+  --st-dnd: #f23f43;
+  --st-off: #80848e;
+}
+
+[data-theme="light"] {
+  --bg: #e3e5e8;
+  --panel: #f2f3f5;
+  --panel2: #e3e5e8;
+  --header: #f2f3f5;
+  --border: #dcddde;
+  --t0: #060607;
+  --t1: #313338;
+  --t2: #5c5e66;
+  /* W45: el naranja brillante sobre blanco daba 2,69:1. En tema claro
+     se usa un naranja más profundo para texto/botones; el texto sobre
+     el acento pasa a blanco. */
+  --accent: #a33f12;
+  --accent-d: #b85416;
+  --accent-hover: #7c2d12;
+  --on-accent: #ffffff;
+  --accent-wash: rgba(163, 63, 18, .14);
+  --err: #d32f2f;
+  --err-bg: #fdecee;
+  --ok: #006ce7;
+  --shadow: 0 1px 3px rgba(6, 6, 7, .2);
+  --float: #ffffff;
+  /* chat (W2) */
+  --chat-bg: #ffffff;
+  --bubble-you: #f2f3f5;
+  --bubble-me: var(--accent-d);
+  --sel: #d7d9dc;
+  --row-hover: rgba(6, 6, 7, .07);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+#app { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--t1);
+  font-family: system-ui, -apple-system, "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+[v-cloak] { display: none !important; }
+
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+a { color: var(--accent); }
+
+/* W27f: el anillo de foco naranja SOLO al navegar con teclado (TAB):
+   con ratón los botones no deben quedar con contorno (se ve como una
+   tecla presionada). Sin :focus-visible (FF78), boot.js pone la clase
+   html.kb-focus al detectar TAB y la quita al tocar el puntero. */
+:focus { outline: none; }
+html.kb-focus :focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- iconos ---------- */
+/* W40: iconos Material Symbols Outlined (rutas de relleno con aspecto
+   de línea fino, estilo WhatsApp/Discord). El único icono custom que
+   queda (i-pin-off) se dibuja a trazo y lo conserva con la regla de
+   abajo. */
+.ic {
+  width: 24px; height: 24px;
+  fill: currentColor;
+  flex: none;
+}
+#i-pin-off path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ic-sm { width: 18px; height: 18px; }
+.ic-lg { width: 32px; height: 32px; }
+.fox { width: 44px; height: 44px; }
+
+/* ---------- botones ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 0 18px;
+  border: 0; border-radius: var(--radius);
+  background: var(--accent); color: var(--on-accent);
+  font-weight: 600;
+  transition: background .15s, transform .1s;
+}
+.btn:hover { background: var(--accent-hover); }
+.btn:active { transform: scale(.98); }
+.btn[disabled] { opacity: .55; cursor: default; transform: none; }
+.btn-full { width: 100%; }
+
+.btn-ghost {
+  background: transparent; color: var(--t1);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--panel2); }
+
+.btn-link {
+  background: none; border: 0; padding: 6px 4px;
+  color: var(--accent); font-weight: 500; font-size: 14px;
+}
+.btn-link[disabled] { color: var(--t2); }
+.btn-link:hover:not([disabled]) { text-decoration: underline; }
+
+/* ---------- campos ---------- */
+.field { display: flex; flex-direction: column; margin-bottom: 14px; }
+.field label { font-size: 13px; color: var(--t2); }
+.field .hint { font-size: 12px; color: var(--t2); }
+
+.input-wrap { position: relative; display: flex; align-items: center; }
+
+.input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel2);
+  color: var(--t1);
+}
+.input:focus { border-color: var(--accent); }
+.input::placeholder { color: var(--t2); opacity: .75; }
+.input.has-eye { padding-right: 44px; }
+
+textarea.input { resize: vertical; min-height: 74px; }
+
+.eye-btn {
+  position: absolute; right: 4px;
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  background: none; border: 0; color: var(--t2); border-radius: 8px;
+}
+.eye-btn:hover { color: var(--t1); }
+
+/* ---------- spinner ---------- */
+.spin {
+  width: 18px; height: 18px;
+  border: 2px solid rgba(255, 255, 255, .35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+.spin-dark {
+  border-color: var(--border);
+  border-top-color: var(--accent);
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* W38: animación de carga "cubitos" — dos cubos recorren la esquina
+   superior izquierda girando (sólo transform, regla FF78). Sustituye
+   al spin en los "Cargando…" de la conversación. */
+.cubes {
+  position: relative;
+  display: inline-block;
+  width: 34px; height: 34px;
+  contain: paint;
+  vertical-align: middle;
+  flex: none;
+}
+.cube {
+  background-color: var(--accent);
+  width: 7px; height: 7px;
+  position: absolute;
+  top: 0; left: 0;
+  animation: cubeSpinner 1.8s ease-in-out infinite;
+}
+.cube:last-child { animation-delay: -.9s; }
+@keyframes cubeSpinner {
+  25% { transform: translateX(15px) rotate(-90deg) scale(.5); }
+  50% { transform: translateX(15px) translateY(15px) rotate(-180deg); }
+  75% { transform: translateY(15px) rotate(-270deg) scale(.5); }
+  to { transform: rotate(-1turn); }
+}
+
+/* ---------- pantalla de carga (boot) ---------- */
+.boot {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--t2);
+}
+
+/* W38: pantalla de arranque compartida (boot-screen.js): icono de la
+   app, sello de cifrado, barra de progreso (scaleX, sólo transform)
+   y el texto de la fase real. Todo centrado en el medio. */
+.bp-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: var(--t2);
+}
+.bp-logo {
+  width: 72px; height: 72px;
+  margin-bottom: 18px;
+}
+.bp-e2e {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+.bp-e2e > * + * { margin-left: 8px; }
+.bp-e2e .ic { color: var(--accent); }
+.bp-bar {
+  width: 220px; max-width: 70vw;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.bp-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transform-origin: left center;
+  transform: scaleX(.15);
+  transition: transform .4s ease;
+}
+.bp-status {
+  margin-top: 12px;
+  font-size: 13.5px;
+  min-height: 18px;
+}
+
+/* W27h: "Cargando…" del arranque de la pantalla principal — cubre la
+   app entera hasta que chats, gente (perfiles) y mensajes iniciales
+   están listos y la interfaz se revela completa */
+.app-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  color: var(--t2);
+  font-size: 14.5px;
+}
+.app-boot > * + * { margin-left: 10px; }
+
+/* ---------- auth ---------- */
+.auth-wrap {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 16px;
+}
+
+.auth-card {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 30px 26px;
+  box-shadow: var(--shadow);
+}
+
+.auth-logo {
+  margin: 0 auto 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.auth-logo .fox { width: 66px; height: 66px; }
+/* W8: logo completo (marca + palabra) */
+/* W27g: logo un poco más grande (se quitó el título "Foxinix" del
+   login: manda la marca sola) */
+.auth-logo-img { height: 56px; width: auto; display: block; }
+
+.auth-title { text-align: center; margin: 0 0 2px; font-size: 23px; }
+.auth-sub { text-align: center; margin: 0 0 22px; color: var(--t2); font-size: 14px; }
+
+.form-err {
+  display: flex; align-items: flex-start;
+  background: var(--err-bg);
+  color: var(--err);
+  border: 1px solid var(--err);
+  border-radius: var(--radius);
+  padding: 9px 12px;
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.form-err .ic { margin-top: 1px; }
+
+.auth-alt {
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 16px; flex-wrap: wrap;
+}
+.auth-sep { color: var(--t2); }
+
+.auth-back {
+  display: flex; justify-content: center; margin-top: 18px;
+}
+
+/* avatar del perfil */
+.avatar-pick {
+  position: relative;
+  width: 108px; height: 108px;
+  margin: 0 auto 18px;
+}
+.avatar-pick .av-img {
+  width: 108px; height: 108px;
+  border-radius: 50%;
+  background: var(--panel2);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.avatar-pick .av-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar-pick .av-img .fox { width: 74px; height: 74px; }
+.avatar-pick .av-btn {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent);
+  border: 3px solid var(--panel);
+  border-radius: 50%;
+}
+.avatar-pick .av-btn:hover { background: var(--accent-hover); }
+.avatar-pick .av-clear {
+  position: absolute; left: -2px; top: -2px;
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel2); color: var(--t2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+
+/* código de verificación */
+.code-input {
+  width: 100%;
+  min-height: 62px;
+  text-align: center;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: .42em;
+  text-indent: .42em; /* compensa el espaciador final al centrar */
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.verify-mail { text-align: center; color: var(--t2); font-size: 14px; margin: -8px 0 18px; }
+.verify-attempts { text-align: center; color: var(--t2); font-size: 13px; margin-top: 12px; }
+.resend-row { display: flex; justify-content: center; margin-top: 4px; }
+
+/* ---------- chat (W2) — ver bloque final ---------- */
+
+/* ---------- toasts ---------- */
+.toasts {
+  position: fixed;
+  left: 50%; transform: translateX(-50%);
+  bottom: 22px;
+  display: flex; flex-direction: column;
+  width: min(420px, 92vw);
+  z-index: 60;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+}
+.toast-ok { border-color: var(--accent); }
+.toast-err { border-color: var(--err); color: var(--err); }
+
+/* ---------- transiciones (solo opacity/transform) ---------- */
+.fade-enter-active, .fade-leave-active { transition: opacity .15s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* El estado de carga (boot) sale sin animación: evita mostrar el spinner
+   150 ms de más y que las capturas/screenshot queden en "Cargando…". */
+.boot.fade-leave-active, .boot.fade-enter-active { transition: none; }
+
+.pop-enter-active, .pop-leave-active { transition: opacity .2s, transform .2s; }
+.pop-enter-from, .pop-leave-to { opacity: 0; transform: translateY(8px); }
+
+/* ---------- scrollbars ---------- */
+/* W29i: "thin" se veía diminuto en Gecko (Mypal/XP): ancho normal y
+   pulgar claro, para que la barra se vea de verdad. */
+* { scrollbar-width: auto; scrollbar-color: var(--t2) transparent; }
+*::-webkit-scrollbar { width: 12px; height: 12px; }
+*::-webkit-scrollbar-thumb { background: var(--t2); border-radius: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* ============================================================
+   CHAT (W2): shell, lista, conversación, composer, modal
+   ============================================================ */
+
+.app-shell {
+  display: flex;
+  height: 100%;              /* W51: 100vh se metía bajo la barra del móvil */
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  position: relative;
+}
+
+/* ---------- sidebar ---------- */
+/* W6: más angosto para dejar lugar al chat (la columna de mensajes
+   también se limita a 820px centrados más abajo). Se edita ACÁ y no al
+   final del archivo: el media query móvil (≤760px, más abajo) debe seguir
+   ganándole con width:100%. */
+.sidebar {
+  width: 32%;
+  min-width: 280px;
+  max-width: 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* W19: sidebar colapsable. La clase vive en <html> (boot.js la aplica
+   antes del primer pintado). Solo escritorio: en móvil (≤760px) manda
+   el media query de abajo con la lista a pantalla completa. El selector
+   va compuesto (`.icon-btn.side-open`) porque `.icon-btn` más abajo
+   volvería a poner display:inline-flex. */
+.icon-btn.side-open { display: none; }
+@media (min-width: 761px) {
+  /* W37c: contraer/expandir con animación — el ancho transiciona y el
+     chat se reacomoda en cada frame (sin el "salto" de antes). */
+  .sidebar {
+    transition: width .22s ease, min-width .22s ease;
+  }
+  html.side-collapsed .sidebar { width: 0; min-width: 0; border-right: 0; }
+  html.side-collapsed .icon-btn.side-open { display: inline-flex; }
+}
+
+/* W20: panel de "Fondo del chat". En desktop/tablet ocupa la columna
+   del sidebar (store.wallPanelOpen cambia el v-if); en celular (≤760px)
+   es una hoja inferior, como pedían. */
+.wall-panel {
+  width: 32%;
+  min-width: 280px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  flex: none;
+}
+.wall-panel .side-head b {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--t0);
+  margin-left: 8px;
+}
+.wp-body { flex: 1; overflow-y: auto; padding: 12px 14px 18px; }
+.wp-hint { font-size: 12.5px; color: var(--t2); margin: 0 0 12px; }
+
+/* W21c: la vista previa a tamaño real ocupa el CENTRO (donde va la
+   conversación) mientras el panel está abierto. Mismo layout que
+   .chat-pane —y las mismas capas de fondo (selectores arriba)—, así
+   que se ve idéntico al chat real. */
+.wall-preview {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chat-bg);
+  position: relative;
+}
+.wp-head .ch-status { color: var(--t2); }
+/* .wp-prev es el área de mensajes de la vista previa (hereda .msgs);
+   el nombre del emisor va en negrita como en el ejemplo del pedido. */
+.wp-prev .msg { margin-top: 6px; }
+.wp-prev .msg:first-child { margin-top: 0; }
+.wp-prev .b-sender { margin-bottom: 2px; }
+.wp-prev .wp-name { font-weight: 600; }
+
+/* Sliders de opacidad / difuminado. accent-color (FF92+) está vetado:
+   el riel va pintado a mano con -moz-range-thumb (FF78 lo soporta). */
+.wp-ctl { margin-bottom: 12px; }
+.wp-ctl .ap-sec { padding-left: 0; }
+.wp-ctl .wp-val { color: var(--t1); font-weight: 600; }
+/* W27d: sin foto de fondo las opciones no están disponibles */
+.wp-ctl.off { opacity: .5; }
+.wp-ctl.off input[type="range"].wp-range { cursor: not-allowed; }
+input[type="range"].wp-range {
+  -moz-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--panel2);
+  border-radius: 3px;
+  cursor: pointer;
+}
+input[type="range"].wp-range::-moz-range-thumb {
+  -moz-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.wp-row { display: flex; align-items: center; flex-wrap: wrap; }
+.wp-row > .btn + .btn { margin-left: 8px; }
+
+/* W20: sección "Micrófono" en Ajustes → Chat: selector de dispositivo
+   + prueba de nivel con la barra. */
+.mic-select { width: 100%; }
+/* W37b: el idioma pasó a ser un cuadro desplegable (select). */
+.lang-select { width: 240px; max-width: 100%; }
+.mic-test-row { align-items: center; padding-top: 8px; }
+.mic-bar {
+  flex: 1;
+  height: 8px;
+  min-width: 80px;
+  max-width: 170px;
+  margin-left: 10px;
+  background: var(--panel2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mic-bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+
+/* W9: cabecera del sidebar 48px, como la de Discord */
+.side-head {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 8px 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.side-logo { height: 40px; width: auto; flex: none; display: block; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  background: none;
+  color: var(--t2);
+  border-radius: 50%;
+  flex: none;
+  transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: var(--panel2); color: var(--t1); }
+/* W7: botón encendido (ej.: panel de info abierto) */
+.icon-btn.on { color: var(--accent); background: var(--panel2); }
+
+.ws-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--err);
+  margin-right: 4px;
+  flex: none;
+  animation: blink-op 1.4s infinite;
+}
+@keyframes blink-op { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+
+.side-search {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+/* W9: buscador estilo Discord — píldora sobre fondo profundo, radio 8px */
+.search-pill {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--t2);
+}
+.search-pill input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--t1);
+}
+
+.chat-list { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 8px; }
+
+/* W9: filas estilo Discord — sin separadores, radio 8px, hover sutil */
+.chat-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  text-align: left;
+  transition: background .12s;
+}
+.chat-item:hover { background: var(--row-hover); }
+.chat-item.active { background: var(--sel); }
+
+.ci-main { flex: 1; min-width: 0; }
+.ci-top { display: flex; justify-content: space-between; align-items: baseline; }
+.ci-name {
+  font-weight: 500;
+  font-size: 15.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ci-time { font-size: 12px; color: var(--t2); flex: none; }
+.ci-bot { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; }
+.ci-prev {
+  flex: 1; min-width: 0;
+  font-size: 13.5px; color: var(--t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.badge {
+  flex: none;
+  min-width: 20px; height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+.list-empty {
+  padding: 40px 22px;
+  text-align: center;
+  color: var(--t2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ---------- avatares ---------- */
+.av-wrap { position: relative; display: inline-flex; flex: none; }
+.av-wrap.on::after {
+  content: '';
+  position: absolute;
+  /* W7: un pelín más abajo y a la derecha */
+  right: -1px; bottom: -1px;
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  background: var(--online);
+  border: 2px solid transparent;
+}
+/* W7: color del puntito según el estado */
+.av-wrap.on.st-busy::after { background: var(--st-busy); }
+.av-wrap.on.st-dnd::after { background: var(--st-dnd); }
+.av-wrap.on.st-off::after { background: var(--st-off); }
+/* W27: en el panel de info del chat PRIVADO el puntito va al doble de
+   tamaño (ficha del contacto); las filas de miembros de un grupo lo
+   mantienen del mismo tamaño que la lista de chats (W27b). */
+.profile-panel .pp-body > .av-wrap.on::after {
+  width: 22px; height: 22px;
+  border-width: 3px;
+}
+.avatar {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 18px;
+  overflow: hidden;
+  flex: none;
+  user-select: none;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar.av36 { width: 36px; height: 36px; font-size: 14.5px; }
+
+/* ---------- panel del chat ---------- */
+.chat-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--chat-bg);
+  position: relative;
+}
+
+/* W9: cabecera 48px con sombra de 1px (Discord) en vez de línea dura */
+.chat-head {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  padding: 0 14px;
+  background: var(--chat-bg);
+  box-shadow: 0 1px 0 rgba(4, 4, 5, .2), 0 1.5px 0 rgba(6, 6, 7, .05);
+  flex: none;
+}
+.back { display: none; margin-left: -6px; }
+.ch-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ch-name {
+  font-weight: 600; font-size: 15.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ch-status {
+  font-size: 13px; color: var(--t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ch-status.typing { color: var(--accent); }
+.ws-pill {
+  margin-left: auto;
+  flex: none;
+  font-size: 12px;
+  color: var(--t2);
+  background: var(--panel2);
+  padding: 4px 10px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+/* ---------- área de mensajes ---------- */
+.msgs {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 6% 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* W27h: "Cargando…" de la conversación — flex:1 llena la zona de
+   mensajes visible y centra el contenido justo encima del composer */
+.msgs-load {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--t2);
+  font-size: 14.5px;
+}
+.msgs-load > * + * { margin-left: 8px; }
+
+.load-older {
+  align-self: center;
+  font-size: 12.5px;
+  color: var(--t2);
+  background: var(--panel2);
+  padding: 5px 12px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+
+.day-pill {
+  align-self: center;
+  margin: 14px 0 4px;
+  background: var(--panel2);
+  color: var(--t2);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.day-pill:first-child { margin-top: 0; }
+
+.msg { display: flex; margin-top: 6px; }
+/* W29a: los mensajes nuevos aparecen "agrandándose" (sólo
+   transform/opacity: FF78 no permite otras propiedades animables) */
+@keyframes msgIn {
+  from { opacity: 0; transform: scale(.86) translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.msg.anim { animation: msgIn .2s ease-out; }
+.msg.tight { margin-top: 2px; }
+.msg.mine { justify-content: flex-end; }
+.msg.system { justify-content: center; }
+/* W29c: columna junto a cada mensaje entrante de grupo (burbujas
+   alineadas); la cara —foto o letra— solo en el primero de la tanda,
+   a la altura del nombre del emisor. */
+.msg-av {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  margin-right: 6px;
+  flex: none;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.msg-av.is-av { background: var(--panel2); color: var(--t2); }
+.msg-av img { width: 100%; height: 100%; object-fit: cover; }
+.msg-av i { font-style: normal; line-height: 1; font-size: 11px; font-weight: 700; }
+/* W29c: fila de "escribiendo…" con nombre (+ avatares apilados) */
+.typ-row { align-items: flex-end; }
+/* W37a: aparece/desaparece con desvanecido + leve impulso (sin brusco) */
+.typ-enter-active { transition: opacity .22s ease, transform .22s ease; }
+.typ-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.typ-enter-from, .typ-leave-to { opacity: 0; transform: translateY(8px); }
+.typ-enter-to, .typ-leave-from { opacity: 1; transform: none; }
+.typ-move { transition: transform .22s ease; }
+.typing-line { display: flex; align-items: center; }
+.typ-txt { margin-left: 8px; font-size: 12.5px; color: var(--t2); }
+.typ-avs { position: relative; width: 34px; height: 24px; margin-right: 6px; flex: none; }
+.typ-avs img {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  object-fit: cover;
+}
+.typ-avs img:nth-child(2) { left: 7px; }
+.typ-avs img:nth-child(3) { left: 14px; }
+/* W29c: pelotita de "escribiendo…" (lista de chats y de miembros) */
+.ci-typing { display: inline-flex; align-items: center; flex: none; margin-right: 6px; }
+.ci-typing i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: ciTyp 1s infinite ease-in-out;
+}
+.ci-typing i + i { margin-left: 2px; }
+.ci-typing i:nth-child(2) { animation-delay: .15s; }
+.ci-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes ciTyp {
+  0%, 60%, 100% { transform: translateY(0); opacity: .45; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+.sys-msg {
+  align-self: center;
+  max-width: 78%;
+  background: var(--panel2);
+  color: var(--t2);
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+
+.bubble {
+  position: relative;
+  background: var(--bubble-you);
+  border-radius: var(--radius);   /* W9: 8px, radio de tarjeta Discord */
+  padding: 6px 9px 7px;
+  box-shadow: var(--shadow);
+  /* W7: un poco más anchas para que la hora entre cómoda */
+  max-width: min(72%, 620px);
+  min-width: 74px;
+}
+.msg.mine .bubble { background: var(--bubble-me); }
+/* W45: dentro de la burbuja propia la cita heredaba naranja/gris sobre
+   naranja (contraste ~1,5:1). Blanco sobre el velo oscuro sí se lee. */
+.msg.mine .b-reply { background: rgba(0, 0, 0, .22); border-left-color: rgba(255, 255, 255, .9); }
+.msg.mine .b-reply .br-name { color: #fff; }
+.msg.mine .b-reply .br-text { color: rgba(255, 255, 255, .9); }
+
+.b-reply {
+  background: rgba(0, 0, 0, .16);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  margin-bottom: 3px;
+  overflow: hidden;
+  max-width: 100%;
+}
+.br-name {
+  display: block;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.br-text {
+  display: block;
+  font-size: 13px;
+  color: var(--t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.b-sender {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 1px;
+}
+/* W46: etiqueta del rol en el nombre del remitente (solo grupos). */
+.b-role {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.b-media { display: block; }
+.b-img {
+  display: block;
+  /* W22: min() evita que la imagen se salga de la burbuja en celular
+     (antes solo había tope en px y en pantallas angostas desbordaba). */
+  max-width: min(300px, 100%);
+  max-height: 340px;
+  border-radius: 6px;
+  margin: 2px 0;
+}
+/* W22: marco de imagen con la resolución reservada (el server manda
+   width/height en el mensaje). El cuadro se ve completo desde el
+   inicio con el spinner de descarga o el círculo de subida dentro;
+   max-width:100% lo mantiene dentro de la burbuja y object-fit:contain
+   evita recortes o distorsión (FF78: sin aspect-ratio, con object-fit). */
+.imgbox {
+  position: relative;
+  display: block;
+  margin: 2px 0;
+  border-radius: 6px;
+  overflow: hidden;
+  max-width: 100%;
+}
+.imgbox > .b-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  object-fit: contain;
+}
+
+.b-file {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, .14);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 200px;
+  max-width: 100%;
+  margin: 2px 0;
+  color: inherit;
+  text-decoration: none;
+  transition: background .15s;
+}
+.b-file:hover { background: rgba(0, 0, 0, .22); }
+.bf-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bf-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bf-size { font-size: 11.5px; color: var(--t2); }
+
+/* W29a: audio adjunto → controles nativos dentro de la burbuja (en
+   vez de la fila de descarga o un <video> negro) */
+.b-afile { margin: 2px 0; max-width: 100%; }
+.b-afile .b-afit { display: block; width: 264px; max-width: 100%; height: 40px; }
+
+/* W8: el <audio> queda oculto (sólo lo usan los tests y el player custom) */
+audio.b-audio { display: none; }
+.b-player {
+  display: flex; align-items: center;
+  min-width: 210px;
+  padding: 4px 2px;
+  margin: 2px 0;
+}
+.au-btn {
+  border: 0;
+  background: none;
+  color: var(--t1);
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  flex: none;
+  transition: background .12s;
+}
+.au-btn:hover { background: var(--panel2); }
+/* W22: el play solo aparece cuando el audio está LISTO (dl-done); mientras
+   baja, el anillo de descarga ocupa SU lugar (a la izquierda). */
+.b-player .au-btn { visibility: hidden; }
+.b-player.dl-done .au-btn { visibility: visible; }
+/* W22: subida de nota de voz → fila con forma de player y el anillo de
+   progreso en el slot del play (el play real llega al terminar). */
+.b-upvoice .au-btn { visibility: visible; cursor: default; }
+.b-upvoice .up-c { width: 30px; height: 30px; }
+.b-upvoice .wave { cursor: default; }
+.b-upvoice .wave i { opacity: .4; }
+.b-upvoice .au-time.is-err { color: #ff9b9b; }
+/* W13: onda de voz con progreso (clic = buscar posición) */
+.wave {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 26px;
+  margin: 0 10px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.wave i {
+  flex: 1;
+  min-width: 2px;
+  margin: 0 1px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: .35;
+  transition: opacity .1s linear;   /* W16: borde de onda continuo */
+}
+.wave i.on { opacity: .95; }
+.au-time {
+  font-size: 11.5px;
+  color: var(--t2);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.b-voice {
+  display: flex; align-items: center;
+  color: var(--t2); font-size: 14px;
+  padding: 4px 2px;
+}
+
+.b-meta {
+  /* W7: sin float — va SIEMPRE debajo del texto, a la derecha, para
+     que la hora entre bien en la burbuja. W9: 12px muted (Discord).
+     W12: --meta-* lo calcula store.js (blanco o negro según el fondo
+     real de la burbuja) para que se vea en TODOS los temas. */
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: 3px -2px 0 0;
+  font-size: 12px;
+  color: var(--meta-you, var(--t2));
+  line-height: 1;
+}
+.msg.mine .b-meta { color: var(--meta-mine, rgba(255, 255, 255, .92)); }
+/* W47: el blanco azulado de W45 se percibía blanco y las palomitas de
+   "leído" dejaban de distinguirse. Se usa un azul medio, visible pero
+   sin el brillo agresivo del azul puro. También cubre stickers, emojis
+   grandes, GIF y videos, que tienen sus propias reglas de color para
+   la meta. */
+.msg.mine .b-meta .t-read,
+.msg.mine .bubble.emo-big .b-meta .t-read,
+.msg.mine .bubble.gif .b-meta .t-read,
+.msg.mine .bubble.sticker .b-meta .t-read {
+  color: #4a90e2;
+  width: 17px;
+  height: 17px;
+}
+.tick { width: 16px; height: 16px; }   /* W40: eran trazo; ahora relleno */
+.t-pend { width: 13px; height: 13px; }
+.t-sent, .t-delivered { color: inherit; }
+.t-read { color: var(--ok); }   /* ✓✓ azul de leído: siempre azul */
+
+.b-text {
+  font-size: 14.5px;
+  line-height: 19.5px;
+  white-space: pre-wrap;
+  word-wrap: break-word;   /* alias legado: red de seguridad en FF78 */
+  overflow-wrap: anywhere; /* manda donde esté soportado (si no, queda arriba) */
+  margin-top: 1px;
+}
+
+.b-reacts { clear: both; display: flex; flex-wrap: wrap; margin-top: 4px; }
+/* W21: reacciones colgando del borde inferior de la burbuja (idea del
+   amigo, estilo WhatsApp/Messenger): la fila se engancha con margen
+   negativo —mitad dentro, mitad fuera— y el mensaje siguiente respira
+   para no pisarlas. En mensajes propios se espejean junto a la hora.
+   Píldora redonda, emoji grande, conteo en negrita y una sombra que
+   las despega del borde (`gap` vetado en FF78: márgenes a mano). */
+.b-reacts {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin: 3px 0 -17px;           /* -17 = padding (7) + 10px colgando */
+}
+.msg.mine .b-reacts { justify-content: flex-end; }
+.msg.reacts + .msg { margin-top: 18px; }   /* respiro por lo colgante */
+.react-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 999px;         /* píldora */
+  padding: 0 8px;
+  margin: 0 4px 0 0;
+  font-size: 16px;              /* el emoji se ve a su tamaño */
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .38);
+  transition: transform .12s;
+}
+.msg.mine .react-chip { margin: 0 0 0 4px; }
+.react-chip:hover { border-color: var(--t2); transform: scale(1.12); }
+.react-chip i {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--t1);
+  margin-left: 4px;
+}
+
+/* W19: los tres puntos quedan ópticamente centrados (antes el baseline
+   del texto los descentraba hacia arriba). */
+.dots { display: flex; align-items: center; padding: 8px 12px; }
+.dots i {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--t2);
+  margin: 0 2px;
+  animation: dots 1.2s infinite ease-in-out;
+}
+.dots i:nth-child(2) { animation-delay: .18s; }
+.dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes dots { 0%, 60%, 100% { opacity: .3; } 30% { opacity: 1; } }
+
+/* ---------- composer (W9: input elevado radio 8px, sobre el lienzo) ---------- */
+.composer {
+  position: relative;            /* W13: ancla del selector de emoji */
+  display: flex;
+  align-items: flex-end;
+  padding: 10px 16px 16px;
+  background: var(--chat-bg);
+  flex: none;
+}
+.composer .icon-btn { margin-bottom: 2px; }
+
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: var(--panel2);
+  color: var(--t1);
+  border-radius: 8px;
+  padding: 11px 16px;
+  min-height: 44px;
+  max-height: 120px;
+  line-height: 20px;
+  overflow-y: auto;
+}
+.composer-input::placeholder { color: var(--t2); opacity: .8; }
+
+.send-btn {
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  display: flex; align-items: center; justify-content: center;
+  flex: none;
+  transition: background .15s, transform .1s;
+}
+.send-btn:hover:not([disabled]) { background: var(--accent-hover); }
+.send-btn:active:not([disabled]) { transform: scale(.95); }
+.send-btn[disabled] { background: var(--panel2); color: var(--t2); cursor: default; }
+/* W29h: mantener presionado 3 s (long-press de spoiler) — el relleno
+   crece con transform (solo se anima transform, regla de animación). */
+.send-btn { position: relative; overflow: hidden; }
+.send-btn .ic { position: relative; z-index: 1; }
+.send-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 100%;
+  background: rgba(0, 0, 0, .35);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+.send-btn.holding .send-fill { animation: sendhold 3s linear forwards; }
+@keyframes sendhold { to { transform: scaleX(1); } }
+
+/* ---------- modal nuevo chat ---------- */
+.modal-veil {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 40;
+}
+.modal {
+  width: min(430px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  animation: modal-in .16s ease-out;
+}
+@keyframes modal-in { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+/* W37c: TODOS los modales animan apertura (modal-in) Y cierre (modal-out)
+   — la velada hace fade con <transition name="veil"> y el cuadro escala. */
+.veil-enter-active { transition: opacity .16s ease; }
+.veil-leave-active { transition: opacity .14s ease; }
+.veil-enter-from, .veil-leave-to { opacity: 0; }
+.veil-leave-active .modal,
+.veil-leave-active .profile-panel { animation: modal-out .14s ease-in forwards; }
+@keyframes modal-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.97); } }
+.modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 16px;
+  font-weight: 600;
+  font-size: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.m-search {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  color: var(--t2);
+  border-bottom: 1px solid var(--border);
+}
+.m-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--t1);
+}
+.results { max-height: min(320px, 50vh); overflow-y: auto; }
+.res-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 9px 14px;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  transition: background .12s;
+}
+.res-item:hover { background: var(--panel2); }
+.ri-col { display: flex; flex-direction: column; min-width: 0; }
+.ri-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ri-user { font-size: 13px; color: var(--t2); }
+.res-empty { padding: 26px 16px; text-align: center; color: var(--t2); font-size: 14px; }
+.res-empty.dim { opacity: .75; }
+
+/* ---------- móvil ---------- */
+@media (max-width: 760px) {
+  .sidebar { width: 100%; max-width: none; border-right: 0; }
+  .chat-pane { display: none; }
+  .app-shell.show-chat .sidebar { display: none; }
+  .app-shell.show-chat .chat-pane { display: flex; }
+  .back { display: inline-flex; }
+  /* W22: contraer el sidebar no tiene sentido con la lista a pantalla
+     completa: el botón no aparece en celular. */
+  .side-head .side-fold { display: none; }
+  .msgs { padding: 14px 12px 10px; }
+  .bubble { max-width: 88%; }
+  /* W51: notch/barra del móvil. env() cae a 0 en navegadores viejos. */
+  .chat-head {
+    height: calc(48px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(14px + env(safe-area-inset-left, 0px));
+    padding-right: calc(14px + env(safe-area-inset-right, 0px));
+  }
+  .side-head {
+    height: calc(48px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(10px + env(safe-area-inset-left, 0px));
+    padding-right: calc(10px + env(safe-area-inset-right, 0px));
+  }
+  .composer {
+    padding: 8px calc(10px + env(safe-area-inset-right, 0px))
+             calc(8px + env(safe-area-inset-bottom, 0px))
+             calc(10px + env(safe-area-inset-left, 0px));
+  }
+  .composer-input { min-height: 42px; padding: 10px 14px; }
+  .send-btn { width: 40px; height: 40px; }
+  .msgs { padding-left: calc(12px + env(safe-area-inset-left, 0px));
+          padding-right: calc(12px + env(safe-area-inset-right, 0px)); }
+  .modal-veil {
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .ws-pill { display: none; }
+  /* W20: el panel de fondo en celular es una hoja inferior */
+  .wall-panel {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    width: auto; min-width: 0; max-width: none;
+    max-height: 78%;
+    border-right: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-top: 1px solid var(--border);
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -3px 16px rgba(0, 0, 0, .5);
+    z-index: 40;
+  }
+}
+
+/* ============================ W3: responder, reacciones, voz, grupos */
+
+/* ---------- composer en columna (reply-bar + controles) ---------- */
+.composer { flex-direction: column; align-items: stretch; }
+.comp-row { display: flex; align-items: flex-end; position: relative; }  /* relative: emo-pop (W7) */
+
+.reply-bar {
+  display: flex;
+  align-items: center;
+  background: var(--panel2);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 6px 8px 6px 10px;
+}
+.rb-ic { color: var(--accent); flex: none; }
+.rb-col { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.rb-col b { font-size: 13px; font-weight: 600; }
+.rb-col span {
+  font-size: 13px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reply-bar .icon-btn { flex: none; }
+/* W30d: tira de aviso de cifrado pendiente en el composer */
+.e2e-pend-bar {
+  display: flex;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--t2);
+  background: var(--accent-wash);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.e2e-pend-bar .ic { color: var(--accent); flex: none; margin-right: 7px; }
+.e2e-pend-bar span { min-width: 0; }
+.comp-mic { flex: none; }
+
+/* ---------- grabación de nota de voz ---------- */
+.rec-bar {
+  align-items: center;
+  background: var(--panel2);
+  border-radius: 22px;
+  padding: 5px 6px 5px 14px;
+}
+.rec-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--err);
+  flex: none;
+  animation: rec-blink 1s ease-in-out infinite;
+}
+@keyframes rec-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.rec-time { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.rec-hint { flex: 1; color: var(--t2); font-size: 13px; }
+.rec-bar .send-btn { width: 38px; height: 38px; }
+
+/* ---------- acciones de mensaje: toolbar flotante estilo Discord (W9) ---------- */
+.b-actions {
+  position: absolute;
+  /* W36: la barra queda COMPLETA encima del mensaje (no atravesando la
+     burbuja); con hover aparece y no tapa el contenido.
+     W37b: bajó de -36px a -30px — el borde inferior queda pegado (o
+     levemente solapado) a la burbuja, así el ratón NO pierde el hover
+     al subir desde el mensaje y la barra no "se desaparece". */
+  top: -30px; right: 0;
+  z-index: 5;
+  display: flex;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s;
+}
+.bubble:hover .b-actions,
+.bubble:focus-within .b-actions,
+.bubble.picking .b-actions { opacity: 1; pointer-events: auto; }
+.b-act {
+  width: 28px; height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 0;
+  background: none;
+  color: var(--t2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color .12s, background .12s;
+}
+.b-act:hover { color: var(--t1); background: var(--panel2); }
+
+.react-picker {
+  position: absolute;
+  /* W36/W37b: .b-actions subió a -36px y bajó a -30px; el picker se
+     compensa para quedar en la MISMA posición absoluta de siempre
+     (-15-74 = -36-53 = -30-59 = -89) — los tests de geometría y el
+     clamp siguen igual. */
+  top: -59px; right: 0;        /* W8: dos filas → flota sobre la burbuja */
+  display: flex;
+  flex-wrap: wrap;              /* W8: 12 emojis en dos filas */
+  width: 216px;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: var(--shadow);
+}
+.react-picker .rp {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 17px;
+  line-height: 1;
+  padding: 4px 5px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform .1s, background .12s;
+}
+.react-picker .rp:hover { background: var(--panel2); transform: scale(1.15); }
+/* W13: botón que abre el selector completo desde el picker de reacciones */
+.react-picker .rp-more { font-size: 13px; color: var(--t2); }
+/* W8: el emoji que ya es tu reacción, resaltado en el picker */
+.react-picker .rp.mine {
+  background: var(--panel2);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+/* W13: selector de emoji completo (composer y reacciones) */
+.emo-picker {
+  position: absolute;
+  right: 8px;
+  bottom: 54px;
+  z-index: 8;
+  width: 320px;
+  max-width: 86vw;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: modal-in .14s ease-out;
+}
+.ep-search {
+  display: flex;
+  align-items: center;
+  margin: 8px;
+  padding: 0 10px;
+  background: var(--panel2);
+  border-radius: 8px;
+}
+.ep-search .ic { color: var(--t2); flex: none; }
+.ep-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--t1);
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+}
+.ep-search input::placeholder { color: var(--t2); }
+/* Tabs del panel de stickers/GIFs (W28g) — el panel de emoji ya no
+   usa .ep-tabs (W29b: categorías a la izquierda). */
+.ep-tabs {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.ep-tab {
+  border: 0;
+  background: none;
+  font-size: 16px;
+  line-height: 1;
+  padding: 5px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.ep-tab:hover { background: var(--panel2); }
+.ep-tab.on { background: var(--panel2); box-shadow: inset 0 -2px 0 var(--accent); }
+/* W29b: panel estilo Discord — buscador arriba, categorías a la
+   IZQUIERDA como "saltos" y UNA sola lista con subtítulos */
+.emo-picker .ep-body { display: flex; height: 258px; }
+.ep-cats {
+  flex: none;
+  width: 36px;
+  padding: 4px 1px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.ep-cat {
+  display: block;
+  width: 32px;
+  height: 30px;
+  margin: 1px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 17px;
+  line-height: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: background .12s;
+}
+.ep-cat:hover { background: var(--panel2); }
+.ep-cat.on { background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+.ep-scroll {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 2px 6px 8px;
+}
+.ep-sub {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--float);
+  padding: 6px 2px 3px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--t2);
+}
+.ep-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+}
+.ep-e {
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  padding: 5px;
+  margin: 1px;                 /* W5: nada de gap (el linter lo vetaría) */
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform .1s, background .12s;
+}
+.ep-e:hover { background: var(--panel2); transform: scale(1.18); }
+/* W29b: emojis Twemoji inline (svg escalable; el alt trae el Unicode) */
+.emo { width: 1.35em; height: 1.35em; vertical-align: -0.35em; display: inline-block; }
+.emo-picker .ep-e .emo { width: 22px; height: 22px; }
+.emo-picker .ep-cat .emo { width: 19px; height: 19px; vertical-align: -4px; }
+.bubble.sticker .b-text .emo, .bubble.emo-big .b-text .emo {
+  width: 52px; height: 52px; vertical-align: -0.3em;
+}
+.react-chip .emo, .rp .emo { width: 1.2em; height: 1.2em; vertical-align: -0.25em; }
+.ep-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--t2);
+  font-size: 13px;
+}
+/* dentro del picker de reacciones: cuelga debajo de la fila de chips */
+.react-picker .emo-picker {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  bottom: auto;
+  margin-top: 4px;
+}
+/* W28b: popup de @menciones (flota sobre el composer como el de :código:) */
+.m-mention {
+  position: absolute;
+  left: 36px;
+  bottom: calc(100% + 6px);
+  z-index: 9;
+  width: 264px;
+  max-width: 86vw;
+  padding: 4px;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: modal-in .12s ease-out;
+}
+.mm-row {
+  display: flex; align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0; border-radius: 6px;
+  background: none; color: var(--t1);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.mm-row:hover, .mm-row.on { background: var(--panel2); }
+.mm-at { color: var(--accent); font-weight: 700; margin-right: 2px; }
+.mm-row b { font-weight: 600; }
+.mm-disp {
+  color: var(--t2); font-size: 12.5px;
+  margin-left: 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* W28b: @menciones resaltadas en la burbuja (la propia, más fuerte) */
+.b-text .mention {
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--accent-wash);
+  color: var(--t0);
+  font-weight: 600;
+}
+.b-text .mention.me { background: var(--accent); color: var(--on-accent); }
+
+/* W35a–c: enlaces en el texto, imagen inline y tarjetas de portada */
+.b-text .msglink {
+  color: var(--t0);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.msg.mine .b-text .msglink { color: #fff; }
+.b-text .msgimg { display: inline-block; margin: 3px 0; }
+.b-text .linkimg {
+  display: block;
+  max-width: 260px;
+  max-height: 260px;
+  border-radius: 10px;
+}
+.b-cards { margin: 6px 0 2px; }
+.linkcard {
+  display: block;
+  max-width: 340px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .18);
+  text-decoration: none;
+  color: var(--t0);
+}
+.linkcard .lc-img {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-bottom: 1px solid var(--border);
+}
+.linkcard .lc-meta { display: flex; padding: 8px 10px; }
+.linkcard .lc-fav {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 8px 0 0;
+  border-radius: 3px;
+}
+.lc-title { font-size: 13px; font-weight: 600; }
+.lc-desc {
+  font-size: 12px;
+  opacity: .75;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lc-site { font-size: 11px; opacity: .55; margin-top: 3px; }
+
+/* W28b: contador de menciones en la lista de chats (rojo, aparte del
+   contador normal de no leídos) */
+.badge.mention { background: var(--err); }
+
+/* W28c: sección de mensajes fijados en la info del chat */
+/* W29l: accesos a los modales de fijados y archivos (con conteo) */
+.pp-acts { flex: none; padding: 10px 12px 14px; border-top: 1px solid var(--border); }
+.pp-acts .pp-pinhead + .pp-pinhead { margin-top: 6px; }   /* sin gap (FF78) */
+.pp-pinhead {
+  display: flex; align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--t1);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pp-pinhead:hover { background: var(--sel); }
+.pp-pinhead b { flex: 1; font-weight: 600; margin-left: 8px; }
+/* W36h: el conteo es texto plano "(3)", sin píldora resaltante */
+.pp-ncount {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--t2);
+  font-size: 12.5px; font-style: normal; font-weight: 500;
+}
+.pp-chev { margin-left: 8px; color: var(--t2); transform: rotate(-90deg); }
+.pp-pinrow {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 0; border-radius: 6px;
+  background: var(--panel2);
+  text-align: left;
+  cursor: pointer;
+}
+.pp-pinrow:hover { background: var(--sel); }
+.pp-pinrow b {
+  display: block;
+  color: var(--accent);
+  font-size: 12.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pp-pinrow span {
+  display: block;
+  color: var(--t1);
+  font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* W28c: el pin en la meta de la burbuja se tiñe como el texto muted */
+.b-pin { color: var(--t2); }
+
+/* W29l: modales "Mensajes fijados" y "Archivos y medios" (visores) */
+.pp-modal { width: min(460px, 100%); }
+.pp-modal header i {
+  color: var(--t2); font-style: normal; font-weight: 500;
+  margin-left: 4px;
+}
+.pp-mbody { max-height: min(64vh, 460px); overflow-y: auto; padding: 6px 8px 8px; }
+.pp-mbody .pp-loading { padding: 24px 8px; }
+.pp-mbody .pp-pinrow { margin-top: 6px; }
+.pp-mbody .pp-galgrid { margin-top: 4px; }
+.gal-veil .pp-galimg {          /* miniaturas grandes en el visor */
+  width: 96px; height: 96px;
+  margin: 0 8px 8px 0;
+  border-radius: 8px;
+}
+
+/* W28d: cuadrícula de miniaturas de la galería (sin gap: margen en las
+   filas, compatibles con FF78) */
+.pp-galgrid { display: flex; flex-wrap: wrap; margin-top: 6px; }
+.pp-galimg {
+  width: 64px; height: 64px;
+  margin: 0 6px 6px 0;
+  padding: 0; border: 0; border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel2);
+  cursor: pointer;
+}
+.pp-galimg img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* W28f: lista de lecturas del modal "Visto por" (filas de miembro
+   reutilizadas, sin viñetas ni hover de botón: no son clicables) */
+.reads-list { list-style: none; margin: 0; padding: 2px 8px 8px; }
+.reads-list .mi-row { cursor: default; }
+.reads-list .mi-row:hover { background: transparent; }
+
+/* W28g: panel de stickers/GIFs (misma posición que el picker de emojis) */
+.st-panel {
+  position: absolute;
+  right: 8px;
+  bottom: 54px;
+  z-index: 8;
+  width: 320px;
+  max-width: 86vw;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: modal-in .14s ease-out;
+}
+/* W29g: panel unificado (3 pestañas) — el picker embebido va en flujo
+   normal: el tamaño y el clamp (clampPanel) los lleva este panel. */
+.st-panel .emo-picker {
+  position: static;
+  width: auto;
+  max-width: none;
+  border: 0;
+  box-shadow: none;
+  animation: none;
+}
+.st-panel .ep-tabs { padding-top: 6px; }
+.st-grid {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 8px;
+  max-height: 236px;   /* W29g: scroll interno en pantallas cortas */
+  overflow-y: auto;
+}
+.st-e {
+  width: 56px;
+  height: 56px;
+  margin: 0 4px 4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 32px;
+  line-height: 1;
+  cursor: pointer;
+}
+.st-e:hover { background: var(--panel2); }
+.st-g {
+  width: 60px;
+  height: 60px;
+  margin: 0 4px 4px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel2);
+  cursor: pointer;
+}
+.st-g img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* W28g: el sticker es el emoji grande, sin caja ni borde. W41: UN solo
+   emoji en el mensaje (.emo-big) se pinta igual — el estilo activo
+   (nativo/noto/twemoji) decide si el grande es un glyph o un <img>.
+   W42: selector con .msg para ganarle a .msg.mine .bubble (3 clase-
+   s): en MIS mensajes la caja naranja tapaba el look transparente. */
+.msg .bubble.sticker, .msg .bubble.emo-big {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 2px 4px;
+}
+.bubble.sticker .b-text, .bubble.emo-big .b-text {
+  font-size: 42px; line-height: 1.2;
+}
+/* W42: la hora y las palomitas de los contenidos GRANDES (un solo
+   emoji, GIF, sticker) van en una fila SEPARADA debajo del contenido,
+   en pastillita (referencia: WhatsApp) — nunca encima. Recibido: la
+   pastillita queda abajo a la izquierda; enviada: abajo a la
+   derecha. z-index 5 → sigue visible sobre el tapado spoiler (4). */
+.bubble.emo-big { position: relative; }
+.bubble.emo-big .b-meta,
+.bubble.gif .b-meta,
+.bubble.sticker .b-meta {
+  position: static;
+  width: max-content;
+  margin: 6px 0 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  font-size: 11px;
+  z-index: 5;
+}
+.msg.mine .bubble.emo-big .b-meta,
+.msg.mine .bubble.gif .b-meta,
+.msg.mine .bubble.sticker .b-meta {
+  margin: 6px 0 0 auto;
+}
+.bubble.emo-big .b-meta .tick, .bubble.gif .b-meta .tick,
+.bubble.sticker .b-meta .tick { color: #fff; }
+.bubble.emo-big .b-meta .b-time, .bubble.gif .b-meta .b-time,
+.bubble.sticker .b-meta .b-time { color: #fff; }
+
+/* W17: autocompletado ":código:" del composer (flota sobre la caja) */
+.emo-ac {
+  position: absolute;
+  left: 36px;
+  bottom: calc(100% + 6px);
+  z-index: 9;
+  width: 236px;
+  max-width: 86vw;
+  padding: 4px;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: modal-in .12s ease-out;
+}
+.emo-ac-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--t1);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.emo-ac-row.on,
+.emo-ac-row:hover { background: var(--panel2); }
+.emo-ac-row b {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 400;
+  margin-right: 8px;
+}
+.emo-ac-row i { color: var(--t2); font-style: normal; }
+
+button.react-chip {
+  -moz-appearance: none;
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+/* W21: tu reacción con fondo OPACO — el tinte translúcido (accent-wash)
+   se veía transparente al colgar la píldora a media asta sobre la
+   burbuja. El anillo del acento va más grueso (2px) para que "tuya" se
+   lea de un vistazo. (border-box: el borde doble no agranda la píldora.) */
+button.react-chip.mine {
+  border-color: var(--accent);
+  border-width: 2px;
+  background: var(--panel2);
+  color: var(--t0);
+}
+button.react-chip.mine i { color: var(--t0); }
+
+/* ---------- modal: tabs, título de grupo, chips de selección ---------- */
+.m-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.m-tab {
+  flex: 1;
+  padding: 8px 0;
+  font-size: 14px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--t2);
+  cursor: pointer;
+  transition: color .12s, border-color .12s;
+}
+.m-tab.on { color: var(--t1); border-bottom-color: var(--accent); font-weight: 600; }
+
+.m-title { padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.m-title input {
+  width: 100%;
+  min-height: 32px;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--t1);
+  font: inherit;
+}
+.m-title input::placeholder { color: var(--t2); }
+
+.g-chips {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.g-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 3px 4px 3px 10px;
+  font-size: 13px;
+}
+.g-chip button {
+  border: 0;
+  background: none;
+  color: var(--t2);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+.g-chip button:hover { color: var(--err); }
+.ic-xs { width: 12px; height: 12px; }
+
+.ri-check { margin-left: auto; color: var(--accent); flex: none; }
+
+.m-foot { padding: 10px 14px; border-top: 1px solid var(--border); }
+.m-foot .btn { width: 100%; }
+.m-foot .btn:disabled { opacity: .5; cursor: default; }
+
+/* ============================ W4: apariencia + PWA */
+
+/* Fondo de la conversación: --wall lo setea el pre-paint / setWall;
+   sin --wall se ve el color del tema del panel. */
+.msgs { background: var(--wall, transparent); }
+/* W44: botón "ir hacia abajo" flotante sobre el compositor — aparece
+   solo cuando el chat no está pegado al final (v-if="!stick") y el
+   clic salta al final (scrollBottom). Sobre las burbujas, bajo los
+   paneles/modales; sin animación (se muestra/oculta con v-if). */
+.jump-bottom {
+  position: absolute;
+  right: 18px;
+  bottom: 66px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--float);
+  color: var(--t1);
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: var(--shadow);
+  transition: background .15s, color .15s;
+}
+.jump-bottom:hover { background: var(--panel2); color: var(--t0); }
+/* W20: foto de fondo en capas sobre .chat-pane (y no sobre .msgs) para
+   poder difuminar SOLO la foto con filter sin tocar los mensajes: la
+   foto va en ::before (escala 1.04 para tapar el borde que deja el
+   blur) y el velo en ::after con --wall-dim configurable desde el panel
+   de fondo. Cabecera y composer quedan por encima (z-index de hijos
+   flex no necesita position). */
+html.wallimg .chat-pane,
+html.wallimg .wall-preview { overflow: hidden; }
+html.wallimg .chat-pane::before,
+html.wallimg .wall-preview::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  background-image: var(--wallimg);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--wall-blur, 0px));
+  transform: scale(1.04);
+  z-index: 0;
+}
+html.wallimg .chat-pane::after,
+html.wallimg .wall-preview::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  background: #000;
+  opacity: var(--wall-dim, .5);
+  z-index: 0;
+}
+html.wallimg .chat-head,
+html.wallimg .msgs,
+html.wallimg .composer { z-index: 1; }
+html.wallimg .msgs { background: transparent; }
+/* W52: Personas no es una conversación. El fondo del chat tapaba sus
+   filas y acciones (solo quedaban visibles los elementos con position)
+   y el overflow:hidden impedía desplazar la lista. Se deja el fondo
+   sólido del panel y su scroll normal. */
+html.wallimg .chat-pane.people-pane {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+html.wallimg .chat-pane.people-pane::before,
+html.wallimg .chat-pane.people-pane::after { content: none; }
+
+/* ---------- modal apariencia ---------- */
+.ap-sec {
+  padding: 10px 16px 4px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--t2);
+}
+.ap-row { display: flex; padding: 2px 16px 4px; }
+.ap-opt {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--t2);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.ap-opt.on { border-color: var(--accent); color: var(--t1); font-weight: 600; }
+
+.ap-swatches { display: flex; flex-wrap: wrap; padding: 4px 16px 6px; }
+.ap-sw {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+  transition: transform .1s, border-color .12s;
+}
+.ap-sw:hover { transform: scale(1.1); }
+.ap-sw.on { border-color: var(--t1); }
+
+.ap-walls { display: flex; flex-wrap: wrap; padding: 4px 16px 16px; }
+.ap-wl {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px 5px 6px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--t2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.ap-wl.on { border-color: var(--accent); color: var(--t1); }
+
+/* W19: fila de la foto de fondo (preview + botones; el input vive oculto
+   y lo abre el botón "Elegir foto"). */
+.ap-wallrow { align-items: center; flex-wrap: wrap; padding-bottom: 14px; }
+.ap-wp-prev {
+  width: 56px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin-right: 10px;
+}
+.ap-wallrow > .btn + .btn { margin-left: 8px; }
+.ap-wall-input { display: none; }
+.wl-chip {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  display: inline-block;
+}
+
+/* ============================ W5: espaciado sin gap (Mypal/FF78)
+   Firefox 78 no soporta gap en flexbox (recién desde FF84): cada
+   contenedor que usaba gap pasa a márgenes con el mismo resultado.
+   Si se agrega un gap nuevo, rompe espacio en XP — el chequeo de
+   scripts/check-js.mjs lo hace fallar. */
+
+/* filas: hueco entre hermanos */
+.btn > * + * { margin-left: 8px; }
+.boot > * + * { margin-left: 10px; }
+.form-err > * + * { margin-left: 8px; }
+.auth-alt > * + * { margin-left: 6px; }
+.toast > * + * { margin-left: 8px; }
+.search-pill > * + * { margin-left: 8px; }
+.chat-item > * + * { margin-left: 12px; }
+.ci-top > * + * { margin-left: 8px; }
+.ci-bot > * + * { margin-left: 8px; }
+.res-item > * + * { margin-left: 12px; }
+.res-item > .ri-check { margin-left: auto; }   /* vuelve el empuje a la derecha */
+.m-search > * + * { margin-left: 8px; }
+.b-file > * + * { margin-left: 10px; }
+.b-meta > * + * { margin-left: 4px; }
+.reply-bar > * + * { margin-left: 10px; }
+.comp-row > * + * { margin-left: 8px; }
+.rec-bar > * + * { margin-left: 10px; }        /* manda sobre .comp-row (misma clase) */
+.react-picker > * + * { margin-left: 1px; }
+.ap-row > * + * { margin-left: 8px; }
+
+/* columnas */
+.field > * + * { margin-top: 6px; }
+.toasts > * + * { margin-top: 8px; }
+.composer > * + * { margin-top: 6px; }         /* reply-bar | comp/rec-bar */
+
+/* side-head: logo a la izquierda; [+]/estado a la derecha (W8) */
+.side-head > * + * { margin-left: 4px; }
+.side-head > .icon-btn { margin-left: auto; }
+/* W22: solo el PRIMER botón empuja a la derecha; el siguiente queda
+   pegado (antes los dos auto repartían el espacio y el ＋ flotaba). */
+.side-head > .icon-btn + .icon-btn { margin-left: 4px; }
+
+/* chat-head: .back está oculto en escritorio, así que el avatar va pegado
+   al borde (su margen es 0 y back, cuando aparece, pone 10 de hueco);
+   el ws-pill conserva margin-left:auto */
+.chat-head > * + * { margin-left: 10px; }
+.chat-head > .av-wrap { margin-left: 0; }
+.chat-head > .back { margin-right: 10px; }
+.chat-head > .ws-pill { margin-left: auto; }
+
+/* wrap: margin-right en TODOS evita sangrías al pasar de fila
+   (con gap el inicio de fila quedaba alineado) */
+.b-reacts > * { margin-right: 4px; }
+.g-chips > * { margin-right: 6px; }
+.ap-swatches > * { margin-right: 10px; }
+.ap-walls > * { margin-right: 8px; }
+
+/* hijos con texto: el nodo de texto no admite margen propio, así que
+   el hueco lo pone el elemento contiguo */
+.b-voice > svg { margin-right: 8px; }
+.ap-wl > .wl-chip { margin-right: 6px; }
+.g-chip > button { margin-left: 4px; }
+
+/* acciones del mensaje: el picker es absolute y no debe recibir margen
+   (gap no afectaba a los hijos fuera del flujo) */
+.b-actions > .b-act + .b-act { margin-left: 3px; }
+
+/* ============================ W6: usuario, perfil y ajustes ============================ */
+
+/* ---- mensajes: columna centrada de hasta 820px (chat legible en pantallas grandes) ---- */
+.msgs > * {
+  width: 100%;
+  max-width: 820px;
+  align-self: center;
+}
+.msgs > .day-pill,
+.msgs > .load-older { width: auto; max-width: none; }
+
+/* ---- panel de usuario (pie del sidebar; W9: franja más oscura como Discord) ---- */
+.user-panel {
+  display: flex;
+  align-items: center;
+  padding: 6px 6px 6px 8px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  flex: none;
+}
+.up-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  border-radius: 8px;
+  transition: background .12s;
+}
+.up-main:hover { background: var(--panel2); }
+.up-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-left: 8px;
+}
+.up-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.up-status {
+  font-size: 12px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-panel > .icon-btn {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  margin-left: 2px;
+}
+
+/* ---- perfil de otro usuario: panel derecho (ensancha el chat al abrirse) ---- */
+.profile-panel {
+  width: 300px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  animation: pp-in .18s ease-out;
+}
+@keyframes pp-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+.pp-head {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 8px 0 14px;
+  background: var(--header);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.pp-head b { flex: 1; font-size: 15px; }
+.pp-loading {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--t2);
+  font-size: 14px;
+}
+.pp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 16px 8px;
+  text-align: center;
+}
+.avatar.pp-av {
+  width: 96px;
+  height: 96px;
+  font-size: 34px;
+}
+.pp-name {
+  margin-top: 12px;
+  font-size: 19px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.pp-user { font-size: 14px; color: var(--t2); }
+.pp-pill {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--t1);
+  font-size: 12.5px;
+}
+.pp-bio {
+  margin-top: 12px;
+  font-size: calc(14px * var(--fs));
+  line-height: 1.55;
+  color: var(--t1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pp-rows { margin-top: 14px; text-align: left; }
+.pp-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.pp-row b {
+  flex: none;
+  margin-right: 10px;
+  color: var(--t2);
+  font-weight: 500;
+}
+.pp-row span { text-align: right; min-width: 0; }
+.pp-foot { flex: none; padding: 12px 16px 16px; }
+
+/* XP mide 1024px: ahí el panel se superpone en vez de aplastar el chat */
+@media (max-width: 1100px) {
+  .profile-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(320px, 100%);
+    z-index: 30;
+    box-shadow: var(--shadow);
+  }
+}
+
+/* ---- cabeceras clicables y nombres de remitente como botón de perfil ---- */
+.chat-head .clickable { cursor: pointer; }
+.chat-head .ch-col.clickable:hover .ch-name { color: var(--accent); }
+.b-sender button {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.b-sender button:hover { text-decoration: underline; }
+
+/* ---- modal Ajustes (W9): nav lateral estilo Discord + cuerpo scrollable ----
+   W10: ALTURA FIJA (no max-height): la ventana no cambia de tamaño al
+   pasar de pestaña; para eso existe el scroll del cuerpo y de la nav. */
+.modal.settings {
+  width: min(640px, 100%);
+  height: min(660px, calc(100vh - 40px));
+}
+.modal.meprof { width: min(430px, 100%); }
+.modal.confirm { width: min(400px, 100%); }
+.modal.settings,
+.modal.meprof,
+.modal.confirm {
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+}
+.modal.settings > header,
+.modal.meprof > header,
+.modal.confirm > header { flex: none; }
+
+/* la nav y el cuerpo comparten la columna scrollable */
+.st-cols {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.modal.settings .m-tabs {
+  flex: none;
+  width: 176px;
+  flex-direction: column;
+  align-items: stretch;
+  border-bottom: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  padding: 8px;
+  overflow-y: auto;
+}
+.st-group {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--t2);
+  padding: 14px 8px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-group:first-child { padding-top: 4px; }
+.modal.settings .m-tab {
+  flex: none;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  margin-bottom: 1px;
+  font-size: 14.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background .12s, color .12s;
+}
+.modal.settings .m-tab:hover { background: var(--accent-wash, var(--panel2)); color: var(--t1); }
+.modal.settings .m-tab.on {
+  background: var(--panel2);
+  color: var(--t0);
+  font-weight: 600;
+  border-bottom: 0;
+}
+.modal.settings .st-body { flex: 1; min-width: 0; }
+.st-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--t0);
+  padding: 16px 16px 2px;
+}
+/* W9: en pantalla chica la nav lateral pasa a barra superior deslizable
+   (va DESPUÉS de los estilos de arriba para poder sobrescribirlos) */
+@media (max-width: 760px) {
+  .st-cols { flex-direction: column; }
+  .modal.settings .m-tabs {
+    width: auto;
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .st-group { display: none; }
+  .modal.settings .m-tab { margin-bottom: 0; padding: 9px 12px; }
+}
+.st-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+
+/* secciones de ajustes */
+.st-sec { padding: 14px 16px 6px; }
+.st-sec + .st-sec { border-top: 1px solid var(--border); }
+.st-h {
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--t2);
+}
+.st-hint {
+  margin: -2px 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t2);
+}
+.st-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+.st-row + .st-row { border-top: 1px solid var(--border); }
+.st-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-right: 12px;
+}
+.st-col b { font-size: 14px; font-weight: 600; }
+.st-col span { font-size: 12.5px; line-height: 1.45; color: var(--t2); }
+/* W50: lista de descargas guardadas */
+.dl-list { margin-top: 4px; }
+.dl-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.dl-item:first-child { border-top: 0; }
+.dl-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-right: 10px;
+}
+.dl-info b {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dl-info span { font-size: 11.5px; color: var(--t2); }
+.dl-item .btn-sm { flex: none; margin-right: 4px; }
+.dl-empty { padding: 10px 0; color: var(--t2); font-size: 13px; }
+.st-err { margin-bottom: 10px; }
+.st-ok { font-size: 13px; font-weight: 600; color: var(--ok); }
+.st-btns { display: flex; }
+.st-btns > * + * { margin-left: 8px; }
+.st-btns .btn { flex: 1; min-width: 0; width: auto; padding: 0 10px; }
+
+/* interruptores (solo transiciones de color: FF78-safe) */
+.tgl {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  cursor: pointer;
+}
+.tgl input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.tgl-track {
+  display: block;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 12px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  transition: background .15s, border-color .15s;
+}
+.tgl-knob {
+  display: block;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--t2);
+  transition: transform .15s, background .15s;
+}
+.tgl input:checked + .tgl-track {
+  /* W45: el knob blanco necesita 3:1; accent-d lo cumple en ambos temas. */
+  background: var(--accent-d);
+  border-color: var(--accent-d);
+}
+.tgl input:checked + .tgl-track .tgl-knob {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+/* atajos de teclado */
+.kbd-row {
+  display: flex;
+  align-items: center;
+  padding: 7px 0;
+  font-size: 14px;
+}
+.kbd-row + .kbd-row { border-top: 1px solid var(--border); }
+.kbd {
+  display: inline-block;
+  flex: none;
+  margin-right: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--panel2);
+  color: var(--t1);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* zona de peligro + botón destructivo */
+.danger-zone {
+  padding: 12px;
+  border: 1px solid rgba(230, 73, 73, .45);
+  background: rgba(230, 73, 73, .07);
+  border-radius: 10px;
+}
+.danger-zone p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t2);
+}
+.danger-zone b { color: var(--err); }
+.btn-danger { background: var(--err); color: #fff; }
+.btn-danger:hover { background: var(--err); opacity: .9; }
+.btn-sm { min-height: 34px; padding: 0 12px; font-size: 13.5px; }
+.btn-full { width: 100%; }
+
+/* caja de confirmación (logout / eliminar cuenta) */
+.cf-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 4px;
+}
+.cf-text {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+/* mi perfil (editar nombre/estado/bio/foto) */
+.mp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 16px 4px;
+}
+.mp-presets {
+  display: flex;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+}
+.mp-presets > * { margin: 0 6px 6px 0; }
+.ap-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  color: var(--t2);
+  font-size: 13px;
+  transition: border-color .12s, color .12s;
+}
+.ap-chip.on {
+  border-color: var(--accent);
+  background: var(--accent-wash, transparent);
+  color: var(--t1);
+  font-weight: 600;
+}
+
+/* W9: puntito de estado dentro de cada preset (colores Discord).
+   W10: ya no existe "Sin estado" (el default es En línea). */
+.sdot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--t2);
+  margin-right: 7px;
+  flex: none;
+}
+.sdot.sd-online { background: var(--online); }
+.sdot.sd-busy { background: var(--st-busy); }
+.sdot.sd-dnd { background: var(--st-dnd); }
+.sdot.sd-off { background: var(--st-off); }
+
+/* ---- tamaño de letra (fm.font → html[data-font] → --fs) ----
+   Escala todo lo que se lee (mensajes, lista, cabecera, composer) sin
+   romper medidas fijas: en "Normal" el calc() devuelve el valor original. */
+html { --fs: 1; }
+html[data-font="small"] { --fs: .9; }
+html[data-font="large"] { --fs: 1.16; }
+body { font-size: calc(15px * var(--fs)); }
+.b-text { font-size: calc(14.5px * var(--fs)); line-height: calc(19.5px * var(--fs)); }
+.b-sender { font-size: calc(13px * var(--fs)); }
+.br-name { font-size: calc(12.5px * var(--fs)); }
+.br-text { font-size: calc(13px * var(--fs)); }
+.b-meta { font-size: calc(12px * var(--fs)); }
+.sys-msg { font-size: calc(12.5px * var(--fs)); }
+.ci-name { font-size: calc(15.5px * var(--fs)); }
+.ci-prev { font-size: calc(13.5px * var(--fs)); }
+.ch-name { font-size: calc(15.5px * var(--fs)); }
+.ch-status { font-size: calc(13px * var(--fs)); }
+.composer-input { line-height: calc(20px * var(--fs)); }
+.pp-name { font-size: calc(19px * var(--fs)); }
+
+/* ============================ W7: info del chat, menús, flotantes ==== */
+
+/* ---- perfil en ventana flotante (antes, panel derecho) ---- */
+.modal.pmodal { width: min(360px, 100%); }
+/* W8: ventanas chicas (cambiar correo / contraseña) */
+.modal.small { width: min(360px, 100%); }
+.modal.small .m-body { padding: 12px 16px 4px; }
+
+/* ---- panel derecho: info del chat activo ---- */
+.pp-body.pp-left {
+  text-align: left;
+  padding: 10px 14px 8px;
+}
+.mi-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--t2);
+  padding: 2px 2px 6px;
+}
+.mi-head b { font-size: 13.5px; color: var(--t1); }
+.mi-head i { font-style: normal; color: var(--online); }
+.mi-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 7px 4px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background .12s;
+}
+.mi-row:hover { background: var(--panel2); }
+.mi-col {
+  flex: 1;
+  min-width: 0;
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.mi-name-line {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+.mi-name-line .mi-name { min-width: 0; }
+.mi-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* W46: etiqueta [Admin] del grupo y ⋮ para administrar al miembro. */
+.mi-role {
+  flex: none;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.mi-more {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--t2);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s, background .12s, color .12s;
+}
+.mi-more .ic { transform: rotate(90deg); }
+.mi-row:hover .mi-more,
+.mi-row:focus-within .mi-more { opacity: 1; }
+.mi-more:hover { background: var(--panel2); color: var(--t1); }
+@media (hover: none) {
+  .mi-more { opacity: 1; }
+}
+.mi-row:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.mi-me {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  margin-left: 6px;
+}
+.mi-sub {
+  font-size: 12px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- menú contextual: reemplaza al del navegador (W7; W9: --float) ---- */
+.ctx-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--float);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  /* W45: si la lista no cabe en una pantalla baja, se desplaza en vez
+     de quedar cortada; también cubre el menú de escritorio a 360 px. */
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  animation: modal-in .12s ease-out;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: var(--t1);
+  font: inherit;
+  font-size: 13.5px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .12s;
+}
+/* W37b: icono del ítem (si lo trae) — sin gap (vetado en FF78) */
+.ctx-ic { flex: none; margin-right: 8px; color: var(--t2); }
+.ctx-item:hover .ctx-ic { color: var(--t1); }
+.ctx-item.danger .ctx-ic { color: var(--err); }
+.ctx-item + .ctx-item { margin-top: 1px; }
+.ctx-item:hover { background: var(--panel2); }
+.ctx-item.danger { color: var(--err); }
+.ctx-item.danger:hover { background: var(--err-bg); }
+/* W37b: en móvil/táctil el menú contextual es un BOTTOM SHEET abajo
+   (la barra flotante no sirve sin hover). Entra deslizando. */
+.ctx-menu.ctx-sheet {
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  width: auto;
+  min-width: 0;
+  border-radius: 12px 12px 0 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+  /* W45: en un teléfono horizontal (poca altura) la hoja se salía de la
+     pantalla y no se podía llegar a las últimas opciones. */
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  animation: sheet-up .18s ease-out;
+}
+@keyframes sheet-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+.ctx-sheet .ctx-item { padding: 12px 14px; font-size: 15px; }
+/* En táctil la toolbar flotante no tiene sentido (no hay hover):
+   las opciones del mensaje se piden con pulsación larga (menú abajo). */
+@media (pointer: coarse) {
+  .bubble:hover .b-actions,
+  .bubble:focus-within .b-actions { opacity: 0; pointer-events: none; }
+  /* W51: controles con dedo, no con puntero fino */
+  .v-btn { width: 36px; height: 36px; }
+  .v-bar { padding: 4px 6px; }
+  .v-center { width: 62px; height: 62px; }
+  .au-btn { width: 36px; height: 36px; }
+  .b-player .au-rate,
+  .b-afile .au-rate { min-width: 40px; height: 32px; padding: 0 9px; }
+}
+
+/* ---- W18: aviso anti-spam: pantalla completa, solo el botón la cierra.
+   Sin backdrop-filter (vetado en FF78); se apoya en rgba + panel sólido. */
+.spam-veil {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 200;                    /* por encima de modales (60) y menús (70) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .72);
+  animation: modal-in .14s ease-out;
+}
+.spam-box {
+  width: min(430px, 92vw);
+  padding: 28px 26px 24px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.spam-veil .spam-ic {
+  width: 48px;
+  height: 48px;
+  color: var(--st-busy);           /* ámbar de advertencia (idle) */
+  margin-bottom: 12px;
+}
+.spam-title {
+  margin: 0 0 10px;
+  font-size: 25px;
+  line-height: 1.2;
+  color: var(--t0);
+}
+.spam-text {
+  margin: 0 0 20px;
+  color: var(--t2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.spam-ok { min-width: 180px; }
+.spam-ok:disabled { opacity: .55; cursor: default; }
+
+/* ---- edición en línea del mensaje propio (W8) ---- */
+.b-edit { font-style: italic; font-size: 10.5px; opacity: .8; }
+.b-editform textarea { width: 100%; resize: vertical; min-height: 46px; }
+.bef-btns { display: flex; justify-content: flex-end; margin-top: 6px; }
+.bef-btns > * + * { margin-left: 8px; }
+
+/* ---- bios con markdown mínimo (W8): texto escapado + etiquetas propias ---- */
+.md-body code {
+  background: var(--panel2);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12.5px;
+}
+.md-body a { color: var(--accent); word-break: break-all; }
+.md-body b { font-weight: 700; }
+
+/* ---- Ajustes → Seguridad: botones al ancho de su texto (W8) ---- */
+.st-btns-left { justify-content: flex-start; }
+.st-btns-left > .btn { flex: none; }
+
+/* ---- W8: vista previa de imágenes con zoom ---- */
+.lightbox {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 12, .92);
+}
+.lightbox .lb-img {
+  max-width: 96vw;
+  max-height: 92vh;
+  user-select: none;
+  -moz-user-select: none;
+  transition: transform .12s ease-out;
+}
+.lightbox .lb-img:active { transition: none; }  /* sin "resbalón" al arrastrar */
+.lb-close {
+  position: absolute;
+  top: 12px; right: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, .35);
+}
+.lb-close:hover { background: rgba(0, 0, 0, .55); color: #fff; }
+.lb-hint {
+  position: absolute;
+  bottom: 16px; left: 0; right: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, .75);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+/* W22: la ayuda va dentro de una píldora (su "cuadro") para que se lea
+   sobre cualquier imagen; el template la oculta al hacer zoom. */
+.lb-pill {
+  display: inline-block;
+  background: rgba(0, 0, 0, .6);
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, .85);
+}
+
+/* ================= W11: subida con círculo de progreso =================
+   Sin conic-gradient (FF78 no lo tiene): SVG con stroke-dashoffset
+   actualizado desde el estado, sin transiciones ni propiedades prohibidas. */
+
+.b-upmedia { position: relative; }
+.b-upmedia .b-img { opacity: .55; }          /* la miniatura queda apagada */
+
+/* círculo centrado sobre la miniatura de la imagen (W23: ✕ DENTRO) */
+.up-ov {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 64px; height: 64px;
+  margin: -32px 0 0 -32px;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+/* el anillo es la capa de fondo; el % y el ✕ van centrados encima */
+.up-ov .up-c { position: absolute; left: 0; top: 0; }
+/* falló: sin anillo, disco oscuro con el ↻ en el centro */
+.up-ov.is-fail { background: rgba(0, 0, 0, .55); border-radius: 50%; }
+.up-ov.is-fail .up-btn { color: #ffd9d9; }
+.up-c { width: 100%; height: 100%; display: block; }
+.up-c-bg { fill: rgba(0, 0, 0, .45); stroke: rgba(255, 255, 255, .35); stroke-width: 3; }
+.up-c-fg {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform: rotate(-90deg);                 /* arranca arriba, gira a favor */
+  transform-origin: 50% 50%;
+}
+.up-pct {
+  position: relative;
+  margin-bottom: 2px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+}
+/* cancelar (en vuelo) / reintentar (falló) DENTRO del círculo */
+.up-btn {
+  position: relative;
+  width: 26px; height: 26px;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  cursor: pointer;
+  flex: none;
+  pointer-events: auto;      /* .up-ov anula los punteros: el ✕ debe clicar */
+}
+.up-btn:hover { background: rgba(0, 0, 0, .78); }
+
+/* archivos y notas de voz: fila con circulito chico (W23: ✕ DENTRO) */
+.b-upfile { position: relative; }
+.b-upfile .bf-size.is-err { color: #ff9b9b; }
+.up-slot {
+  position: relative;
+  width: 30px; height: 30px;
+  flex: none;
+}
+.b-upvoice .au-btn { position: relative; }
+.up-btn-static {
+  flex: none;
+  width: 26px; height: 26px;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .3);
+  color: inherit;
+  cursor: pointer;
+}
+.up-btn-static:hover { background: rgba(0, 0, 0, .5); }
+/* ✕/↻ centrado dentro del anillo chico (30px → botón de 22) */
+.up-slot .up-btn-static,
+.b-upvoice .au-btn .up-btn-static {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 22px; height: 22px;
+  margin: -11px 0 0 -11px;
+  background: rgba(0, 0, 0, .45);
+  color: #fff;
+}
+.up-slot .up-btn-static:hover,
+.b-upvoice .au-btn .up-btn-static:hover { background: rgba(0, 0, 0, .7); }
+
+/* video adjunto → player inline (el archivo no es "cosa de archivos") */
+.b-video { margin: 2px 0; }
+.b-vid {
+  display: block;
+  max-width: 360px;
+  width: 100%;
+  max-height: 340px;
+  border-radius: 6px;
+  background: #000;
+}
+/* W51: marco reservado con la resolución del server (sin aspect-ratio,
+   vetado en FF78). El video se ajusta dentro; el hueco ya está pintado
+   desde el primer render, así no salta al llegar los metadatos. */
+.b-video.vbox {
+  width: 360px;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #000;
+}
+.b-video.vbox > .b-vid {
+  position: absolute;
+  left: 0; top: 0;
+  width: 100%; height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  object-fit: contain;
+}
+
+/* tira de caption en el composer (imagen/video elegidos) */
+.cap-strip {
+  display: flex;
+  align-items: center;
+  background: var(--panel2);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 6px 8px 6px 10px;
+  margin-bottom: 6px;
+}
+.cap-strip > * + * { margin-left: 10px; }
+.cs-thumb {
+  width: 40px; height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: none;
+}
+.cs-ic { flex: none; color: var(--t2); }
+/* W23: ficha con nombre arriba y tipo + tamaño abajo */
+.cs-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cs-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cs-meta {
+  display: flex;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--t2);
+}
+.cs-meta > * + * { margin-left: 8px; }
+.cap-strip .icon-btn { flex: none; }
+
+/* soltar archivos sobre la conversación */
+.drop-hint {
+  position: fixed;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  background: var(--panel2);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  padding: 18px 26px;
+  font-size: 14px;
+  color: var(--t1);
+  pointer-events: none;
+}
+
+/* descarga directa en el lightbox */
+.lb-dl {
+  position: absolute;
+  top: 12px; right: 52px;
+  color: #fff;
+  background: rgba(0, 0, 0, .35);
+}
+.lb-dl:hover { background: rgba(0, 0, 0, .55); color: #fff; }
+
+/* ---------------- W13 ---------------- */
+
+/* grabación: onda animada (solo transform/opacity) */
+.rec-wave {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 22px;
+  min-width: 0;
+  overflow: hidden;
+}
+.rec-wave i {
+  flex: 1;
+  max-width: 3px;
+  height: 100%;
+  margin: 0 1px;
+  background: currentColor;
+  opacity: .7;
+  transform-origin: center;
+  animation: rwave .9s ease-in-out infinite;
+}
+.rec-wave i:nth-child(3n) { animation-delay: .15s; }
+.rec-wave i:nth-child(3n+1) { animation-delay: .3s; }
+@keyframes rwave {
+  0%, 100% { transform: scaleY(.18); }
+  50% { transform: scaleY(1); }
+}
+/* W24: con analyser real (.live) la onda la dibujan los picos del
+   micrófono: la animación falsa se apaga y el transform lo pone el JS. */
+.rec-wave.live i {
+  animation: none;
+  transition: transform .09s linear;
+}
+
+/* etiqueta de mensaje reenviado */
+.b-fwd {
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--meta-you);
+  margin-bottom: 2px;
+}
+.msg.mine .b-fwd { color: var(--meta-mine); }
+
+/* lista: fijado / silenciado */
+.ci-icons {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--t2);
+}
+.ci-icons .ic { margin-right: 4px; }
+.badge.muted { opacity: .55; }
+
+/* W37b: buscar en el chat como MODAL (antes era un panel lateral).
+   La lista de resultados se limita en alto y hace scroll. */
+.modal.search-modal { width: min(520px, 100%); display: flex; flex-direction: column; }
+.modal.search-modal .sp-body {
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: min(420px, 70vh);
+}
+.modal.search-modal .sp-body .search-pill { flex: none; margin-bottom: 10px; }
+.sp-res {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background .12s;
+}
+.sp-res:hover, .sp-res:focus { background: var(--panel2); }
+.spr-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  margin-bottom: 2px;
+}
+.spr-top b { color: var(--t0); }
+.spr-time { color: var(--t2); }
+.spr-text {
+  display: block;
+  font-size: 13px;
+  color: var(--t1);
+  word-break: break-word;
+}
+.sp-empty {
+  padding: 24px 10px;
+  text-align: center;
+  color: var(--t2);
+  font-size: 13px;
+}
+
+/* salto a un mensaje buscado: destello (solo opacity) */
+.msg.flash .bubble { position: relative; }
+.msg.flash .bubble::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  border-radius: inherit;
+  background: var(--accent-wash);
+  pointer-events: none;
+  animation: msg-flash 1.8s ease-out forwards;
+}
+@keyframes msg-flash {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* modal de reenvío */
+.results.fwd-list { max-height: 320px; }
+@media (max-width: 560px) {
+  .rec-hint { display: none; }
+  .emo-picker { right: 4px; width: 300px; }
+  .results.fwd-list { max-height: 60vh; }
+}
+
+/* ============ W15: descarga de medios (mediadl.js) ============
+   El marco .mframe envuelve imagen/video/audio/archivo; el overlay
+   .mf-ov (anillo de progreso + ✕ de cancelar / ↻ de reintento) lo crea
+   la directiva v-dl en memoria. Reutiliza los círculos .up-c de subida. */
+.mframe { position: relative; }
+
+.mf-ov {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  pointer-events: none;       /* W51: el anillo no bloquea el play del video */
+}
+.mf-ov .mf-btn { pointer-events: auto; }
+.mf-ov .up-c { width: 48px; height: 48px; }
+.mf-ov .up-c-bg { fill: rgba(0, 0, 0, .55); }
+/* solo gira cuando el server no manda el total (sin lengthComputable);
+   con total conocido el arco avanza y el anillo queda quieto */
+@keyframes dlspin { to { transform: rotate(360deg); } }
+.dl-on .mf-ov .up-c.indet { animation: dlspin 1s linear infinite; }
+
+/* W23: el ✕/↻ va DENTRO del anillo (centrado sobre él) */
+.mf-btn {
+  position: absolute;
+  left: 50%; top: 50%;
+  margin: -17px 0 0 -17px;
+  width: 34px; height: 34px;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .6);
+  color: #fff;
+  cursor: pointer;
+}
+.mf-btn:hover { background: rgba(0, 0, 0, .8); }
+
+/* miniatura difuminada como previsualización mientras baja el original */
+.dl-blur {
+  filter: blur(14px);
+  transform: scale(1.03);        /* tapa el halo del blur en los bordes */
+  opacity: .9;
+}
+/* en curso: original apagado detrás del anillo */
+.dl-on .b-img, .dl-on .b-vid { opacity: .55; }
+/* falló / cancelado: sin anillo, el ✕ pasa a ↻ de reintento */
+.dl-err .mf-ov { background: rgba(0, 0, 0, .35); }
+.dl-err .mf-ov .up-c { display: none; }
+.dl-err .mf-btn { background: rgba(0, 0, 0, .78); color: #ffd9d9; }
+/* terminado: el overlay desaparece (además mediaUrl() sirve el blob) */
+.dl-done .mf-ov { display: none; }
+
+/* filas chicas (archivo / nota de voz): circulito acorde al tamaño */
+.b-file.mframe .mf-ov .up-c,
+.b-player.mframe .mf-ov .up-c { width: 30px; height: 30px; }
+.b-file.mframe .mf-btn {
+  width: 22px; height: 22px;
+  margin: -11px 0 0 -11px;
+}
+/* W22/W23: en el player el anillo de descarga vive EN el slot del play
+   (izquierda, centrado en los 32px del play) y el ✕/↻ ocupa ese mismo
+   centro; sin velo oscuro sobre la onda. */
+/* El overlay va inset:0 sobre el PADDING-box de la fila (padding 2px) y el
+   slot del play arranca en el content-box: son 2px extra que hay que sumar
+   al centrar el anillo (30 en 32 → +1) y el ✕ (22 en 32 → +5). */
+.b-player .mf-ov { justify-content: flex-start; }
+.b-player .mf-ov .up-c { margin-left: 3px; }
+.b-player .mf-btn {
+  left: 7px;
+  top: 50%;
+  margin: -11px 0 0 0;
+  width: 22px; height: 22px;
+}
+.b-player.dl-err .mf-ov { background: none; }
+
+/* ================= W27: Personas/Amigos, ⋮, foto de grupo, editor de foto
+   Sin gap/:has/backdrop-filter/accent-color (FF78); espaciado con
+   márgenes y transiciones solo en transform/opacity. ================= */
+
+/* ---- Personas en el centro (W27: reemplaza la bienvenida) ----
+   El panel mantiene su medida cómoda y se centra en el ancho del chat. */
+.people-pane {
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow-y: auto;
+}
+.people-pane .side-open { position: fixed; top: 8px; left: 8px; z-index: 5; }
+.people-pane .ppl {
+  flex: none;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 10px 16px 24px;
+}
+.people-pane .ppl-tabs { padding: 2px 0 0; }
+/* W27h: aire arriba de la barra de búsqueda (Activos y Solicitudes) */
+.people-pane .ppl-find { padding: 10px 0; }
+.people-pane .ppl-list { padding: 4px 0 10px; }
+
+/* ---- W27b: búsqueda más gruesa en Personas (pide el usuario) ---- */
+.search-pill.ppl-find {
+  height: 40px;
+  padding: 0 14px;
+  /* W27h: aire arriba de la barra (Activos y Solicitudes) — margin,
+     no padding: la píldora es de 40px con box-sizing border-box */
+  margin-top: 18px;
+}
+.search-pill.ppl-find input { font-size: 14.5px; }
+
+/* ---- W27b: CTA "Buscar personas" en Solicitudes (abre el mismo
+   modal que el ＋ del sidebar) ---- */
+.ppl-cta { padding: 2px 0 8px; }
+.ppl-cta .btn .ic { margin-right: 6px; }
+
+/* ---- W27b: espacio entre icono y texto (botones del editor y del
+   pie "Editar perfil"; antes quedaban pegados) ---- */
+.av-ed-row .btn .ic { margin-right: 6px; }
+.m-foot .btn .ic { margin-right: 6px; }
+
+/* ---- W27c: opción "Personas" en el PANEL DE CHATS (sidebar), arriba
+   de la lista de chats. Resaltada cuando Personas es la pantalla
+   activa (centro en escritorio; completa en móvil) ---- */
+.side-people {
+  display: flex;
+  align-items: center;
+  flex: none;
+  margin: 2px 10px 6px;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--t1);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.side-people:hover { background: var(--row-hover); }
+.side-people.on { background: var(--panel2); color: var(--accent); }
+.side-people .ic { margin-right: 8px; color: var(--t2); }
+.side-people.on .ic { color: var(--accent); }
+/* W29a: globo rojo de solicitudes recibidas en "Personas" (tope 9+) */
+.side-badge {
+  margin-left: auto;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #c62828;
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-style: normal;
+  line-height: 17px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* ---- W27b: ficha de solo lectura en "Tu perfil" (la edición vive en
+   su propio modal: .mp-edit) ---- */
+.mp-view { text-align: center; padding: 6px 0 2px; }
+.mp-view .av-wrap { position: relative; display: inline-block; }
+.avatar.mp-av { width: 88px; height: 88px; font-size: 30px; }
+.avatar.mp-av .fox { width: 58px; height: 58px; }
+.mp-view .pp-pill { display: inline-block; }
+.mp-view .pp-bio { margin: 10px auto 0; max-width: 340px; }
+.modal header .mp-edit-open { margin-left: auto; }
+
+/* ---- W27b: móvil — Personas a pantalla completa con botón de volver
+   (la entrada es la opción del sidebar, visible en todas las
+   plataformas) ---- */
+.people-pane .ppl-back-btn { margin: 6px 0 0 8px; }
+@media (max-width: 760px) {
+  .app-shell.show-people .sidebar { display: none; }
+  .app-shell.show-people .chat-pane { display: flex; }
+}
+
+.ppl-badge {
+  position: absolute;
+  top: 1px; right: 6px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent); color: var(--on-accent);
+  font-size: 10.5px; font-style: normal;
+  line-height: 16px; text-align: center;
+}
+
+/* ---- panel Personas/Amigos ---- */
+.ppl {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ppl-tabs {
+  display: flex;
+  flex: none;
+  padding: 6px 10px 0;
+}
+.ppl-tab {
+  position: relative;
+  flex: 1;
+  height: 34px;
+  border: 0;
+  background: none;
+  color: var(--t2);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color .12s;
+}
+.ppl-tab.on { color: var(--t1); border-bottom-color: var(--accent); }
+.ppl-tab:hover { color: var(--t1); }
+.ppl-tab .ppl-badge { top: -4px; right: 10px; }
+.ppl-find { padding: 8px 10px; flex: none; border-bottom: 0; }
+.ppl-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 10px;
+}
+.ppl-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 7px 6px;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  transition: background .12s;
+}
+.ppl-row:hover { background: var(--row-hover); }
+.ppl-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 4px;
+}
+.ppl-col b {
+  font-size: 13.5px; font-weight: 600; color: var(--t1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ppl-col i {
+  font-style: normal; font-size: 12px; color: var(--t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ppl-acts { flex: none; display: flex; align-items: center; }
+.ppl-acts > * + * { margin-left: 6px; }
+
+/* botón pequeño (acciones de fila) */
+.btn-xs {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+
+/* ---- encabezados de sección En línea / Desconectados / Enviados ---- */
+.mi-sec {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t2);
+  padding: 10px 6px 4px;
+}
+
+/* ---- ⋮ de la lista (chat-item) y de las cabeceras (pp-more) ----
+   Los tres puntos se pintan VERTICALES rotando el sprite i-dots. */
+.ci-menu {
+  flex: none;
+  margin-left: 6px;
+  width: 26px; height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--t2);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity .12s, background .12s;
+}
+.ci-menu .ic, .pp-more .ic { transform: rotate(90deg); }
+.chat-item:hover .ci-menu,
+.chat-item.active .ci-menu,
+.ci-menu:focus {
+  opacity: 1;
+}
+.ci-menu:hover { background: var(--row-hover); color: var(--t1); }
+@media (hover: none) {
+  .ci-menu { opacity: 1; }
+}
+/* el ⋮ de la ventana de perfil se alinea a la derecha junto a ✕
+   (en .pp-head el <b> con flex:1 ya empuja los botones al final) */
+.modal header .pp-more { margin-left: auto; }
+
+/* ---- foto del grupo en la info (solo owner/admin la cambia) ---- */
+.avatar.av72 { width: 72px; height: 72px; font-size: 26px; }
+.grp-av {
+  position: relative;
+  width: 72px;
+  margin: 8px auto 12px;
+}
+.grp-av-btn {
+  position: absolute;
+  right: -6px; bottom: -4px;
+  width: 30px; height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 3px solid var(--panel);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.grp-av-btn:hover { background: var(--accent-hover); }
+
+/* ---- botón "Ajustar foto" en la ficha del avatar ---- */
+.avatar-pick .av-edit {
+  position: absolute;
+  left: -2px; bottom: -2px;
+  width: 30px; height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel2);
+  color: var(--t2);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.avatar-pick .av-edit:hover { color: var(--t1); border-color: var(--t2); }
+
+/* ---- editor de foto: encuadre + rotación ---- */
+.av-ed {
+  width: 240px;
+  max-width: 100%;
+  margin: 0 auto 18px;
+  text-align: center;
+}
+.av-ed-hint {
+  font-size: 12px;
+  color: var(--t2);
+  margin: 0 0 8px;
+}
+.av-ed-cv {
+  display: block;
+  width: 220px; height: 220px;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+  cursor: grab;
+  touch-action: none;
+}
+.av-ed-cv:active { cursor: grabbing; }
+.av-ed-zoom { width: 220px; max-width: 100%; margin: 14px auto 4px; }
+.av-ed-row { display: flex; margin-top: 8px; }
+.av-ed-row .btn { flex: 1; min-width: 0; }
+.av-ed-row .btn + .btn { margin-left: 8px; }
+
+/* --------------------------------------------------- W28h: llamadas
+
+   .callbox: panel flotante inferior-derecha (entrante o en curso), con
+   video remoto, PIP local y controles. El pulsar de "Contestar" en la
+   entrante anima solo con transform (FF78: sin filter/backdrop). */
+.callbox { position: fixed; right: 18px; bottom: 18px; z-index: 62;
+  min-width: 248px; max-width: 320px; padding: 12px;
+  background: var(--float); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 26px rgba(0, 0, 0, .5); }
+.callbox.incoming { border-color: var(--accent); }
+.call-head { display: flex; align-items: center; }
+.call-head > * + * { margin-left: 10px; }
+.call-col { display: flex; flex-direction: column; min-width: 0; }
+.call-col b { color: var(--t0); font-size: 14px; }
+.call-state { color: var(--t2); font-size: 12px; }
+.call-remote { display: block; width: 100%; max-height: 240px; margin-top: 10px;
+  border-radius: 8px; background: #000; object-fit: cover; }
+.call-pip { position: absolute; right: 24px; top: 66px; width: 88px;
+  border-radius: 6px; background: #000; object-fit: cover; }
+.call-ctl { display: flex; justify-content: center; margin-top: 10px; }
+.call-ctl > * + * { margin-left: 12px; }
+.callbox .icon-btn { background: var(--panel2); }
+.call-accept { background: var(--online); }
+.call-accept:hover { background: #1e8e4c; }
+.call-reject { background: var(--panel2); color: var(--t1); }
+.call-reject:hover { background: var(--err); color: #fff; }
+.callbox .call-hang { background: var(--err); color: #fff; }
+.callbox .call-hang:hover { background: #c22; }
+@keyframes callpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+.callbox.incoming .call-accept { animation: callpulse 1.4s ease-in-out infinite; }
+
+/* ================== W29d: spoilers ================== */
+/* Capa opaca que tapa TODA la burbuja (texto, medios y acciones) hasta
+   que se toca. Sin backdrop-filter (FF78): fondo sólido translúcido. */
+.b-spoil-ov {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: row;   /* W29j: "[ojo] Texto" en UNA línea: en dos
+                            líneas el texto caía sobre la hora */
+  align-items: flex-start;   /* W29k: rótulo ARRIBA, nunca sobre .b-meta */
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.3;
+  padding: 4px 8px;
+  text-align: center;
+  cursor: pointer;
+}
+.b-spoil-ov .ic { width: 20px; height: 20px; }
+.b-spoil-ov span {
+  margin-left: 4px;    /* sin gap: FF78 */
+  margin-top: 2px;     /* centrado a ojo contra el icono de 20 px */
+  white-space: nowrap; /* W29k: SIEMPRE una línea (dos tapaban la hora) */
+}
+/* W29k: burbuja corta que quepa "[ojo] Mostrar Spoiler" sin cortar */
+.bubble.is-spoiled { min-width: 160px; }
+.b-spoil-ov:active { background: rgba(0, 0, 0, .84); }
+/* Mientras la capa tapa, el contenido NO se pinta (aunque sea con
+   opacidad reducida: sobre burbujas naranjas el texto asomaba).
+   W29h: la hora y las palomitas (.b-meta) NO se tapan: quedan
+   pintadas ENCIMA de la capa, en un color claro fijo para que se
+   lean sobre la capa oscura en cualquier tema. */
+.bubble.is-spoiled > *:not(.b-spoil-ov):not(.b-meta) { visibility: hidden; }
+.bubble.is-spoiled .b-meta {
+  position: relative;
+  z-index: 5;
+  color: rgba(255, 255, 255, .85);
+}
+/* Ojo + "Ocultar" del pie para volver a tapar (cuando ya se reveló) */
+.b-spoil-dot {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  padding: 0 6px;
+  margin-right: 4px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 16px;
+  opacity: .8;
+  cursor: pointer;
+}
+.b-spoil-dot span { margin-left: 3px; }
+.b-spoil-dot:hover { opacity: 1; }
+/* Miniatura de spoiler en la galería del panel de info */
+.pp-galimg { position: relative; }
+.gal-spoil {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  border-radius: 6px;
+}
+.gal-spoil .ic { width: 18px; height: 18px; }
+
+/* ================== W29e: hora 12/24 h ================== */
+.h12-select { width: 96px; flex: none; }
+/* W40: desplegable del estilo de emojis (Nativo/Google/Twemoji) */
+.emo-select { width: 168px; flex: none; }
+
+/* ============ W29f: cifrado E2E en el panel de info ============ */
+.pp-e2e {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding: 10px 16px 14px;
+}
+.pp-e2e-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+/* W39: `.pp-e2e-txt` (título + estado) ya no existe: el panel solo
+   queda la nota centrada de la sección siguiente. */
+/* W30d: aviso de cifrado pendiente (el par aún no publica su clave) */
+.pp-e2e-pend {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--t2);
+  background: var(--accent-wash);
+  border-radius: 8px;
+}
+.pp-e2e-pend .ic { color: var(--accent); flex: none; margin-right: 6px; }
+.pp-e2e-pend span { min-width: 0; }
+/* W39: el panel ya no muestra estado ni botones — solo la nota
+   centrada "Cifrado de extremo a extremo" con la llave a la izquierda. */
+.pp-e2e-center { justify-content: center; color: var(--t2); }
+.pp-e2e-center .ic { color: var(--accent); margin-right: 6px; flex: none; }
+.pp-e2e-center b { font-size: 13px; font-weight: 600; }
+
+/* W39: modal del código de verificación E2E — números bien grandes y
+   centrados para poder compararlos de un vistazo con el contacto. */
+.sas-body { padding: 20px 22px 24px; text-align: center; }
+.sas-ic { color: var(--accent); width: 26px; height: 26px; }
+.sas-code {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 5px;
+  color: var(--t0);
+  margin: 14px 0 10px;
+}
+.sas-hint { font-size: 13px; line-height: 1.45; color: var(--t2); }
+
+/* ============================ W36: lote de optimización y detalle ============================ */
+
+/* ---- W36b: el GIF va dentro del mensaje — burbuja transparente.
+   W42: la hora/palomitas salieron del encima del GIF: van en la
+   pastillita de la fila separada (regla compartida en W42) ---- */
+.msg .bubble.gif {
+  position: relative;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 3px;
+}
+.bubble.gif .b-media, .bubble.gif .b-img { border-radius: 12px; }
+
+/* ---- W36c: reproductor PROPIO de video ---- */
+.b-video { position: relative; cursor: pointer; }
+.v-center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px; height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity .2s;
+}
+.v-center:hover { background: rgba(0, 0, 0, .75); }
+.v-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .75));
+  color: #fff;
+  transition: opacity .2s;
+}
+.v-btn {
+  width: 28px; height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+.v-fs { margin-right: 6px; }        /* pantalla completa: abajo IZQUIERDA */
+/* W43: el volumen abre un pop-up VERTICAL por encima del botón — en
+   videos angostos el slider horizontal no cabía en la barra. La hora
+   se desvanece al abrirlo (transition sobre .v-time, W37d). */
+.v-vol {
+  position: absolute;
+  right: 6px;
+  bottom: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 6px 4px;
+  background: rgba(0, 0, 0, .8);
+  border-radius: 10px;
+}
+/* caja fija: el input gira dentro y el layout no se ensancha */
+.v-vol-vt { position: relative; display: block; width: 20px; height: 64px; }
+.v-vol-vt .v-slider {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  margin: 0;
+  transform: translate(-50%, -50%) rotate(-90deg);  /* arriba = más alto */
+}
+.v-vol .v-btn { margin-top: 4px; }
+.v-slider {
+  -moz-appearance: none;
+  appearance: none;
+  width: 72px;
+  height: 4px;
+  margin: 0 6px 0 2px;
+  background: rgba(255, 255, 255, .35);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.v-slider::-moz-range-thumb {
+  -moz-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+/* W37d: video con mime/decodificación rota → aviso claro con icono */
+.v-err {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 22px 14px;
+  background: var(--panel2);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--t2);
+  font-size: 13.5px;
+  text-align: center;
+  cursor: default;
+  animation: modal-in .18s ease-out;
+}
+.v-err .ic { width: 28px; height: 28px; margin-bottom: 8px; color: var(--warn, #e0a800); }
+.v-time {
+  font-size: 12px;
+  margin-right: 8px;
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.v-seek {
+  flex: 1;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  background: rgba(255, 255, 255, .25);
+  border-radius: 2px;
+}
+.v-seek i {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.v-meta {
+  position: absolute;
+  right: 8px;
+  bottom: 44px;
+  margin: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  z-index: 3;
+  transition: opacity .2s;
+}
+.v-meta .tick, .v-meta .b-time { color: #fff; }
+/* 1 s de inactividad reproduciendo → los controles desaparecen */
+.b-video.vhide .v-center,
+.b-video.vhide .v-bar,
+.b-video.vhide .v-meta { opacity: 0; pointer-events: none; }
+/* con video, la hora/palomitas de fuera NO se duplican (viven dentro) */
+.bubble.vid > .b-meta { display: none; }
+/* W43: en pantalla completa el marco ocupa TODA la pantalla y el video
+   se ajusta a ella (object-fit: contain, sin redondeo). El marco es
+   position:fixed (UA o esta regla) y las medidas son explícitas para
+   que height:100% del video tenga contra qué resolverse. */
+.b-video:fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: #000;
+}
+.b-video:fullscreen .b-vid {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  object-fit: contain;
+}
+
+/* ---- W36c: audio adjunto con player propio (play, barra, hora, velocidad) ---- */
+.b-afile { display: flex; align-items: center; min-width: 250px; }
+.b-afile .au-seek {
+  flex: 1;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+  cursor: pointer;
+  background: rgba(127, 127, 127, .25);
+  border-radius: 2px;
+}
+.b-afile .au-seek i {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.b-afile .au-rate { margin-left: 4px; }
+/* W51: la velocidad de las notas de voz no tenía estilo propio (sólo
+   la de audio adjunto). Un botón-pastilla consistente, con área táctil
+   suficiente y cifras tabulares para que no baile al cambiar 1×/1,5×. */
+.b-player .au-rate,
+.b-afile .au-rate {
+  flex: none;
+  min-width: 36px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  background: rgba(127, 127, 127, .14);
+  color: var(--t2);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.b-player .au-rate { margin-left: 6px; }
+.b-player .au-rate:hover,
+.b-afile .au-rate:hover {
+  background: var(--panel2);
+  border-color: var(--border);
+  color: var(--t1);
+}
+/* En burbuja propia (naranja) el gris de --t2 no contrasta: la
+   pastilla de velocidad/descarga pasa a blanco translúcido. */
+.msg.mine .b-player .au-rate,
+.msg.mine .b-afile .au-rate {
+  background: rgba(0, 0, 0, .18);
+  border-color: rgba(255, 255, 255, .2);
+  color: #fff;
+}
+.msg.mine .b-player .au-rate:hover,
+.msg.mine .b-afile .au-rate:hover {
+  background: rgba(0, 0, 0, .3);
+  border-color: rgba(255, 255, 255, .35);
+  color: #fff;
+}
+
+/* ---- W36e: la pelotica del modal "Tu perfil" al doble de tamaño ---- */
+.meprof .mp-view .av-wrap.on::after {
+  width: 22px; height: 22px;
+  border-width: 3px;
+}
+
+/* ---- W36j: panel del compositor de TAMAÑO FIJO + "pasar página" ---- */
+.st-panel {
+  height: 344px;
+  display: flex;
+  flex-direction: column;
+  transform-origin: 100% 100%;
+  animation: pageflip .25s ease-out;
+}
+@keyframes pageflip {
+  from { opacity: 0; transform: perspective(700px) rotateY(26deg); }
+  to { opacity: 1; transform: none; }
+}
+.pgflip-enter-active, .pgflip-leave-active {
+  transition: transform .2s ease, opacity .2s ease;
+}
+.pgflip-enter-from {
+  opacity: 0;
+  transform: perspective(700px) rotateY(24deg);
+  transform-origin: left center;
+}
+.pgflip-leave-to {
+  opacity: 0;
+  transform: perspective(700px) rotateY(-24deg);
+  transform-origin: right center;
+}
+.st-panel .emo-picker {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.st-panel .emo-picker .ep-body { flex: 1; height: auto; min-height: 0; }
+.st-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+.st-body .st-grid { max-height: none; }
+
+/* ---- W36a: stickers con Twemoji del sitio ---- */
+.st-e .emo { width: 34px; height: 34px; }
+
+/* ---- W36k: tiles de GIF con estrella de favorito ---- */
+.st-g-wrap { position: relative; display: inline-block; margin: 0 4px 4px 0; }
+.st-g-wrap .st-g { margin: 0; }
+.st-fav {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 20px; height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.st-g-wrap:hover .st-fav { opacity: 1; }
+.st-fav.on { opacity: 1; color: #ffd75e; }
+.st-sec {
+  margin: 8px 8px 2px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--t2);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+/* W36: la barra flotante del mensaje vive FUERA de la burbuja (encima):
+   la lista respira 40px arriba para que nunca quede recortada. */
+.msgs { padding-top: 40px; }

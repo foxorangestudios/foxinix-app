@@ -1,0 +1,69 @@
+/* Tema/acento guardados ANTES del primer pintado (sin parpadeo).
+   W10: IIFE — nada de esto puede escaparse a window (un `var t` global
+   acá adentro tapaba el import de t() de i18n con "dark").
+   W14: vive en un archivo propio (y no como <script> inline) para poder
+   servir una CSP estricta: script-src 'self' sin 'unsafe-inline'.
+   Clásico (sin type=module) a propósito: los módulos se difieren y el
+   tema tendría que aplicarse antes del primer pintado. */
+(function () {
+  try {
+    var t = localStorage.getItem('fm.theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    var a = localStorage.getItem('fm.accent');
+    if (a && /^#[0-9a-fA-F]{6}$/.test(a)) {
+      var n = parseInt(a.slice(1), 16);
+      var R = (n >> 16) & 255, G = (n >> 8) & 255, B = n & 255;
+      var r = Math.round(R * 0.72),
+          g = Math.round(G * 0.72),
+          b = Math.round(B * 0.72);
+      var root = document.documentElement.style;
+      root.setProperty('--accent', a);
+      root.setProperty('--accent-d', '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1));
+      root.setProperty('--accent-wash', 'rgba(' + R + ', ' + G + ', ' + B + ', .18)');
+    }
+    var w = localStorage.getItem('fm.wall');
+    if (w && /^#[0-9a-fA-F]{6}$/.test(w)) {
+      document.documentElement.style.setProperty('--wall', w);
+    }
+    /* W19: foto de fondo de la conversación (data-URL guardada por el
+       usuario) + sidebar contraído: mismo truco sin parpadeo. */
+    var wi = localStorage.getItem('fm.wallimg');
+    if (wi && wi.slice(0, 5) === 'data:') {
+      document.documentElement.style.setProperty('--wallimg', 'url("' + wi + '")');
+      document.documentElement.classList.add('wallimg');
+    }
+    /* W20: opacidad del velo y difuminado del fondo (antes eran fijos) */
+    var wd = localStorage.getItem('fm.wdim');
+    document.documentElement.style
+      .setProperty('--wall-dim', ((wd === null ? 50 : parseInt(wd, 10) || 0) / 100).toFixed(2));
+    var wb = localStorage.getItem('fm.wblur');
+    document.documentElement.style
+      .setProperty('--wall-blur', (parseInt(wb, 10) || 0) + 'px');
+    if (localStorage.getItem('fm.side') === '1') {
+      document.documentElement.classList.add('side-collapsed');
+    }
+    var f = localStorage.getItem('fm.font');
+    if (f === 'small' || f === 'large') document.documentElement.setAttribute('data-font', f);
+    /* W10: idioma de la interfaz antes del primer pintado (sin parpadeo) */
+    var lg = localStorage.getItem('fm.lang');
+    if (lg === 'en' || lg === 'es') document.documentElement.setAttribute('lang', lg);
+  } catch (e) {}
+})();
+
+/* W27f: el anillo de foco naranja solo al navegar con TECLADO (TAB):
+   al hacer clic, un botón no debe quedar con contorno (se ve como si
+   se presionara una tecla). :focus-visible no existe en FF78, así que
+   la modalidad se sigue con eventos: TAB → modo teclado; cualquier
+   puntero (ratón/tactil) lo apaga. La clase vive en <html> para que
+   el CSS la alcance desde el primer pintado. */
+(function () {
+  var kbOn = function (e) {
+    if (e.key === 'Tab') document.documentElement.classList.add('kb-focus');
+  };
+  var kbOff = function () {
+    document.documentElement.classList.remove('kb-focus');
+  };
+  document.addEventListener('keydown', kbOn, true);
+  document.addEventListener('mousedown', kbOff, true);
+  document.addEventListener('touchstart', kbOff, true);
+})();

@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+dist/
+build/
+*.spec
+.noop
+
+# Builds, dependencias y binarios (los instaladores van a GitHub Releases)
+desktop/src-tauri/target/
+desktop/node_modules/
+node_modules/
+desktop/releases/
+*.AppImage
+
+# Respaldos local/despliegue y caché de pruebas
+backups/
+.pytest_cache/
+*.log

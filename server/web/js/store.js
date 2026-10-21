@@ -1,0 +1,551 @@
+/* Estado global + router W22 (History API: rutas reales, sin #).
+   No importa api.js (sin ciclos). */
+const { reactive, watch } = Vue;
+
+function readLs(key) {
+  try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
+}
+
+export const store = reactive({
+  route: 'boot',          // boot | login | register | profile | verify | forgot | reset | app
+  hasSession: false,      // espejo de los tokens en localStorage
+  user: null,             // usuario público (scope full)
+  pendingEmail: '',       // correo enmascarado para la verificación
+  pendingInfo: null,      // {email_masked, resend_after, attempts_left, retry_after}
+
+  /* W27h: "Cargando…" del arranque: la pantalla principal se revela
+     cuando ya están la lista de chats, la gente (perfiles) y los
+     mensajes del chat inicial. */
+  booting: true,
+  /* W38: fase real del arranque — la pantalla de carga la muestra con
+     su barra de progreso y su texto ("Descargando los recursos…",
+     "Iniciando sesión…", …). La avanzan bootstrap() (api.js) y
+     bootAll() (views/chat.js) al terminar cada fase. */
+  bootPhase: 'resources',
+  /* ---- chat (W2) ---- */
+  chats: [],
+  activeChatId: 0,
+  /* W22: chat pendiente de abrir desde la URL (deep link o botón atrás):
+     {kind:'user'|'group', id} — lo resuelve actions.resolvePendingChat. */
+  pendingPath: null,
+  jumpMsg: 0,             // W22: id de mensaje al que saltar (?m= en la URL)
+  /* W29d: spoilers revelados por chat — se vacía al salir del chat */
+  spoilSeen: {},           // chatId → {msgId: 1}
+  /* W35c: caché de "portadas" de enlaces por URL (en memoria) */
+  linkPrev: {},            // url → {status, type, url, title, desc, image, icon, site}
+  /* W36k: favoritos de GIFs (biblioteca y subidos) */
+  gifFavs: [],             // [{media_id, name, url}]
+  gifFavsLoaded: false,
+  /* W29f: cifrado de extremo a extremo (por chat, persistido aparte) */
+  e2e: {},                 // chatId → 1
+  e2eSas: {},              // chatId → '8 2 0 7 0 2' (código de verificación)
+  e2ePend: {},             // W30d/W31c: chatId → 1 (par sin clave; en memoria)
+  pinsRev: 0,             // W28c: gatillo para refrescar los fijados abiertos
+  msgs: {},               // chatId → array de mensajes (crudos)
+  loaded: {},             // chatId → mensajes iniciales ya pedidos
+  syncNeeded: {},         // chatId → la WS se reconectó; falta catch-up
+  hasMore: {},            // chatId → quedan antiguos por cargar
+  loadingOlder: false,
+  /* W27h: pedidos de mensajes en vuelo del chat abierto ("Cargando…") */
+  chatLoading: false,
+  typing: {},             // chatId → true mientras el peer escribe
+  presence: {},           // W26: userId → online (eventos WS + snapshot al reconectar)
+  readSeqs: {},           // chatId → {userId: seq} (eventos 'read' recibidos)
+  deliveredSeqs: {},      // chatId → {userId: seq} (eventos 'delivered', W12)
+  ws: 'off',              // off | connecting | on
+  call: null,             // W28h: llamada WebRTC 1:1 en curso | null
+  search: '',             // filtro de la lista de chats
+  newChatOpen: false,     // modal "nuevo chat"
+  newChatMode: 'dm',      // dm | group | add (agregar miembro al grupo activo)
+  /* ---- W27: panel Personas/Amigos (en el centro, sin chat abierto) ---- */
+  people: null,           // {friends:[], sent:[], received:[]} | null
+  blocks: [],             // W28e: ids de los usuarios que yo bloqueé
+  /* ---- W6: panel de usuario, perfil y ajustes ---- */
+  settingsOpen: false,    // modal "Ajustes"
+  settingsTab: 'apariencia',  // apariencia | chat | atajos | cuenta (W8: cuenta = última)
+  meProfileOpen: false,   // modal "Tu perfil" (solo vista; W27b)
+  meEditOpen: false,      // modal "Editar perfil" (foto, nombre, estado, bio)
+  sasOpen: false,         // W39: modal con el código de verificación E2E
+  sasFor: 0,              // W39: chat cuyo código se muestra
+  peopleMobile: false,    // W27b: pantalla Personas a pantalla completa (móvil)
+  peopleTab: 'active',    // W27c: pestaña de Personas (la reinicia el sidebar)
+  /* W27b: foto de grupo en edición { chatId, src, initial } — vive en el
+     panel de info del chat */
+  grpEdit: { chatId: 0, src: '' },
+  profile: null,          // ventana flotante de perfil: {loading, user, error} | null
+  confirmBox: null,       // {title, text, danger, requireUser, requirePassword, ...}
+  readsBox: null,         // W28f: {chatId, msgId, rows: null|[usuarios], total, loading, error}
+  lb: null,               // W8: visor de imágenes {url} — W29l: también desde la info
+  pwOpen: false,          // W8: ventana "cambiar contraseña" (desde Ajustes)
+  emOpen: false,          // W8: ventana "cambiar correo" (desde Ajustes)
+  /* ---- W7: info del chat, menú contextual, picker de reacciones ---- */
+  infoOpen: false,        // panel derecho "info del chat" (default: pantalla ancha)
+  info: null,             // {chatId, loading, members: [], error} | null
+  pinsModal: false,       // W29l: modal "Mensajes fijados" (abre desde la info)
+  galModal: false,        // W29l: modal "Archivos y medios" (abre desde la info)
+  ctx: null,              // menú contextual {x, y, items: [{label, danger, fn}]}
+  reactFor: 0,            // id de mensaje cuyo picker se abre desde el menú
+  /* ---- W8: editar mensaje en línea ---- */
+  editFor: 0,             // id del mensaje que se está editando (0 = ninguno)
+  editDraft: '',          // texto en curso de la edición
+  /* apariencia: el pre-paint de index.html ya los aplicó al DOM */
+  theme: document.documentElement.getAttribute('data-theme') || 'dark',
+  accent: readLs('fm.accent') || '#ff751f',
+  wall: readLs('fm.wall'),
+  /* W19: foto de fondo (data-URL) y sidebar contraído (escritorio) */
+  wallimg: readLs('fm.wallimg'),
+  sideCollapsed: readLs('fm.side') === '1',
+  /* W20: ajustes del fondo — opacidad del velo (0-100, 50 por defecto),
+     difuminado en px (0-20) — y dispositivo de micrófono preferido */
+  wdim: readLs('fm.wdim') === '' ? 50 : parseInt(readLs('fm.wdim'), 10) || 0,
+  wblur: parseInt(readLs('fm.wblur'), 10) || 0,
+  micDev: readLs('fm.mic'),
+  wallPanelOpen: false,
+  font: document.documentElement.getAttribute('data-font') || 'normal',
+  /* W10: idioma de la interfaz (pre-paint setea <html lang> sin parpadeo) */
+  lang: document.documentElement.getAttribute('lang') === 'en' ? 'en' : 'es',
+  /* preferencias de chat (dispositivo): default encendido si no hay clave */
+  prefs: {
+    sound: readLs('fm.p.sound') !== '0',
+    typing: readLs('fm.p.typing') !== '0',
+    receipts: readLs('fm.p.receipts') !== '0',
+    enter: readLs('fm.p.enter') !== '0',
+    /* W17: hora de 12 horas (am/pm). Default: 24 h. */
+    h12: readLs('fm.p.h12') === '1',
+    /* W40: estilo de los emojis — 'system' (fuente del sistema,
+       default: cero descargas), 'noto' (imágenes de Google) o
+       'twemoji' (imágenes Twemoji del sitio). */
+    emo: (function (v) {
+      return (v === 'noto' || v === 'twemoji') ? v : 'system';
+    })(readLs('fm.p.emo')),
+  },
+  drafts: {},             // chatId → borrador de entrada
+  /* W17: el selector de emojis del composer vive aquí para que solo
+     haya UN panel flotante abierto a la vez (chips/menú lo cierran).
+     W29g: ese panel ahora tiene 3 pestañas (Emojis/Stickers/GIFs). */
+  emoOpen: false,
+  /* W18: ms (Date.now) hasta los que el aviso anti-spam bloquea la
+     pantalla. Lo levanta api.js con el 429 {spam:true} del server. */
+  spamUntil: 0,
+
+  online: navigator.onLine !== false,
+  toasts: [],
+});
+
+/* W38: fases del arranque, en orden — su texto y el progreso de la
+   barra de la pantalla de carga (views/bootscreen.js). store.bootPhase
+   guarda la clave de la fase activa; la avanzan bootstrap() (api.js)
+   y bootAll() (views/chat.js). */
+export const BOOT_PHASES = [
+  { key: 'resources', progress: 0.15, txt: 'Descargando los recursos…' },
+  { key: 'session', progress: 0.35, txt: 'Iniciando sesión…' },
+  { key: 'chats', progress: 0.60, txt: 'Cargando los mensajes…' },
+  { key: 'people', progress: 0.80, txt: 'Cargando usuarios…' },
+  { key: 'previews', progress: 0.93, txt: 'Cargando vista previas…' },
+  { key: 'ready', progress: 1, txt: 'Cargando…' },
+];
+
+const PUBLIC_ROUTES = ['login', 'register', 'forgot', 'reset'];
+const AUTH_ROUTES = ['profile', 'verify', 'app'];
+
+function guard(name) {
+  if (AUTH_ROUTES.includes(name) && !store.hasSession) return 'login';
+  return name;
+}
+
+/* ---------- W22: router con History API (rutas reales, sin #) ----------
+
+   La URL se deriva del estado (fuente única de verdad) y el estado se
+   aplica desde la URL (arranque y botón atrás/adelante):
+
+     /login /register /profile /verify /forgot /reset   vistas públicas
+     /app                                                sin chat abierto
+     /app/user/<id del peer>                             chat DM
+     /app/group/<id del chat>                            grupo
+     ?settings=1                                         Ajustes abierto
+     ?m=<id del mensaje>                                 salto (permalink)
+
+   Al abrir algo la app empuja una entrada; al cerrar usa atrás si la
+   entrada inferior ya es el destino (el historial no se ensucia) o
+   replace si venimos de un deep link. */
+const ROUTE_PATHS = {
+  boot: '/',
+  login: '/login',
+  register: '/register',
+  profile: '/profile',
+  verify: '/verify',
+  forgot: '/forgot',
+  reset: '/reset',
+  app: '/app',
+};
+const KNOWN_ROUTES = Object.keys(ROUTE_PATHS);
+
+let nav = null;   // espejo de las entradas que empuja la app (atrás/cierre)
+
+function locPath() { return location.pathname + location.search; }
+
+function chatById(id) {
+  if (!id) return null;
+  for (let i = 0; i < store.chats.length; i++) {
+    if (store.chats[i].id === id) return store.chats[i];
+  }
+  return null;
+}
+
+function splitPath(p) {
+  const i = p.indexOf('?');
+  const path = i < 0 ? p : p.slice(0, i);
+  const params = {};
+  const qs = i < 0 ? '' : p.slice(i + 1);
+  qs.split('&').forEach(function (kv) {
+    if (!kv) return;
+    const j = kv.indexOf('=');
+    params[decodeURIComponent(j < 0 ? kv : kv.slice(0, j))] =
+      decodeURIComponent(j < 0 ? '' : kv.slice(j + 1));
+  });
+  return { path: path, params: params };
+}
+
+/** URL que corresponde al estado actual. */
+export function urlForState() {
+  if (store.route !== 'app') return ROUTE_PATHS[store.route] || '/';
+  let path = '/app';
+  const chat = chatById(store.activeChatId);
+  if (chat) {
+    /* El DM se direcciona por el id del PEER (no el del chat) y el grupo
+       por el id del chat: la URL identifica por id exacto. */
+    if (chat.type === 'dm' && chat.title && chat.title.id) {
+      path = '/app/user/' + chat.title.id;
+    } else {
+      path = '/app/group/' + chat.id;
+    }
+  }
+  const q = [];
+  if (store.settingsOpen) q.push('settings=1');
+  if (store.jumpMsg) q.push('m=' + store.jumpMsg);
+  return path + (q.length ? '?' + q.join('&') : '');
+}
+
+function writeUrl(path, mode) {
+  if (!nav) nav = [locPath()];
+  if (locPath() === path) return;   // ya está ahí: nada que tocar
+  if (mode === 'push') {
+    nav.push(path);
+    history.pushState({ fm: 1, nav: nav.length - 1 }, '', path);
+  } else {
+    nav[nav.length - 1] = path;
+    history.replaceState({ fm: 1, nav: nav.length - 1 }, '', path);
+  }
+}
+
+function closeUrl(want) {
+   /* Cerrar desde la UI: si la entrada inferior ya es el destino, atrás
+      (el historial queda limpio); si no (deep link), reemplazar. */
+  if (nav && nav.length >= 2 && nav[nav.length - 2] === want) {
+    history.back();               // el popstate recorta nav (estado ya aplicado)
+  } else {
+    writeUrl(want, 'replace');
+  }
+}
+
+/** Cambia de ruta (misma firma que antes). Empuja entrada; con `replace`
+    reescribe la actual (redirecciones, arranque y logout). */
+export function go(name, replace) {
+  const g = guard(name);
+  store.route = g;
+  writeUrl(ROUTE_PATHS[g] || '/', replace ? 'replace' : 'push');
+}
+
+/** Igual que go(), reescribiendo la entrada actual (sin volver atrás). */
+export function goReplace(name) { go(name, true); }
+
+/** Ruta a la que volver si no hay sesión válida. */
+export function authFallback() {
+  const cur = store.route;
+  if (PUBLIC_ROUTES.includes(cur)) return null; // quedarse (ej. /register recién abierto)
+  return 'login';
+}
+
+/** Reemplaza la URL por la que corresponde al estado (sin empujar). */
+export function syncUrl() { writeUrl(urlForState(), 'replace'); }
+
+/** Aplica la URL al estado (arranque y botón atrás/adelante). */
+function applyState(p) {
+  const sp = splitPath(p);
+  const seg = sp.path.split('/').filter(function (s) { return s; });
+  let route = null;
+  let chatRef = null;
+  let unknown = false;
+  if (!seg.length) {
+    /* '/' lo decide la sesión (bootstrap termina el trabajo si hace falta) */
+    if (store.user) route = 'app';
+    else if (store.hasSession) route = 'boot';
+    else route = 'login';
+  } else if (seg[0] === 'app') {
+    route = 'app';
+    if (seg[1] === 'user' && seg[2]) {
+      chatRef = { kind: 'user', id: parseInt(seg[2], 10) || 0 };
+    } else if (seg[1] === 'group' && seg[2]) {
+      chatRef = { kind: 'group', id: parseInt(seg[2], 10) || 0 };
+    }
+  } else if (KNOWN_ROUTES.indexOf(seg[0]) >= 0) {
+    route = seg[0];
+  } else {
+    unknown = true;
+    route = store.user ? 'app' : 'login';
+  }
+
+  /* guardas */
+  if (AUTH_ROUTES.indexOf(route) >= 0 && !store.hasSession) {
+    route = 'login';
+    chatRef = null;
+    writeUrl('/login', 'replace');
+  } else if (route === 'login' && store.user) {
+    /* Con sesión iniciada el login no existe: de vuelta al chat. */
+    route = 'app';
+    chatRef = null;
+    writeUrl('/app', 'replace');
+  } else if (route === 'app' && !store.hasSession) {
+    route = 'login';
+    chatRef = null;
+    writeUrl('/login', 'replace');
+  } else if (unknown) {
+    writeUrl(ROUTE_PATHS[route], 'replace');
+  } else if (route === 'login' && !seg.length) {
+    /* sin sesión, la raíz canónica es /login (evita '/' y '/login' vivos) */
+    writeUrl('/login', 'replace');
+  } else if (route === 'app' && !seg.length) {
+    writeUrl('/app', 'replace');
+  }
+
+  store.route = route;
+  if (route === 'app') {
+    store.settingsOpen = sp.params.settings === '1';
+    store.jumpMsg = parseInt(sp.params.m, 10) || 0;
+    if (chatRef && chatRef.id) {
+      store.pendingPath = chatRef;   // lo abre actions.resolvePendingChat
+    } else {
+      store.pendingPath = null;
+      if (store.activeChatId) store.activeChatId = 0;   // volver al panel
+    }
+  } else {
+    /* Fuera de la app (ChatShell se desmonta y limpia sus estados). */
+    store.pendingPath = null;
+    store.jumpMsg = 0;
+  }
+}
+
+/** Lee la URL actual y aplica guardas. Se llama al arrancar; además
+    convierte enlaces viejos #/ruta a la ruta real equivalente. */
+export function syncPath() {
+  if (location.hash && location.hash !== '#/') {
+    const legacy = location.hash.replace(/^#\/?/, '').split('?')[0];
+    const target = KNOWN_ROUTES.indexOf(legacy) >= 0 ? ROUTE_PATHS[legacy] : '/';
+    history.replaceState(null, '', target);
+  }
+  nav = [locPath()];
+  applyState(locPath());
+}
+
+window.addEventListener('popstate', function () {
+  const p = locPath();
+  if (nav) {
+    const st = history.state;
+    if (st && typeof st.nav === 'number' && st.nav < nav.length && nav[st.nav] === p) {
+      nav = nav.slice(0, st.nav + 1);
+    } else {
+      nav = [p];
+    }
+  }
+  applyState(p);
+});
+
+/* Estado → URL: cada cambio de vista/chat/ajustes/salto deja la URL al
+   día. push al abrir; al cerrar, atrás si la entrada inferior ya es el
+   destino o replace si no (deep link). */
+watch(
+  function () {
+    return [store.route, store.activeChatId, store.settingsOpen, store.jumpMsg];
+  },
+  function (nv, ov) {
+    if (store.pendingPath) return;         // un deep link se resuelve aparte
+    const want = urlForState();
+    if (want === locPath()) return;
+    const routeChanged = nv[0] !== ov[0];
+    const chatClosed = !!ov[1] && !nv[1];
+    const settingsClosed = !!ov[2] && !nv[2];
+    const chatSwitched = !!ov[1] && !!nv[1] && ov[1] !== nv[1];
+    const jumpChanged = nv[3] !== ov[3];
+    if (!routeChanged && (chatClosed || settingsClosed)) closeUrl(want);
+    /* replace solo cuando el cambio es "en el sitio" (el ?m= de un salto
+       o su limpieza); abrir/switch de chat siempre empuja. */
+    else if (jumpChanged && !routeChanged && !chatSwitched) writeUrl(want, 'replace');
+    else writeUrl(want, 'push');
+  }
+);
+
+/* ---------- toasts ---------- */
+let tid = 0;
+export function toast(msg, kind = 'info') {
+  const id = ++tid;
+  store.toasts.push({ id, msg, kind });
+  setTimeout(() => {
+    const i = store.toasts.findIndex((t) => t.id === id);
+    if (i >= 0) store.toasts.splice(i, 1);
+  }, 4000);
+}
+
+/* ---------- tema ---------- */
+/* data-theme siempre está (html + script pre-paint); acá solo damos vuelta
+   y persistimos — lo aplica el CSS sin parpadeo. */
+export function setTheme(mode) {
+  if (mode !== 'dark' && mode !== 'light') return;
+  document.documentElement.setAttribute('data-theme', mode);
+  store.theme = mode;
+  try { localStorage.setItem('fm.theme', mode); } catch (e) {}
+  updateMetaContrast();
+}
+
+export function toggleTheme() {
+  setTheme(store.theme === 'light' ? 'dark' : 'light');
+}
+
+/* ---------- acento y fondo (W4) ---------- */
+
+function applyAccent(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const R = (n >> 16) & 255, G = (n >> 8) & 255, B = n & 255;
+  const r = Math.round(R * 0.72),
+        g = Math.round(G * 0.72),
+        b = Math.round(B * 0.72);
+  const root = document.documentElement.style;
+  root.setProperty('--accent', hex);
+  root.setProperty('--accent-d', '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1));
+  /* W9: tinte translúcido del acento (chips activos, hover de fila, etc.) */
+  root.setProperty('--accent-wash', 'rgba(' + R + ', ' + G + ', ' + B + ', .18)');
+  updateMetaContrast();   /* W12: el acento manda el fondo de "mi burbuja" */
+}
+
+export function setAccent(hex) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+  store.accent = hex;
+  applyAccent(hex);
+  try { localStorage.setItem('fm.accent', hex); } catch (e) {}
+}
+
+/* W12: la hora y las palomitas se pintan del color que CONTRASTE con el
+   fondo real de la burbuja (blanco sobre oscuro, negro sobre claro).
+   FF78: sin color-mix() — calculamos la luminancia y seteamos dos vars. */
+function lum(css) {
+  const s = String(css || '').trim();
+  if (s.charAt(0) === '#') {
+    const n = parseInt(s.slice(1), 16);
+    if (isNaN(n)) return 0;
+    return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+  }
+  const m = s.match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+  if (!m) return 0;
+  return (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255;
+}
+
+export function updateMetaContrast() {
+  const cs = getComputedStyle(document.documentElement);
+  const root = document.documentElement.style;
+  const mine = lum(cs.getPropertyValue('--bubble-me'));   /* acento oscurecido */
+  root.setProperty('--meta-mine', mine > 0.5 ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.92)');
+  const you = lum(cs.getPropertyValue('--bubble-you'));
+  root.setProperty('--meta-you', you > 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.7)');
+}
+/* El pre-paint de index.html ya aplicó tema y acento: afinar al cargar. */
+updateMetaContrast();
+
+/* '' = automático (el color del tema vía var(--bg)). */
+export function setWall(hex) {
+  store.wall = hex || '';
+  const root = document.documentElement.style;
+  if (store.wall) root.setProperty('--wall', store.wall);
+  else root.removeProperty('--wall');
+  try {
+    if (store.wall) localStorage.setItem('fm.wall', store.wall);
+    else localStorage.removeItem('fm.wall');
+  } catch (e) {}
+}
+
+/* W19: foto de fondo de la conversación. Es apariencia del dispositivo
+   (igual que el color): se guarda ya achicada como data-URL y el CSS la
+   pone sobre --wall con un velo oscuro para que las burbujas se lean. */
+export function setWallImg(dataUrl) {
+  store.wallimg = dataUrl || '';
+  const root = document.documentElement.style;
+  if (store.wallimg) {
+    root.setProperty('--wallimg', 'url("' + store.wallimg + '")');
+    document.documentElement.classList.add('wallimg');
+  } else {
+    root.removeProperty('--wallimg');
+    document.documentElement.classList.remove('wallimg');
+  }
+  try {
+    if (store.wallimg) localStorage.setItem('fm.wallimg', store.wallimg);
+    else localStorage.removeItem('fm.wallimg');
+  } catch (e) {}
+}
+
+/* W19: contraer el sidebar (solo escritorio; el CSS de móvil lo ignora).
+   El <html> lleva la clase desde boot.js para que no parpadee. */
+export function setSideCollapsed(v) {
+  store.sideCollapsed = !!v;
+  if (store.sideCollapsed) document.documentElement.classList.add('side-collapsed');
+  else document.documentElement.classList.remove('side-collapsed');
+  try { localStorage.setItem('fm.side', store.sideCollapsed ? '1' : '0'); } catch (e) {}
+}
+
+/* W20: opacidad del velo oscuro del fondo (0-100) y difuminado (0-20 px).
+   Ambos viven como variables en :root para que la preview del panel de
+   fondo y la conversación real se muevan juntas, en vivo. */
+export function setWallDim(v) {
+  store.wdim = Math.max(0, Math.min(100, Math.round(+v) || 0));
+  document.documentElement.style
+    .setProperty('--wall-dim', (store.wdim / 100).toFixed(2));
+  try { localStorage.setItem('fm.wdim', String(store.wdim)); } catch (e) {}
+}
+
+export function setWallBlur(v) {
+  store.wblur = Math.max(0, Math.min(20, Math.round(+v) || 0));
+  document.documentElement.style
+    .setProperty('--wall-blur', store.wblur + 'px');
+  try { localStorage.setItem('fm.wblur', String(store.wblur)); } catch (e) {}
+}
+
+/* W20: micrófono preferido (deviceId; '' = el del sistema). */
+export function setMicDev(id) {
+  store.micDev = id || '';
+  try {
+    if (store.micDev) localStorage.setItem('fm.mic', store.micDev);
+    else localStorage.removeItem('fm.mic');
+  } catch (e) {}
+}
+
+/* ---------- preferencias de chat (W6) ---------- */
+
+export function setPref(key, val) {
+  if (!(key in store.prefs)) return;
+  store.prefs[key] = !!val;
+  try { localStorage.setItem('fm.p.' + key, val ? '1' : '0'); } catch (e) {}
+}
+
+/* W40: preferencia de valor libre (estilo de emojis: system/noto/
+   twemoji). */
+export function setPrefStr(key, val) {
+  if (!(key in store.prefs)) return;
+  store.prefs[key] = val;
+  try { localStorage.setItem('fm.p.' + key, val); } catch (e) {}
+}
+
+/* Tamaño de letra: data-font lo aplica el CSS (--fs); el pre-paint lo
+   re-aplica en la próxima carga sin parpadeo. */
+export function setFont(size) {
+  if (size !== 'small' && size !== 'normal' && size !== 'large') return;
+  store.font = size;
+  document.documentElement.setAttribute('data-font', size);
+  try { localStorage.setItem('fm.font', size); } catch (e) {}
+}
