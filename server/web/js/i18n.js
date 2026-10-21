@@ -518,6 +518,7 @@ const EN = {
   'No se pudo subir la foto': 'Could not upload the photo',
   'Ajustar foto': 'Adjust photo',
   'Arrastra para encuadrar': 'Drag to frame',
+  'Arrastra para mover · pellizca para ampliar y girar': 'Drag to move · pinch to zoom and rotate',
   'Girar': 'Rotate',
   'Restablecer': 'Reset',
   'Aplicar': 'Apply',

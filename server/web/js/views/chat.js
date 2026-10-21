@@ -267,7 +267,7 @@ function isTouchUI() {
       window.innerWidth < 640;
   } catch (e) { return window.innerWidth < 640; }
 }
-const openCtx = function (e, items, anchor, key) {
+const openCtx = function (e, items, anchor, key, head) {
   /* W36i: si el menú de ESTE botón ya está abierto, un segundo clic
      lo cierra (antes sólo se cerraba tocando afuera). */
   if (key && store.ctx && store.ctx.key === key) {
@@ -277,9 +277,14 @@ const openCtx = function (e, items, anchor, key) {
   /* W17: un solo panel flotante: abrir el menú cierra pickers. */
   store.emoOpen = false;
   store.reactFor = 0;
-  /* W37b: bottom sheet en táctil — sin anclas ni cálculo de posición. */
+  /* W37b: bottom sheet en táctil — sin anclas ni cálculo de posición.
+     W54c: en el teléfono la hoja lleva una cabecera con la foto y el
+     nombre cuando el menú pertenece a un chat o grupo. */
   if (isTouchUI()) {
-    store.ctx = { x: 0, y: 0, items: items, key: key || '', sheet: true };
+    store.ctx = {
+      x: 0, y: 0, items: items, key: key || '', sheet: true,
+      head: head || null,
+    };
     return;
   }
   const vw = window.innerWidth;
@@ -302,7 +307,7 @@ const openCtx = function (e, items, anchor, key) {
        podía desbordar por abajo (p. ej. clic derecho cerca del borde). */
     if (y + estH > vh - 4) y = clampPos(vh - estH, vh);
   }
-  store.ctx = { x: x, y: y, items: items, key: key || '' };
+  store.ctx = { x: x, y: y, items: items, key: key || '', head: head || null };
   /* W29c: corrección con medida REAL — corre SIEMPRE (antes solo con
      ancla); offset* es inmune al transform de la animación de entrada. */
   Vue.nextTick(function () {
@@ -358,6 +363,23 @@ function pickGroupPhoto(c) {
     };
   });
   inp.click();
+}
+
+/* W54c: cabecera de la hoja móvil para los menús de chat/grupo. */
+function ctxChatHead(c) {
+  if (!c) return null;
+  const name = chatTitle(c) || '';
+  const raw = c.type === 'dm'
+    ? (c.title && c.title.avatar_url)
+    : c.avatar_url;
+  return {
+    name: name,
+    avatar: raw ? mediaUrl(raw) : '',
+    ini: name ? name.charAt(0).toUpperCase() : '?',
+    sub: c.type === 'group'
+      ? t('Grupo')
+      : (c.title && c.title.username ? '@' + c.title.username : t('Chat')),
+  };
 }
 
 /* ⋮ de la lista de chats y del panel de info: administrar el chat. */
@@ -417,7 +439,7 @@ function chatMenu(e, c, key) {
   /* W36i: key = el mismo botón alterna abrir/cerrar. El ⋮ de la INFO
      usa 'info' (distinta de la lista): abrir uno no cierra el otro
      con un segundo clic, cada botón se auto-gestiona. */
-  openCtx(e, items, null, key || 'chat:' + c.id);
+  openCtx(e, items, null, key || 'chat:' + c.id, ctxChatHead(c));
 }
 
 /* ⋮ de la ventana de perfil de OTRO usuario: administrar la amistad
@@ -2725,7 +2747,11 @@ const SettingsModal = {
   template: `
     <div class="modal-veil settings-veil" @click.self="close">
       <div class="modal settings" role="dialog" :aria-label="t('Ajustes')">
-        <header>{{ t('Ajustes') }}
+        <header>
+          <span class="m-head-title">
+            <img class="mobile-page-logo" src="/static/icon.svg" alt="">
+            <b>{{ t('Ajustes') }}</b>
+          </span>
           <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
             <svg class="ic"><use href="#i-x"></use></svg>
           </button>
@@ -3225,10 +3251,12 @@ const MeProfileEditModal = {
   },
   components: { AvatarEditor },
   template: `
-    <div class="modal-veil" @click.self="close">
-      <div class="modal meprof mp-edit" role="dialog" :aria-label="t('Editar perfil')">
-        <header>{{ t('Editar perfil') }}
-          <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
+    <div class="modal-veil" :class="{ 'veil-cropping': !!edSrc }" @click.self="close">
+      <div class="modal meprof mp-edit" :class="{ 'is-cropping': !!edSrc }"
+        role="dialog" :aria-label="t('Editar perfil')">
+        <header>{{ edSrc ? t('Ajustar foto') : t('Editar perfil') }}
+          <button class="icon-btn" type="button" :title="t('Cerrar')"
+            @click="edSrc ? onEdCancel() : close()">
             <svg class="ic"><use href="#i-x"></use></svg>
           </button>
         </header>
@@ -3255,30 +3283,32 @@ const MeProfileEditModal = {
           </div>
           <avatar-editor v-else :src="edSrc" :initial="edInitial"
             @confirm="onEdConfirm" @cancel="onEdCancel"></avatar-editor>
-          <div class="form-err st-err" v-if="err" role="alert">
-            <svg class="ic ic-sm"><use href="#i-alert"></use></svg><span>{{ t(err) }}</span>
-          </div>
-          <div class="field">
-            <label>{{ t('Nombre') }}</label>
-            <input class="input" v-model.trim="name" maxlength="50" :placeholder="t('Tu nombre')">
-          </div>
-          <div class="field">
-            <label>{{ t('Estado') }}</label>
-            <input class="input" v-model.trim="statusText" maxlength="80" :placeholder="t('jugando a algo…')">
-          </div>
-          <div class="mp-presets">
-            <button class="ap-chip" type="button" v-for="p in presets" :key="p.val"
-              :class="{ on: preset === p.val }" @click="preset = p.val"><span
-              class="sdot" :class="p.dot"></span>{{ t(p.label) }}</button>
-          </div>
-          <div class="field">
-            <label>Bio</label>
-            <textarea class="input" v-model.trim="bio" maxlength="150" rows="2"
-              :placeholder="t('Cuéntanos algo sobre ti…')"></textarea>
-            <p class="st-hint">{{ t('Se muestra con') }} <b>markdown</b>: {{ t('**negrita**, *cursiva*, \`código\`, ~~tachado~~ y [links](https://…)') }}</p>
-          </div>
+          <template v-if="!edSrc">
+            <div class="form-err st-err" v-if="err" role="alert">
+              <svg class="ic ic-sm"><use href="#i-alert"></use></svg><span>{{ t(err) }}</span>
+            </div>
+            <div class="field">
+              <label>{{ t('Nombre') }}</label>
+              <input class="input" v-model.trim="name" maxlength="50" :placeholder="t('Tu nombre')">
+            </div>
+            <div class="field">
+              <label>{{ t('Estado') }}</label>
+              <input class="input" v-model.trim="statusText" maxlength="80" :placeholder="t('jugando a algo…')">
+            </div>
+            <div class="mp-presets">
+              <button class="ap-chip" type="button" v-for="p in presets" :key="p.val"
+                :class="{ on: preset === p.val }" @click="preset = p.val"><span
+                class="sdot" :class="p.dot"></span>{{ t(p.label) }}</button>
+            </div>
+            <div class="field">
+              <label>Bio</label>
+              <textarea class="input" v-model.trim="bio" maxlength="150" rows="2"
+                :placeholder="t('Cuéntanos algo sobre ti…')"></textarea>
+              <p class="st-hint">{{ t('Se muestra con') }} <b>markdown</b>: {{ t('**negrita**, *cursiva*, \`código\`, ~~tachado~~ y [links](https://…)') }}</p>
+            </div>
+          </template>
         </div>
-        <div class="m-foot st-btns">
+        <div class="m-foot st-btns" v-if="!edSrc">
           <button class="btn btn-ghost" type="button" @click="close" :disabled="busy">{{ t('Cancelar') }}</button>
           <button class="btn" type="button" @click="save" :disabled="busy">
             {{ busy ? t('Guardando…') : t('Guardar') }}</button>
@@ -5917,7 +5947,7 @@ export const ChatShell = {
         icon: c.muted ? 'i-bell' : 'i-bell-off',
         fn: function () { setMuted(c.id, !c.muted); },
       });
-      openCtx(e, items, null, 'chat-more');
+      openCtx(e, items, null, 'chat-more', ctxChatHead(c));
     };
 
     /* ---------- W13: buscar dentro del chat ---------- */
@@ -6295,19 +6325,34 @@ export const ChatShell = {
       };
     });
     let lbMoved = false;            // W22: hubo arrastre → el clic NO zoom
+    /* W54c: al ampliar, la imagen puede recorrer la pantalla pero nunca
+       se pierde fuera de ella. El visor queda entre los controles. */
+    const lbClamp = function () {
+      if (lbScale.value <= 1) { lbTx.value = 0; lbTy.value = 0; return; }
+      const img = document.querySelector('.lightbox .lb-img');
+      if (!img) return;
+      const rect = img.getBoundingClientRect();
+      const baseW = rect.width / lbScale.value;
+      const baseH = rect.height / lbScale.value;
+      const maxX = Math.max(0, (baseW * lbScale.value - window.innerWidth) / 2 + 10);
+      const maxY = Math.max(0, (baseH * lbScale.value - window.innerHeight) / 2 + 10);
+      lbTx.value = Math.max(-maxX, Math.min(maxX, lbTx.value));
+      lbTy.value = Math.max(-maxY, Math.min(maxY, lbTy.value));
+    };
     const lbZoom = function () {
       /* clic sobre la imagen: alterna ajustado ↔ ampliado (2.5x).
          W22: si el clic cierra un arrastre no alterna (antes soltar el
          drag hacía zoom-out sin querer). */
       if (lbMoved) { lbMoved = false; return; }
       if (lbScale.value > 1) lbReset();
-      else lbScale.value = 2.5;
+      else { lbScale.value = 2.5; lbClamp(); }
     };
     const lbWheel = function (e) {
       /* rueda/trackpad: zoom continuo entre 1x y 5x */
       const d = e.deltaY < 0 ? 0.25 : -0.25;
       lbScale.value = Math.max(1, Math.min(5, lbScale.value + d));
       if (lbScale.value === 1) lbReset();
+      else lbClamp();
     };
     const lbDown = function (e) {
       /* arrastrar para recorrer la imagen ampliada */
@@ -6324,6 +6369,7 @@ export const ChatShell = {
         }
         lbTx.value = ev.clientX - sx;
         lbTy.value = ev.clientY - sy;
+        lbClamp();
       };
       const up = function () {
         lbDragging.value = false;
@@ -6334,6 +6380,70 @@ export const ChatShell = {
       document.addEventListener('mousemove', move);
       document.addEventListener('mouseup', up);
       lbMoveOff = up;
+    };
+
+    /* W54c: en el teléfono se amplía con dos dedos y se arrastra con
+       uno; así el visor funciona como una galería táctil. */
+    let lbTouches = null;
+    const lbTouchStart = function (e) {
+      const t = e.touches;
+      if (t.length === 2) {
+        const dx = t[0].clientX - t[1].clientX;
+        const dy = t[0].clientY - t[1].clientY;
+        lbTouches = {
+          mode: 'pinch',
+          dist: Math.max(1, Math.sqrt(dx * dx + dy * dy)),
+          scale: lbScale.value,
+          tx: lbTx.value, ty: lbTy.value,
+          mx: (t[0].clientX + t[1].clientX) / 2,
+          my: (t[0].clientY + t[1].clientY) / 2,
+        };
+      } else if (t.length === 1 && lbScale.value > 1) {
+        lbTouches = {
+          mode: 'pan',
+          x: t[0].clientX, y: t[0].clientY,
+          tx: lbTx.value, ty: lbTy.value,
+        };
+      } else {
+        lbTouches = null;
+      }
+    };
+    const lbTouchMove = function (e) {
+      if (!lbTouches) return;
+      const t = e.touches;
+      if (lbTouches.mode === 'pinch' && t.length >= 2) {
+        const dx = t[0].clientX - t[1].clientX;
+        const dy = t[0].clientY - t[1].clientY;
+        const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const mx = (t[0].clientX + t[1].clientX) / 2;
+        const my = (t[0].clientY + t[1].clientY) / 2;
+        lbScale.value = Math.max(1, Math.min(5, lbTouches.scale * dist / lbTouches.dist));
+        lbTx.value = lbTouches.tx + mx - lbTouches.mx;
+        lbTy.value = lbTouches.ty + my - lbTouches.my;
+        if (lbScale.value === 1) { lbTx.value = 0; lbTy.value = 0; }
+        else lbClamp();
+        lbMoved = true;
+        if (e.cancelable) e.preventDefault();
+      } else if (lbTouches.mode === 'pan' && t.length === 1) {
+        lbTx.value = lbTouches.tx + t[0].clientX - lbTouches.x;
+        lbTy.value = lbTouches.ty + t[0].clientY - lbTouches.y;
+        lbClamp();
+        lbMoved = true;
+        if (e.cancelable) e.preventDefault();
+      }
+    };
+    const lbTouchEnd = function (e) {
+      const t = e.touches;
+      if (!t.length) { lbTouches = null; return; }
+      if (t.length === 1 && lbScale.value > 1) {
+        lbTouches = {
+          mode: 'pan',
+          x: t[0].clientX, y: t[0].clientY,
+          tx: lbTx.value, ty: lbTy.value,
+        };
+      } else {
+        lbTouches = null;
+      }
     };
 
     /* Guardar la edición en línea de un mensaje propio (W8). */
@@ -6492,6 +6602,7 @@ export const ChatShell = {
       acEl, acList, acIdx, pickAc, updAc,
       /* W8 */
       lb, lbStyle, openLb, closeLb, lbZoom, lbWheel, lbDown,
+      lbTouchStart, lbTouchMove, lbTouchEnd,   /* W54c: pinza y arrastre */
       lbScale,   // W22: la ayuda (v-if) se va cuando hay zoom
       onSaveEdit,
       /* W11 */
@@ -6876,7 +6987,8 @@ export const ChatShell = {
       '<main class="chat-pane people-pane" v-else>' +
         /* W54: título de pantalla en móvil (en escritorio Personas vive
            en el centro y no necesita app bar propia). */
-        '<header class="mobile-page-head"><b>{{ t(\'Personas\') }}</b></header>' +
+        '<header class="mobile-page-head"><img class="mobile-page-logo" ' +
+          'src="/static/icon.svg" alt=""><b>{{ t(\'Personas\') }}</b></header>' +
         /* W19: sin chat abierto también se puede devolver el sidebar */
         '<button class="icon-btn side-open" type="button" :title="t(\'Mostrar chats\')" ' +
           '@click="unfoldSide">' +
@@ -7038,7 +7150,7 @@ export const ChatShell = {
         '<span>{{ t(\'Suelta los archivos para enviarlos\') }}</span>' +
       '</div>' +
       /* W8: vista previa de imágenes con zoom (clic = 2.5x, rueda, arrastre) */
-      '<div class="lightbox" v-if="lb" @click.self="closeLb">' +
+      '<div class="lightbox" v-if="lb" :class="{ \'lb-zoomed\': lbScale > 1 }" @click.self="closeLb">' +
         '<button class="icon-btn lb-close" type="button" :title="t(\'Cerrar (Esc)\')" @click="closeLb">' +
           '<svg class="ic"><use href="#i-x"></use></svg>' +
         '</button>' +
@@ -7046,7 +7158,9 @@ export const ChatShell = {
           '<svg class="ic"><use href="#i-download"></use></svg>' +
         '</a>' +
         '<img class="lb-img" :src="lb.url" :style="lbStyle" ' +
-          '@click="lbZoom" @wheel.prevent="lbWheel" @mousedown.prevent="lbDown">' +
+          '@click="lbZoom" @wheel.prevent="lbWheel" @mousedown.prevent="lbDown" ' +
+          '@touchstart="lbTouchStart" @touchmove.prevent="lbTouchMove" ' +
+          '@touchend="lbTouchEnd" @touchcancel="lbTouchEnd">' +
         /* W22: la ayuda lleva su píldora de fondo y desaparece al
            hacer zoom (con la imagen ampliada solo estorba). */
         '<span class="lb-hint" v-if="lbScale <= 1"><span class="lb-pill">' +
@@ -7056,10 +7170,22 @@ export const ChatShell = {
          W17: con ancla a la burbuja no tapa el mensaje.
          W37b: cada ítem puede traer su icono (it.icon → #symbol).
          W37b: en móvil el MISMO menú es un bottom sheet abajo. */
+      '<div class="ctx-backdrop" v-if="store.ctx && store.ctx.sheet" ' +
+        '@click.stop="store.ctx = null"></div>' +
       '<div class="ctx-menu" :class="{ \'ctx-sheet\': store.ctx.sheet }" ' +
         'v-if="store.ctx" @click.stop ' +
         ':style="store.ctx.sheet ? {} : ' +
           '{ left: store.ctx.x + \'px\', top: store.ctx.y + \'px\' }">' +
+        '<div class="ctx-head" v-if="store.ctx.sheet && store.ctx.head">' +
+          '<span class="avatar av36">' +
+            '<img v-if="store.ctx.head.avatar" :src="store.ctx.head.avatar" alt="">' +
+            '<span v-else>{{ store.ctx.head.ini }}</span>' +
+          '</span>' +
+          '<span class="ctx-head-col">' +
+            '<b>{{ store.ctx.head.name }}</b>' +
+            '<small v-if="store.ctx.head.sub">{{ store.ctx.head.sub }}</small>' +
+          '</span>' +
+        '</div>' +
         '<button class="ctx-item" :class="{ danger: it.danger }" type="button" ' +
           'v-for="(it, i) in store.ctx.items" :key="i" @click="runCtx(it)">' +
           '<svg class="ic ic-sm ctx-ic" v-if="it.icon"><use :href="\'#\' + it.icon"></use></svg>' +

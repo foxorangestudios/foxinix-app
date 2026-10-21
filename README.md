@@ -26,6 +26,7 @@ Centro de mensajería propio: servidor en tu máquina host `1` (firuserver) + **
 | W14 | **Cifrado en reposo (SQLCipher)**: la DB de producción queda cifrada con SQLCipher (clave `FOXMSG_DB_KEY` en `.env`, driver `sqlcipher3-binary`, migración con `sqlcipher_export` + verificación de conteos/cipher_version y borrado del backup plano); dev/local sigue con SQLite en claro y las mismas 8 suites. Fix extra: fijar/silenciar re-resuelve el chat tras el `await` (race con reconexión WS) | ✅ desplegado |
 | W50 | **Descargas persistentes + escritorio**: caché de medios separado del shell (sobrevive a las actualizaciones, poda por 512 MB/500 entradas, migra lo ya cacheado), descargas explícitas en `foxinix-downloads-v1` + IndexedDB con lista en Ajustes → Descargas, y app Tauri (`desktop/`) que carga la misma web con instaladores `.deb`/`.rpm`/`.AppImage` | ✅ local + Tauri probado |
 | W54 | **Cáscara móvil tipo app** (la misma web que carga el APK): app bar propio con ＋ limpio y avatar a juego, barra inferior Chats/Personas/Ajustes, chat a pantalla completa, llamadas y acciones del chat en un menú ⋮, Ajustes como pestaña con la barra inferior visible, login sin tarjeta flotante y burbujas/composer con radios táctiles. El escritorio y Mypal 78 conservan la interfaz anterior | ✅ E2E local (`tests/mobile_ui_test.py`) |
+| W54c | **Pulido móvil**: menús contextuales como hoja con fondo oscurecido y cabecera (foto + nombre) para chats/grupos, visor con controles fuera de la imagen, zoom con dos dedos y arrastre, editor de foto a pantalla completa con pinza/giro (sin barra ni botón Girar), tema claro legible dentro de las burbujas, sin rectángulo azul al tocar, logos del sitio en Chats/Personas/Ajustes, safe-area en barras y modales, e iconos Tauri/Android con padding y fondo propio | ✅ E2E local (`tests/mobile_ui_test.py`, `tests/w27_ui_test.py`) |
 
 ## Estructura
 
@@ -99,6 +100,9 @@ Servicio: `sudo systemctl status chat-server` · logs: `journalctl -u chat-serve
 ```bash
 # UI web (Firefox headless + WebDriver BiDi): registro → perfil → código → app
 server/.venv/bin/python tests/web_e2e.py
+
+# cáscara móvil (390x844): menús, visor, editor de foto y tema claro
+server/.venv/bin/python tests/mobile_ui_test.py
 
 # compat del frontend con Mypal 78: sintaxis ES2020 + CSS/APIs en lista negra
 node scripts/check-js.mjs

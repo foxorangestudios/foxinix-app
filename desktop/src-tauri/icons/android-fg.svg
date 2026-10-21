@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"
+     viewBox="0 0 1024 1024" role="img" aria-label="Foxinix">
+  <g transform="translate(204 210) scale(1.95)">
+    <path d="M249 228 L34 10 L18 180 L160 300 L302 180 L286 10 L71 228"
+          fill="none" stroke="#FF6A13" stroke-width="27"
+          stroke-linejoin="miter" stroke-miterlimit="4"
+          stroke-linecap="butt"/>
+  </g>
+</svg>

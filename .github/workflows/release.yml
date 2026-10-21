@@ -170,7 +170,7 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
-          npx tauri icon src-tauri/icons/icon.svg
+          npx tauri icon src-tauri/icons/icon.json
           npx tauri android init --ci
           echo "$ANDROID_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/foxinix-release.jks"
           cat > src-tauri/gen/android/keystore.properties <<EOF

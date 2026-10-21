@@ -31,6 +31,7 @@
   --chat-bg: #313338;
   --bubble-you: #2b2d31;
   --bubble-me: var(--accent-d);
+  --bubble-me-fg: #ffffff;
   --sel: #4e5058;
   --row-hover: rgba(78, 80, 88, .3);  /* hover de filas (Discord) */
   /* estados del puntito: valores Discord (W9) — en línea #23a55a,
@@ -67,6 +68,7 @@
   --chat-bg: #ffffff;
   --bubble-you: #f2f3f5;
   --bubble-me: var(--accent-d);
+  --bubble-me-fg: #ffffff;
   --sel: #d7d9dc;
   --row-hover: rgba(6, 6, 7, .07);
 }
@@ -900,7 +902,20 @@ input[type="range"].wp-range::-moz-range-thumb {
   max-width: min(72%, 620px);
   min-width: 74px;
 }
-.msg.mine .bubble { background: var(--bubble-me); }
+.msg.mine .bubble {
+  background: var(--bubble-me);
+  color: var(--bubble-me-fg, #fff);
+}
+/* W54c: en tema claro la burbuja naranja conserva texto y metadatos
+   blancos; antes heredaba el texto oscuro del tema y no se leía. */
+.msg.mine .bubble .au-time,
+.msg.mine .bubble .bf-size,
+.msg.mine .bubble .b-voice,
+.msg.mine .bubble .b-file .bf-size { color: rgba(255, 255, 255, .78); }
+.msg.mine .bubble .au-btn:hover {
+  background: rgba(0, 0, 0, .18);
+  color: #fff;
+}
 /* W45: dentro de la burbuja propia la cita heredaba naranja/gris sobre
    naranja (contraste ~1,5:1). Blanco sobre el velo oscuro sí se lee. */
 .msg.mine .b-reply { background: rgba(0, 0, 0, .22); border-left-color: rgba(255, 255, 255, .9); }
@@ -2727,6 +2742,10 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 html { --fs: 1; }
 html[data-font="small"] { --fs: .9; }
 html[data-font="large"] { --fs: 1.16; }
+/* W54c: Android WebView pinta un rectángulo azul al tocar enlaces y
+   botones; eso delata que es una página. Se apaga el resaltado táctil. */
+html, * { -webkit-tap-highlight-color: transparent; }
+
 body { font-size: calc(15px * var(--fs)); }
 .b-text { font-size: calc(14.5px * var(--fs)); line-height: calc(19.5px * var(--fs)); }
 .b-sender { font-size: calc(13px * var(--fs)); }
@@ -2908,11 +2927,50 @@ body { font-size: calc(15px * var(--fs)); }
   padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
   /* W45: en un teléfono horizontal (poca altura) la hoja se salía de la
      pantalla y no se podía llegar a las últimas opciones. */
-  max-height: calc(100vh - 8px);
+  max-height: calc(100vh - env(safe-area-inset-top, 0px) - 8px);
   overflow-y: auto;
   animation: sheet-up .18s ease-out;
 }
 @keyframes sheet-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@keyframes ctx-fade { from { opacity: 0; } to { opacity: 1; } }
+/* W54c: en el teléfono el menú tapa el resto con un velo oscuro. */
+.ctx-backdrop {
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 69;
+  background: rgba(0, 0, 0, .52);
+  animation: ctx-fade .15s ease-out;
+}
+.ctx-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.ctx-head .avatar { margin-right: 10px; }
+.ctx-head-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ctx-head-col b {
+  color: var(--t0);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-head-col small {
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ctx-sheet .ctx-item { padding: 12px 14px; font-size: 15px; }
 /* En táctil la toolbar flotante no tiene sentido (no hay hover):
    las opciones del mensaje se piden con pulsación larga (menú abajo). */
@@ -3003,12 +3061,14 @@ body { font-size: calc(15px * var(--fs)); }
   align-items: center;
   justify-content: center;
   background: rgba(6, 10, 12, .92);
+  touch-action: none;
 }
 .lightbox .lb-img {
   max-width: 96vw;
   max-height: 92vh;
   user-select: none;
   -moz-user-select: none;
+  touch-action: none;
   transition: transform .12s ease-out;
 }
 .lightbox .lb-img:active { transition: none; }  /* sin "resbalón" al arrastrar */
@@ -3688,9 +3748,9 @@ body { font-size: calc(15px * var(--fs)); }
 }
 .avatar-pick .av-edit:hover { color: var(--t1); border-color: var(--t2); }
 
-/* ---- editor de foto: encuadre + rotación ---- */
+/* ---- editor de foto: encuadre + zoom + rotación ---- */
 .av-ed {
-  width: 240px;
+  width: 300px;
   max-width: 100%;
   margin: 0 auto 18px;
   text-align: center;
@@ -3700,10 +3760,10 @@ body { font-size: calc(15px * var(--fs)); }
   color: var(--t2);
   margin: 0 0 8px;
 }
+.av-ed-hint-touch { display: none; }
 .av-ed-cv {
   display: block;
-  width: 220px; height: 220px;
-  max-width: 100%;
+  width: 100%; height: auto;
   margin: 0 auto;
   border-radius: 16px;
   border: 1px solid var(--border);
@@ -3712,10 +3772,17 @@ body { font-size: calc(15px * var(--fs)); }
   touch-action: none;
 }
 .av-ed-cv:active { cursor: grabbing; }
-.av-ed-zoom { width: 220px; max-width: 100%; margin: 14px auto 4px; }
+.av-ed-zoom { width: 100%; max-width: 100%; margin: 14px auto 4px; }
 .av-ed-row { display: flex; margin-top: 8px; }
 .av-ed-row .btn { flex: 1; min-width: 0; }
 .av-ed-row .btn + .btn { margin-left: 8px; }
+/* Mientras se ajusta la foto no se ve el resto del formulario: así no
+   hay dos "Aplicar/Guardar" confundidos en el teléfono. */
+.mp-edit.is-cropping .mp-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 
 /* --------------------------------------------------- W28h: llamadas
 
@@ -4215,6 +4282,7 @@ body { font-size: calc(15px * var(--fs)); }
 .side-title,
 .mobile-me,
 .mobile-page-head,
+.mobile-page-logo,
 .mobile-tabs,
 .chat-more { display: none; }
 
@@ -4322,6 +4390,27 @@ body { font-size: calc(15px * var(--fs)); }
     color: var(--t0);
     font-size: 19px;
     font-weight: 700;
+  }
+  .mobile-page-logo {
+    display: block;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    margin-right: 9px;
+  }
+  .m-head-title {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+  .m-head-title > b {
+    color: var(--t0);
+    font-size: 18px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .people-pane .ppl-back-btn { display: none; }
 
@@ -4454,4 +4543,78 @@ body { font-size: calc(15px * var(--fs)); }
   .auth-logo-img { height: 64px; }
   .auth-title { font-size: 25px; }
   .auth-sub { margin-bottom: 24px; }
+
+  /* W54c: las cabeceras que se pegan al borde superior (perfil/info,
+     autenticación y modales) también respetan el notch. */
+  .pp-head {
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(14px + env(safe-area-inset-left, 0px));
+    padding-right: calc(8px + env(safe-area-inset-right, 0px));
+  }
+  .auth-card {
+    padding-top: calc(34px + env(safe-area-inset-top, 0px));
+    padding-left: calc(22px + env(safe-area-inset-left, 0px));
+    padding-right: calc(22px + env(safe-area-inset-right, 0px));
+  }
+  /* W54c: el visor deja libres la barra de cerrar/descargar y la pista
+     inferior. La imagen se ajusta entre ambas, sin meterse debajo. */
+  .lightbox .lb-img {
+    max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    max-height: calc(100vh - 128px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+  .lb-close {
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    right: calc(12px + env(safe-area-inset-right, 0px));
+  }
+  .lb-dl {
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    right: calc(60px + env(safe-area-inset-right, 0px));
+  }
+  .lb-hint {
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    padding-left: calc(10px + env(safe-area-inset-left, 0px));
+    padding-right: calc(10px + env(safe-area-inset-right, 0px));
+  }
+  /* Al ampliar, los controles se apartan y dejan ver la foto completa. */
+  .lightbox.lb-zoomed .lb-close,
+  .lightbox.lb-zoomed .lb-dl {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .12s ease-out;
+  }
+  .lightbox .lb-close,
+  .lightbox .lb-dl { transition: opacity .12s ease-out; }
+
+  /* W54c: editor de foto grande y gestual. Sin barra de zoom ni botón
+     Girar: se usan dos dedos, como en una app de verdad. */
+  /* W54c: mientras se ajusta la foto, el editor ocupa la pantalla y
+     tapa el chat y la barra inferior; al pulsar Aplicar vuelve el
+     formulario. Así no hay dos "Aplicar/Guardar" a la vista. */
+  .modal-veil.veil-cropping {
+    padding: 0;
+    background: var(--bg);
+  }
+  .modal-veil.veil-cropping .modal.mp-edit {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+  .veil-cropping .modal.mp-edit > header {
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(16px + env(safe-area-inset-left, 0px));
+    padding-right: calc(8px + env(safe-area-inset-right, 0px));
+  }
+  .av-ed {
+    width: min(330px, calc(100vw - 48px));
+    margin-bottom: 12px;
+  }
+  .av-ed-hint-desk { display: none; }
+  .av-ed-hint-touch { display: inline; }
+  .av-ed-zoom,
+  .av-ed-rotate { display: none; }
+  .mp-edit.is-cropping .mp-body { padding: 10px 12px 4px; }
 }

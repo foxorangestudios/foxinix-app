@@ -21,8 +21,8 @@ compilar en macOS.
 Para ejecutar el AppImage en Arch Linux:
 
 ```bash
-chmod +x Foxinix-0.1.1-linux-x86_64.AppImage
-./Foxinix-0.1.1-linux-x86_64.AppImage
+chmod +x Foxinix-0.1.2-linux-x86_64.AppImage
+./Foxinix-0.1.2-linux-x86_64.AppImage
 ```
 
 Los paquetes `.deb` y `.rpm` recomiendan los plugins de GStreamer para
@@ -33,8 +33,12 @@ reproductor no anda, instalá `gstreamer1.0-plugins-good`,
 ## Icono y descripción
 
 El icono fuente es `src-tauri/icons/icon.svg` (SVG cuadrado con el logo de
-Foxinix). `tauri icon` genera los PNG, ICO, ICNS y los iconos de Android a
-partir de ese archivo. La descripción, editorial, copyright y licencia se
+Foxinix sobre una placa oscura y margen interno). `icon.json` es el manifiesto
+de `tauri icon`: usa ese SVG para escritorio y `android-fg.svg`/`android-bg.svg`
+para el icono adaptativo de Android, con el logo al 60 % para que respire
+dentro de las máscaras circular, cuadrada y rounded. El comando
+`tauri icon src-tauri/icons/icon.json` regenera los PNG, ICO, ICNS y los
+iconos de Android. La descripción, editorial, copyright y licencia se
 declaran en `src-tauri/tauri.conf.json`; Linux usa esos datos para el
 `.desktop` y los paquetes `.deb`/`.rpm`, y Windows para las propiedades del
 instalador.

@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -88,6 +89,17 @@ def main():
         ]:
             base.send(a.base, who["access"], cid, {"kind": "text", "body": body})
             time.sleep(0.2)
+        # Una imagen alta y otra normal: el visor debe dejar libres los
+        # controles de arriba y la pista inferior aun con una foto 9:16.
+        tall = SHOTS / f"mov-tall-{stamp}.png"
+        im = Image.new("RGB", (360, 900), (255, 138, 61))
+        for y in range(900):
+            for x in range(360):
+                if (x + y) % 80 < 8:
+                    im.putpixel((x, y), (28, 32, 36))
+        im.save(tall)
+        up = base.upload(a.base, B["access"], tall)
+        base.send(a.base, B["access"], cid, {"kind": "image", "media_id": up["id"]})
         print(f"→ sembrados: {ua} (A) y {ub} (B), chat {cid}")
 
         sess = json.dumps({"access": A["access"], "refresh": A["refresh"],
@@ -167,8 +179,12 @@ def main():
                    "document.querySelector('.chat-more').click();"
                    "await s(450);"
                    "const m=document.querySelector('.ctx-menu');"
+                   "const h=m?m.querySelector('.ctx-head'):null;"
                    "return JSON.stringify({sheet:!!(m&&m.classList.contains('ctx-sheet')),"
-                   "items:m?m.querySelectorAll('.ctx-item').length:0})})()")
+                   "items:m?m.querySelectorAll('.ctx-item').length:0,"
+                   "backdrop:!!document.querySelector('.ctx-backdrop'),"
+                   "head:h?h.querySelector('b').textContent:'',"
+                   "headAv:!!(h&&h.querySelector('.avatar'))})})()")
         ok, js_res, _, log = run_shot(
             f"{a.base}/?v=mobile-more", SHOTS / "mov-3-mas.png",
             js=js_more, wait=500)
@@ -179,6 +195,8 @@ def main():
         st = js_res
         if not st["sheet"] or st["items"] < 4:
             raise SystemExit(f"✗ menú móvil incompleto: {st}")
+        if not st["backdrop"] or not st["head"] or not st["headAv"]:
+            raise SystemExit(f"✗ falta el velo o la cabecera del chat: {st}")
 
         # 4) Personas: app bar propia y barra inferior activa.
         js_people = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
@@ -186,7 +204,9 @@ def main():
                      "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
                      "document.querySelector('.mobile-tabs .mt-btn:nth-child(2)').click();"
                      "await s(900);"
+                     "const lg=document.querySelector('.mobile-page-head .mobile-page-logo');"
                      "return JSON.stringify({head:(document.querySelector('.mobile-page-head b')||{}).textContent,"
+                     "logo:!!lg,logoW:lg?Math.round(lg.getBoundingClientRect().width):0,"
                      "on:!!document.querySelectorAll('.mobile-tabs .mt-btn.on')[0]})})()")
         ok, js_res, _, log = run_shot(
             f"{a.base}/?v=mobile-people", SHOTS / "mov-4-personas.png",
@@ -198,6 +218,8 @@ def main():
         st = js_res
         if st["head"] != "Personas" or not st["on"]:
             raise SystemExit(f"✗ cabecera de Personas incorrecta: {st}")
+        if not st["logo"] or st["logoW"] != 32:
+            raise SystemExit(f"✗ falta el icono del sitio en Personas: {st}")
 
         # 5) Ajustes: pestaña de abajo; la barra sigue visible y activa.
         js_set = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
@@ -210,7 +232,9 @@ def main():
                   "const nav=document.querySelector('.mobile-tabs');"
                   "const on=document.querySelector('.mobile-tabs .mt-btn.on .mt-label');"
                   "const close=document.querySelector('.modal.settings > header .icon-btn');"
+                  "const lg=document.querySelector('.modal.settings > header .mobile-page-logo');"
                   "return JSON.stringify({w:Math.round(r.width),h:Math.round(r.height),"
+                  "logo:!!lg,logoW:lg?Math.round(lg.getBoundingClientRect().width):0,"
                   "tabs:getComputedStyle(nav).display,active:on?on.textContent.trim():'',"
                   "close:close?getComputedStyle(close).display:'',"
                   "navZ:getComputedStyle(nav).zIndex,"
@@ -229,6 +253,8 @@ def main():
             raise SystemExit(f"✗ Ajustes no se comporta como pestaña: {st}")
         if st["close"] != "none":
             raise SystemExit(f"✗ la X de Ajustes sigue visible en móvil: {st}")
+        if not st["logo"] or st["logoW"] != 32:
+            raise SystemExit(f"✗ falta el icono del sitio en Ajustes: {st}")
         if int(st["navZ"]) <= int(st["veilZ"]):
             raise SystemExit(f"✗ la barra inferior quedó debajo de Ajustes: {st}")
 
@@ -256,6 +282,132 @@ def main():
         st = js_res
         if not st["opened"] or not st["closed"] or st["active"] != "Chats":
             raise SystemExit(f"✗ la barra no navega desde Ajustes: {st}")
+
+        # 7) Editor de foto móvil: grande, sin barra/botón y sin el
+        # formulario de abajo hasta pulsar Aplicar.
+        js_avatar = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+                     "let t=Date.now();"
+                     "while(Date.now()-t<12000&&!document.querySelector('.mobile-me'))await s(120);"
+                     "document.querySelector('.mobile-me').click();"
+                     "await s(500);"
+                     "const pencil=document.querySelector('.mp-edit-open');"
+                     "if(!pencil)return 'FAIL: no abrió el perfil';"
+                     "pencil.click(); await s(500);"
+                     "const inp=document.querySelector('.mp-edit input[type=file]');"
+                     "if(!inp)return 'FAIL: sin selector de foto';"
+                     "const blob=await (await fetch('/static/icon-192.png')).blob();"
+                     "const dt=new DataTransfer();"
+                     "dt.items.add(new File([blob],'perfil.png',{type:'image/png'}));"
+                     "inp.files=dt.files;"
+                     "inp.dispatchEvent(new Event('change',{bubbles:true}));"
+                     "await s(700);"
+                     "const cv=document.querySelector('.mp-edit .av-ed-cv');"
+                     "if(!cv)return 'FAIL: no abrió el editor';"
+                     "const r=cv.getBoundingClientRect();"
+                     "const before=cv.toDataURL();"
+                     "function pe(type,id,x,y){cv.dispatchEvent(new PointerEvent(type,"
+                     "{bubbles:true,cancelable:true,pointerId:id,pointerType:'touch',"
+                     "clientX:x,clientY:y}));}"
+                     "pe('pointerdown',1,r.left+r.width*.3,r.top+r.height*.5);"
+                     "pe('pointerdown',2,r.left+r.width*.7,r.top+r.height*.5);"
+                     "pe('pointermove',2,r.left+r.width*.85,r.top+r.height*.5);"
+                     "pe('pointerup',1,r.left+r.width*.85,r.top+r.height*.5);"
+                     "pe('pointerup',2,r.left+r.width*.85,r.top+r.height*.5);"
+                     "await s(200);"
+                     "const z=document.querySelector('.mp-edit .av-ed-zoom');"
+                     "const rot=document.querySelector('.mp-edit .av-ed-rotate');"
+                     "const out={w:Math.round(r.width),h:Math.round(r.height),"
+                     "gesture:cv.toDataURL()!==before,"
+                     "zoom:z?getComputedStyle(z).display:'',"
+                     "rotate:rot?getComputedStyle(rot).display:'',"
+                     "foot:!!document.querySelector('.mp-edit .m-foot'),"
+                     "fields:document.querySelectorAll('.mp-edit .field').length};"
+                     "const apply=Array.from(document.querySelectorAll('.mp-edit .av-ed .btn'))"
+                     ".find(b=>b.textContent.trim()==='Aplicar');"
+                     "if(apply)apply.click(); await s(600);"
+                     "out.footAfter=!!document.querySelector('.mp-edit .m-foot');"
+                     "out.fieldsAfter=document.querySelectorAll('.mp-edit .field').length;"
+                     "return JSON.stringify(out)})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-avatar", SHOTS / "mov-7-foto.png",
+            js=js_avatar, wait=500)
+        print("paso7 editor de foto:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1800:])
+            raise SystemExit("✗ no abrió el editor de foto móvil")
+        st = js_res
+        if st.get("w", 0) < 300 or st.get("h", 0) < 300:
+            raise SystemExit(f"✗ el editor no es grande en móvil: {st}")
+        if not st.get("gesture"):
+            raise SystemExit(f"✗ los dos dedos no cambian el encuadre: {st}")
+        if st.get("zoom") != "none" or st.get("rotate") != "none":
+            raise SystemExit(f"✗ siguen visibles los controles de escritorio: {st}")
+        if st.get("foot") or st.get("fields"):
+            raise SystemExit(f"✗ el formulario tapa el editor: {st}")
+        if not st.get("footAfter") or not st.get("fieldsAfter"):
+            raise SystemExit(f"✗ Aplicar no devolvió el formulario: {st}")
+
+        # 8) Visor: la imagen queda entre los controles; al ampliar se
+        # esconden solo los controles.
+        js_lb = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+                 "let t=Date.now();"
+                 "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))await s(120);"
+                 "document.querySelector('.chat-list .chat-item').click();"
+                 "await s(900);"
+                 "const im=document.querySelector('.b-img');"
+                 "if(!im)return 'FAIL: no hay imagen en el chat';"
+                 "im.click(); await s(500);"
+                 "const big=document.querySelector('.lightbox .lb-img');"
+                 "const close=document.querySelector('.lb-close');"
+                 "const dl=document.querySelector('.lb-dl');"
+                 "const hint=document.querySelector('.lb-hint');"
+                 "if(!big||!close||!dl)return 'FAIL: no abrió el visor';"
+                 "const br=big.getBoundingClientRect(),cr=close.getBoundingClientRect(),"
+                 "dr=dl.getBoundingClientRect(),hr=hint?hint.getBoundingClientRect():null;"
+                 "const out={top:br.top>=cr.bottom,dl:br.top>=dr.bottom,"
+                 "bottom:!hr||br.bottom<=hr.top};"
+                 "big.click(); await s(350);"
+                 "out.zoomed=document.querySelector('.lightbox').classList.contains('lb-zoomed');"
+                 "out.closeOpacity=getComputedStyle(close).opacity;"
+                 "out.closePointer=getComputedStyle(close).pointerEvents;"
+                 "return JSON.stringify(out)})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-lightbox", SHOTS / "mov-8-visor.png",
+            js=js_lb, wait=500)
+        print("paso8 visor:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1800:])
+            raise SystemExit("✗ no abrió el visor de imágenes")
+        st = js_res
+        for key in ("top", "dl", "bottom", "zoomed"):
+            if not st.get(key):
+                raise SystemExit(f"✗ el visor no respeta los controles ({key}): {st}")
+        if st.get("closeOpacity") != "0" or st.get("closePointer") != "none":
+            raise SystemExit(f"✗ los controles no se esconden al ampliar: {st}")
+
+        # 9) Tema claro: la burbuja propia mantiene texto blanco legible.
+        js_light = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+                    "document.documentElement.setAttribute('data-theme','light');"
+                    "const close=document.querySelector('.lb-close');"
+                    "if(close)close.click(); await s(400);"
+                    "document.querySelector('.chat-list .chat-item').click();"
+                    "await s(700);"
+                    "const b=document.querySelector('.msg.mine .bubble');"
+                    "const cs=b?getComputedStyle(b):null;"
+                    "const t=b?b.querySelector('.b-text'):null;"
+                    "return JSON.stringify({bubble:cs?cs.backgroundColor:'',"
+                    "color:cs?cs.color:'',text:t?getComputedStyle(t).color:''})})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-light", SHOTS / "mov-9-claro.png",
+            js=js_light, wait=500)
+        print("paso9 tema claro:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1800:])
+            raise SystemExit("✗ no cargó el tema claro")
+        if js_res.get("bubble") != "rgb(184, 84, 22)":
+            raise SystemExit(f"✗ burbuja propia inesperada en claro: {js_res}")
+        if js_res.get("color") != "rgb(255, 255, 255)" or js_res.get("text") != "rgb(255, 255, 255)":
+            raise SystemExit(f"✗ texto oscuro sobre burbuja naranja: {js_res}")
 
         # 6) Escritorio: nada exclusivo de móvil.
         ok, js_res, ev, log = run_shot(
