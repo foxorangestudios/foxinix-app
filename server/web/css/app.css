@@ -4255,7 +4255,9 @@ body { font-size: calc(15px * var(--fs)); }
   .side-head > .icon-btn + .icon-btn { margin-left: 4px; }
   /* W54b: el ＋ va sin disco de color; el avatar ocupa el mismo
      diámetro que el botón (40px) para que la barra quede pareja. */
-  .side-new { background: none; color: var(--t2); }
+  .side-new,
+  .side-new:hover,
+  .side-new:active { background: none; color: var(--t2); }
   .mobile-me { display: inline-flex; }
   .mobile-me .avatar {
     width: 40px;
