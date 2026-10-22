@@ -28,17 +28,31 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dependencias del sistema
-        timeout-minutes: 20
+        timeout-minutes: 30
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           set -euo pipefail
-          # Los runners de Azure a veces intentan IPv6 y apt se queda
-          # esperando; forzamos IPv4 y reintentos para no bloquear el
-          # release entero. El timeout convierte un espejo colgado en un
-          # fallo reintentable en vez de una espera indefinida.
-          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 \
+          # Los runners de Ubuntu pueden arrancar con unattended-upgrades
+          # reteniendo el lock de dpkg; sin esto apt se queda esperando y
+          # el release entero termina en timeout. También forzamos IPv4:
+          # en Azure algunos espejos intentan IPv6 y no responden.
+          timeout 30s sudo systemctl stop unattended-upgrades.service \
+            apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+          timeout 10s sudo systemctl stop apt-daily.timer \
+            apt-daily-upgrade.timer 2>/dev/null || true
+          if curl -4 -fsS --max-time 10 \
+            http://azure.archive.ubuntu.com/ubuntu/dists/jammy/InRelease \
+            >/dev/null 2>&1; then
+            sudo sed -i \
+              -e 's|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+              -e 's|http://security.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+              /etc/apt/sources.list
+          fi
+          APT_OPTS=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3
+            -o DPkg::Lock::Timeout=300)
+          sudo apt-get "${APT_OPTS[@]}" update
+          sudo apt-get "${APT_OPTS[@]}" \
             -o Dpkg::Options::=--force-confdef \
             -o Dpkg::Options::=--force-confold install -y \
             build-essential curl wget file \
