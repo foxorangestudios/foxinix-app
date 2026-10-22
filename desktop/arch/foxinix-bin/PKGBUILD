@@ -1,0 +1,55 @@
+# Maintainer: Foxinix <soporte@foxinix.qzz.io>
+pkgname=foxinix-bin
+pkgver=0.1.5
+pkgrel=1
+pkgdesc="Cliente de mensajería Foxinix (binario oficial)"
+arch=('x86_64')
+url="https://github.com/foxorangestudios/foxinix-app"
+license=('Apache-2.0')
+depends=('glibc' 'gcc-libs' 'bash' 'bzip2' 'e2fsprogs' 'libdrm' 'libglvnd'
+         'expat' 'fontconfig' 'freetype2' 'fribidi' 'mesa' 'libgpg-error'
+         'graphite' 'harfbuzz' 'wayland' 'libx11' 'libxcb' 'zlib' 'dbus'
+         'xdg-utils')
+optdepends=('libnotify: notificaciones de escritorio')
+provides=('foxinix')
+conflicts=('foxinix')
+options=('!strip' '!debug')
+noextract=("Foxinix-${pkgver}-linux-x86_64.AppImage")
+source=("Foxinix-${pkgver}-linux-x86_64.AppImage::https://github.com/foxorangestudios/foxinix-app/releases/download/v${pkgver}/Foxinix-${pkgver}-linux-x86_64.AppImage"
+        "LICENSE::https://raw.githubusercontent.com/foxorangestudios/foxinix-app/v${pkgver}/LICENSE")
+sha256sums=('31112b76be8039339562ace461e0266728c7b2f9f6cb04cb319f9921054f6a93'
+            'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30')
+
+package() {
+  local appdir="$pkgdir/opt/foxinix"
+
+  cd "$srcdir"
+  rm -rf squashfs-root
+  "$srcdir/Foxinix-${pkgver}-linux-x86_64.AppImage" --appimage-extract >/dev/null
+
+  # Mover el árbol extraído evita duplicar ~427 MB durante el empaquetado.
+  install -d "$pkgdir/opt"
+  mv "$srcdir/squashfs-root" "$appdir"
+
+  install -d "$pkgdir/usr/bin"
+  cat > "$pkgdir/usr/bin/foxinix" <<'WRAPPER'
+#!/bin/sh
+exec /opt/foxinix/AppRun "$@"
+WRAPPER
+  chmod 755 "$pkgdir/usr/bin/foxinix"
+
+  install -d "$pkgdir/usr/share/applications"
+  sed -e 's/^Exec=.*/Exec=foxinix %U/' \
+      -e 's/^Icon=.*/Icon=foxinix/' \
+      "$appdir/usr/share/applications/Foxinix.desktop" \
+      > "$pkgdir/usr/share/applications/foxinix.desktop"
+
+  install -Dm644 "$appdir/usr/share/icons/hicolor/32x32/apps/foxinix-desktop.png" \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/foxinix.png"
+  install -Dm644 "$appdir/usr/share/icons/hicolor/128x128/apps/foxinix-desktop.png" \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/foxinix.png"
+  install -Dm644 "$appdir/usr/share/icons/hicolor/256x256@2/apps/foxinix-desktop.png" \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/foxinix.png"
+
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
