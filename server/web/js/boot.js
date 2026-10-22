@@ -147,3 +147,19 @@
   });
   setTimeout(read, 0);
 })();
+
+/* W57: el APK oculta el WebView en segundo plano. Avisamos al documento
+   para congelar animaciones/transiciones (el WebSocket y los avisos
+   siguen vivos) y las reanudamos al volver a primer plano. */
+(function () {
+  var root = document.documentElement;
+  window.foxinixNativePause = function () {
+    root.classList.add('native-bg');
+  };
+  window.foxinixNativeResume = function () {
+    root.classList.remove('native-bg');
+  };
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) root.classList.remove('native-bg');
+  });
+})();

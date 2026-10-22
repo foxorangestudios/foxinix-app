@@ -13,6 +13,122 @@
    Sin dependencias. FF78: Cache API + IndexedDB + Blob disponibles. */
 export const DL_CACHE = 'foxinix-downloads-v1';
 
+/* W57: tipos de descarga y preferencias de descarga automática por red.
+   Se guardan en el dispositivo (localStorage), igual que el resto de
+   preferencias locales. */
+export const DL_TYPES = [
+  { id: 'video', label: 'Video', done: 'Video guardado' },
+  { id: 'image', label: 'Imagen', done: 'Imagen guardada' },
+  { id: 'audio', label: 'Audio', done: 'Audio guardado' },
+  { id: 'file', label: 'Archivo', done: 'Archivo guardado' },
+  { id: 'document', label: 'Documento', done: 'Documento guardado' },
+];
+const DL_AUTO_KEY = 'fm.dl.auto';
+
+export function dlTypeInfo(type) {
+  for (let i = 0; i < DL_TYPES.length; i++) {
+    if (DL_TYPES[i].id === type) return DL_TYPES[i];
+  }
+  return DL_TYPES[3];
+}
+
+export function dlCategory(kind, mime, name) {
+  const m = String(mime || '').toLowerCase();
+  const n = String(name || '').toLowerCase();
+  if (kind === 'image' || m.indexOf('image/') === 0 ||
+      /\.(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(n)) return 'image';
+  if (kind === 'voice' || kind === 'audio' || m.indexOf('audio/') === 0 ||
+      /\.(mp3|ogg|oga|opus|wav|m4a|aac|flac)$/.test(n)) return 'audio';
+  if (kind === 'video' || m.indexOf('video/') === 0 ||
+      /\.(mp4|m4v|mov|webm|mkv|avi|ogv)$/.test(n)) return 'video';
+  if (/\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|txt|csv|md|epub)$/.test(n) ||
+      m.indexOf('application/pdf') === 0 ||
+      m.indexOf('application/msword') === 0 ||
+      m.indexOf('application/vnd.openxmlformats') === 0 ||
+      m.indexOf('application/vnd.oasis.opendocument') === 0 ||
+      m.indexOf('text/plain') === 0) return 'document';
+  return 'file';
+}
+
+function emptyAuto() {
+  const out = {};
+  for (let i = 0; i < DL_TYPES.length; i++) {
+    out[DL_TYPES[i].id] = { wifi: false, mobile: false };
+  }
+  return out;
+}
+
+export function autoDlPrefs() {
+  const out = emptyAuto();
+  try {
+    const raw = JSON.parse(localStorage.getItem(DL_AUTO_KEY) || '{}');
+    for (let i = 0; i < DL_TYPES.length; i++) {
+      const id = DL_TYPES[i].id;
+      const v = raw && raw[id];
+      if (v && typeof v === 'object') {
+        out[id].wifi = !!v.wifi;
+        out[id].mobile = !!v.mobile;
+      }
+    }
+  } catch (e) {}
+  return out;
+}
+
+export function setAutoDl(type, network, on) {
+  const prefs = autoDlPrefs();
+  if (!prefs[type] || (network !== 'wifi' && network !== 'mobile')) return prefs;
+  prefs[type][network] = !!on;
+  try { localStorage.setItem(DL_AUTO_KEY, JSON.stringify(prefs)); } catch (e) {}
+  return prefs;
+}
+
+export function autoDlEnabled(type, network) {
+  if (network !== 'wifi' && network !== 'mobile') return false;
+  const prefs = autoDlPrefs();
+  return !!(prefs[type] && prefs[type][network]);
+}
+
+function androidBridge() {
+  try {
+    const a = window.FoxinixAndroid;
+    return a && typeof a.download === 'function' ? a : null;
+  } catch (e) { return null; }
+}
+
+export function nativeDownloadAvailable() {
+  return !!androidBridge();
+}
+
+export function nativeNetwork() {
+  const a = androidBridge();
+  if (!a || typeof a.networkType !== 'function') return '';
+  try { return String(a.networkType() || ''); } catch (e) { return ''; }
+}
+
+/* En Android los bytes los baja DownloadManager directamente a
+   Downloads/Foxinix. La web sigue usando blob + <a download>. */
+export function nativeDownload(url, name, mime, type, silent) {
+  const a = androidBridge();
+  if (!a || !url || String(url).indexOf('blob:') === 0) return false;
+  let full = String(url);
+  /* DownloadManager exige una URL absoluta. Las medias firmadas del
+     server vienen como /media/… (ruta relativa): se completa con el
+     origen real del WebView (https://chat.foxinix.qzz.io en el APK). */
+  if (full.charAt(0) === '/' && full.charAt(1) !== '/') {
+    full = window.location.origin + full;
+  }
+  try {
+    return !!a.download(full, String(name || 'archivo'),
+      String(mime || ''), String(type || 'file'), !!silent);
+  } catch (e) { return false; }
+}
+
+export function shouldAutoDownload(type) {
+  if (!nativeDownloadAvailable()) return false;
+  return autoDlEnabled(type, nativeNetwork());
+}
+
+
 const DB_NAME = 'foxinix-downloads';
 const DB_VERSION = 1;
 const STORE = 'files';
@@ -130,6 +246,7 @@ export async function saveDownload(url, name, blob) {
   }
   const meta = {
     key: key,
+    url: String(url),       // W57: URL firmada original (APK la usa)
     name: name || 'archivo',
     size: blob.size,
     mime: mime,

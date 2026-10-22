@@ -21,7 +21,8 @@ export const BootScreen = {
   },
   template:
     '<div class="bp-screen">' +
-      '<img class="bp-logo" src="/static/icon.svg" alt="Foxinix">' +
+      '<svg class="bp-logo" viewBox="-7 -30 334 362" role="img" aria-label="Foxinix">' +
+        '<use href="#i-logo-mark"></use></svg>' +
       '<div class="bp-e2e">' +
         '<svg class="ic ic-sm"><use href="#i-key"></use></svg>' +
         '<span>{{ t(\'Cifrado de extremo a extremo\') }}</span>' +

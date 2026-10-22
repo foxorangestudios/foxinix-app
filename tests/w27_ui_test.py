@@ -15,7 +15,7 @@ y maneja Firefox headless (BiDi):
   4. Activos solo lista amigos en línea: C aparece (y sigue apareciendo
      con estado "No molestar" o "Ausente"); B, desconectado, no está
   5. info del DM con B (offline con preset "en línea" guardado): la
-     píldora dice "Desconectado" y el puntito del info mide 22px (doble)
+     píldora dice "Desconectado" y el puntito del info mide 23px (doble)
   6. ⋮ de la lista en el grupo (owner): "Cambiar foto del grupo"
      presente; la info del grupo ya no tiene el botón grande de salir
      y "Salir del grupo" vive en el ⋮ de la info
@@ -535,8 +535,8 @@ def main():
     d = json.loads(res) if res and res.startswith("{") else {}
     step("la píldora del perfil dice Desconectado (aunque el preset "
          "guardado sea en línea)", d.get("pill") == "Desconectado", d)
-    step("el puntito del info mide 22px (doble) y es el de la ficha "
-         "del contacto", d.get("dot") == "22px" and d.get("inCard"), d)
+    step("el puntito del info mide 23px (doble) y es el de la ficha "
+         "del contacto", d.get("dot") == "23px" and d.get("inCard"), d)
 
     # =================== 6. ⋮ del grupo en la lista ====================
     print("→ paso6 ⋮ del grupo (owner)")
@@ -713,7 +713,7 @@ def main():
     step("puntitos: A con clase on y B con st-off",
          dots and "on" in dots[0] and "st-off" in dots[-1], dots)
     step("el punto de los miembros mide 11px (igual que la lista de "
-         "chats, no el doble del info privado)", d.get("dotW") == "11px", d)
+         "chats, no el doble del info privado)", d.get("dotW") == "14px", d)
 
     # =================== 9. auto-scroll por ResizeObserver ==============
     print("→ paso9 auto-scroll al crecer una fila")

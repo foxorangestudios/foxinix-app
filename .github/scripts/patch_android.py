@@ -85,6 +85,8 @@ for permission in (
     # normal y permite que el canal de mensajes vibre.
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.VIBRATE",
+    # W57: para elegir descarga automática por Wi-Fi/datos móviles.
+    "android.permission.ACCESS_NETWORK_STATE",
 ):
     if permission not in manifest:
         tag = f'    <uses-permission android:name="{permission}" />\n'
@@ -96,6 +98,25 @@ for permission in (
         else:
             sys.exit("AndroidManifest.xml no tiene cierre </manifest>")
         print(f"Permiso agregado: {permission}")
+
+# W57: guardar en Downloads/Foxinix. En Android 10+ el DownloadManager
+# escribe en la colección pública sin permiso; en Android 9 o anterior
+# hace falta WRITE_EXTERNAL_STORAGE (se pide en tiempo de ejecución).
+for permission, max_sdk in (
+    ("android.permission.WRITE_EXTERNAL_STORAGE", 28),
+    ("android.permission.READ_EXTERNAL_STORAGE", 32),
+):
+    if permission not in manifest:
+        tag = (f'    <uses-permission android:name="{permission}" '
+               f'android:maxSdkVersion="{max_sdk}" />\n')
+        application = manifest.find("<application")
+        if application != -1:
+            manifest = manifest[:application] + tag + manifest[application:]
+        elif "</manifest>" in manifest:
+            manifest = manifest.replace("</manifest>", tag + "</manifest>", 1)
+        else:
+            sys.exit("AndroidManifest.xml no tiene cierre </manifest>")
+        print(f"Permiso agregado: {permission} (maxSdkVersion={max_sdk})")
 
 # W54d: el WebView ocupa toda la pantalla y el teclado debe reducir la
 # ventana en vez de tapar el composer. Sin esto Android elige adjustPan
@@ -122,14 +143,20 @@ main_activity = next(ROOT.glob("app/src/main/java/**/MainActivity.kt"), None)
 if main_activity:
     activity = main_activity.read_text(encoding="utf-8")
     if "WindowInsetsCompat.Type.ime()" not in activity:
-        activity = activity.replace(
-            "import androidx.activity.enableEdgeToEdge",
-            "import android.view.View\n"
-            "import androidx.activity.enableEdgeToEdge\n"
-            "import androidx.core.view.ViewCompat\n"
+        for imp in (
+            "import android.view.View",
+            "import androidx.core.view.ViewCompat",
             "import androidx.core.view.WindowInsetsCompat",
-            1,
-        )
+        ):
+            if imp in activity:
+                continue
+            marker = "import androidx.activity.enableEdgeToEdge"
+            if marker in activity:
+                activity = activity.replace(marker, imp + "\n" + marker, 1)
+            else:
+                pkg = re.search(r"^package\s+[\w.]+\n", activity, re.MULTILINE)
+                if pkg:
+                    activity = activity[:pkg.end()] + imp + "\n" + activity[pkg.end():]
         marker = "    super.onCreate(savedInstanceState)\n"
         if marker not in activity:
             print("Aviso: no se encontró onCreate en MainActivity.kt")
@@ -180,49 +207,55 @@ if main_activity:
             1,
         )
 
-    has_create = "override fun onWebViewCreate" in activity
-    if "private var appWebView" not in activity and has_create:
-        marker = "    override fun onWebViewCreate(webView: WebView) {"
-        if marker in activity:
-            activity = activity.replace(
-                marker,
-                "    private var appWebView: WebView? = null\n\n" + marker,
-                1,
-            )
-
+    has_create = bool(re.search(
+        r"override fun onWebViewCreate\s*\(webView: WebView\)", activity
+    ))
     if has_create:
-        if "addJavascriptInterface" not in activity:
-            marker = (
-                "    override fun onWebViewCreate(webView: WebView) {\n"
-                "        super.onWebViewCreate(webView)\n"
-            )
-            if marker in activity:
-                activity = activity.replace(
-                    marker,
-                    marker
-                    + "        appWebView = webView\n"
-                    + '        webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
-                    + "        webView.post { ViewCompat.requestApplyInsets(webView) }\n",
-                    1,
+        method_re = re.compile(
+            r"(?m)^([ \t]*)override fun onWebViewCreate\(webView: WebView\) \{\n"
+        )
+        match = method_re.search(activity)
+        if not match:
+            print("Aviso: no se pudo ubicar onWebViewCreate")
+        else:
+            indent = match.group(1)
+            if "private var appWebView" not in activity:
+                activity = (
+                    activity[:match.start()]
+                    + indent + "private var appWebView: WebView? = null\n\n"
+                    + activity[match.start():]
                 )
-            else:
-                print("Aviso: no se pudo inyectar el puente en onWebViewCreate")
-        elif "appWebView = webView" not in activity:
-            marker = "        super.onWebViewCreate(webView)\n"
-            activity = activity.replace(
-                marker,
-                marker + "        appWebView = webView\n",
-                1,
-            )
-        if ("ViewCompat.requestApplyInsets(webView)" not in activity
-                and "appWebView = webView" in activity):
-            marker = '        webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
-            if marker in activity:
-                activity = activity.replace(
-                    marker,
-                    marker + "        webView.post { ViewCompat.requestApplyInsets(webView) }\n",
-                    1,
+                match = method_re.search(activity)
+            # Se examina sólo el comienzo del método: ahí viven el super y
+            # las inyecciones de W55/W57.
+            segment = activity[match.start():match.start() + 2000]
+            inject = ""
+            if "appWebView = webView" not in segment:
+                inject += "appWebView = webView\n"
+            if "addJavascriptInterface" not in segment:
+                inject += (
+                    'webView.addJavascriptInterface('
+                    'AndroidNotifier(this), "FoxinixAndroid")\n'
                 )
+            if "ViewCompat.requestApplyInsets(webView)" not in segment:
+                inject += "webView.post { ViewCompat.requestApplyInsets(webView) }\n"
+            if inject:
+                super_re = re.compile(
+                    r"(?m)^([ \t]*)super\.onWebViewCreate\(webView\)[ \t]*\n"
+                )
+                sm = super_re.search(activity, match.start())
+                if sm:
+                    body_indent = sm.group(1)
+                    insert = "".join(body_indent + line + "\n"
+                                     for line in inject.rstrip("\n").split("\n"))
+                    activity = activity[:sm.end()] + insert + activity[sm.end():]
+                else:
+                    brace = activity.find("{", match.start())
+                    if brace != -1:
+                        body_indent = indent + "    "
+                        insert = "".join(body_indent + line + "\n"
+                                         for line in inject.rstrip("\n").split("\n"))
+                        activity = activity[:brace + 1] + "\n" + insert + activity[brace + 1:]
         print("Puente de notificaciones agregado a MainActivity.kt")
     else:
         bridge_method = (
@@ -233,13 +266,6 @@ if main_activity:
             '    webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
             "    webView.post { ViewCompat.requestApplyInsets(webView) }\n"
             "  }\n"
-            "\n  /* W55: Wry pausa el WebView al pasar a segundo plano; eso\n"
-            "     detiene los timers del WebSocket y dejarían de llegar los\n"
-            "     avisos. Lo reanudamos para mantener la conexión viva. */\n"
-            "  override fun onPause() {\n"
-            "    super.onPause()\n"
-            "    appWebView?.onResume()\n"
-            "  }\n"
         )
         closing = activity.rfind("}")
         if closing == -1:
@@ -247,6 +273,168 @@ if main_activity:
         else:
             activity = activity[:closing] + bridge_method + activity[closing:]
             print("Puente de notificaciones agregado a MainActivity.kt")
+    # W57: deep links desde avisos, descargas y segundo plano.
+    if "import android.content.Intent" not in activity:
+        activity = activity.replace(
+            "import android.webkit.WebView",
+            "import android.content.Intent\nimport android.webkit.WebView",
+            1,
+        )
+    if "import android.content.pm.PackageManager" not in activity:
+        activity = activity.replace(
+            "import android.content.Intent",
+            "import android.content.Intent\nimport android.content.pm.PackageManager",
+            1,
+        )
+    if "import android.view.View" not in activity:
+        activity = activity.replace(
+            "import android.content.Intent",
+            "import android.content.Intent\nimport android.view.View",
+            1,
+        )
+
+    if "captureNotificationIntent(intent)" not in activity:
+        create_marker = "    super.onCreate(savedInstanceState)\n"
+        if create_marker in activity:
+            activity = activity.replace(
+                create_marker,
+                create_marker + "    captureNotificationIntent(intent)\n",
+                1,
+            )
+        else:
+            print("Aviso: no se encontró onCreate para el deep link")
+
+    target_methods = (
+        "\n  /* W57: guarda el chat/mensaje del aviso y avisa al WebView.\n"
+        "     Si el WebView aún no cargó, pendingTarget() lo entrega después. */\n"
+        "  private fun captureNotificationIntent(intent: Intent?) {\n"
+        "    val chatId = intent?.getStringExtra(\"foxinix_chat_id\") ?: return\n"
+        "    val messageId = intent?.getStringExtra(\"foxinix_message_id\") ?: \"\"\n"
+        "    AndroidNotifier.setPendingTarget(chatId, messageId)\n"
+        "    notifyNativeTarget()\n"
+        "  }\n"
+        "\n"
+        "  private fun notifyNativeTarget() {\n"
+        "    runJs(\"window.__foxinixNativeTarget&&window.__foxinixNativeTarget()\")\n"
+        "  }\n"
+        "\n"
+        "  /* W57: también lo usa AndroidNotifier para los popups de descarga. */\n"
+        "  fun runJs(js: String) {\n"
+        "    appWebView?.post { appWebView?.evaluateJavascript(js, null) }\n"
+        "  }\n"
+    )
+    if "fun captureNotificationIntent" not in activity:
+        closing = activity.rfind("}")
+        if closing != -1:
+            activity = activity[:closing] + target_methods + activity[closing:]
+
+    if "override fun onNewIntent" not in activity:
+        new_intent = (
+            "\n  override fun onNewIntent(intent: Intent) {\n"
+            "    super.onNewIntent(intent)\n"
+            "    setIntent(intent)\n"
+            "    captureNotificationIntent(intent)\n"
+            "  }\n"
+        )
+        closing = activity.rfind("}")
+        if closing != -1:
+            activity = activity[:closing] + new_intent + activity[closing:]
+
+    if "override fun onRequestPermissionsResult" not in activity:
+        perm_method = (
+            "\n  /* W57: el DownloadManager de Android 9 o anterior necesita\n"
+            "     WRITE_EXTERNAL_STORAGE; al concederlo se reintenta la descarga. */\n"
+            "  override fun onRequestPermissionsResult(\n"
+            "    requestCode: Int,\n"
+            "    permissions: Array<out String>,\n"
+            "    grantResults: IntArray\n"
+            "  ) {\n"
+            "    super.onRequestPermissionsResult(requestCode, permissions, grantResults)\n"
+            "    if (requestCode == 7320) {\n"
+            "      AndroidNotifier.onStoragePermissionResult(\n"
+            "        grantResults.isNotEmpty() &&\n"
+            "          grantResults[0] == PackageManager.PERMISSION_GRANTED\n"
+            "      )\n"
+            "    }\n"
+            "  }\n"
+        )
+        closing = activity.rfind("}")
+        if closing != -1:
+            activity = activity[:closing] + perm_method + activity[closing:]
+
+    # W57: en segundo plano NO se pausa el WebView (la WS y los avisos
+    # deben seguir), pero se oculta para que Android deje de dibujarlo.
+    if "override fun onPause()" in activity:
+        if "appWebView?.visibility = View.INVISIBLE" not in activity:
+            activity = activity.replace(
+                "    super.onPause()\n",
+                "    super.onPause()\n"
+                "    /* W57: Wry pausa el WebView en super.onPause(); se\n"
+                "       reanuda para conservar la WS, pero queda invisible. */\n"
+                "    appWebView?.onResume()\n"
+                "    appWebView?.visibility = View.INVISIBLE\n"
+                "    runJs(\"window.foxinixNativePause&&window.foxinixNativePause()\")\n",
+                1,
+            )
+    else:
+        pause_method = (
+            "\n  override fun onPause() {\n"
+            "    super.onPause()\n"
+            "    /* W57: ocultar el WebView detiene el dibujo sin cortar la\n"
+            "       conexión ni los avisos; la UI vuelve en onResume. */\n"
+            "    appWebView?.onResume()\n"
+            "    appWebView?.visibility = View.INVISIBLE\n"
+            "    runJs(\"window.foxinixNativePause&&window.foxinixNativePause()\")\n"
+            "  }\n"
+        )
+        closing = activity.rfind("}")
+        if closing != -1:
+            activity = activity[:closing] + pause_method + activity[closing:]
+
+    # W57b: algunos WebView pausan el JS recién en onStop. Se reanuda
+    # también ahí para que la notificación siga llegando en segundo plano.
+    if "override fun onStop()" in activity:
+        if "appWebView?.onResume()\n" not in activity.split("override fun onStop()", 1)[1][:600]:
+            activity = activity.replace(
+                "    super.onStop()\n",
+                "    super.onStop()\n    appWebView?.onResume()\n",
+                1,
+            )
+    else:
+        stop_method = (
+            "\n  override fun onStop() {\n"
+            "    super.onStop()\n"
+            "    /* W57b: mantener viva la WebSocket aunque el sistema\n"
+            "       detenga la actividad; el WebView sigue invisible. */\n"
+            "    appWebView?.onResume()\n"
+            "  }\n"
+        )
+        closing = activity.rfind("}")
+        if closing != -1:
+            activity = activity[:closing] + stop_method + activity[closing:]
+
+    if "override fun onResume()" in activity:
+        if "appWebView?.visibility = View.VISIBLE" not in activity:
+            activity = activity.replace(
+                "    super.onResume()\n",
+                "    super.onResume()\n"
+                "    appWebView?.visibility = View.VISIBLE\n"
+                "    runJs(\"window.foxinixNativeResume&&window.foxinixNativeResume()\")\n",
+                1,
+            )
+    else:
+        resume_method = (
+            "\n  override fun onResume() {\n"
+            "    super.onResume()\n"
+            "    appWebView?.visibility = View.VISIBLE\n"
+            "    runJs(\"window.foxinixNativeResume&&window.foxinixNativeResume()\")\n"
+            "  }\n"
+        )
+        closing = activity.rfind("}")
+        if closing != -1:
+            activity = activity[:closing] + resume_method + activity[closing:]
+
+    print("Deep links, descargas y segundo plano listos en MainActivity.kt")
     main_activity.write_text(activity, encoding="utf-8")
 
     notifier = main_activity.parent / "AndroidNotifier.kt"
@@ -255,11 +443,14 @@ if main_activity:
 
 import android.Manifest
 import android.app.Activity
+import android.app.DownloadManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -267,18 +458,25 @@ import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Shader
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import android.util.LruCache
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.widget.Toast
 import androidx.annotation.Keep
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import org.json.JSONObject
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /* W55: avisos nativos del APK. La web llama a FoxinixAndroid.notify()
@@ -301,7 +499,67 @@ class AndroidNotifier(private val activity: Activity) {
     drawableBitmap(if (id != 0) id else R.drawable.ic_stat_foxinix)
   }
 
+  /* W57: descargas nativas a Downloads/Foxinix. */
+  private data class DownloadInfo(
+    val url: String,
+    val name: String,
+    val mime: String,
+    val type: String,
+    val silent: Boolean
+  )
+  private val downloadIds = ConcurrentHashMap<Long, DownloadInfo>()
+  private var pendingDownload: DownloadInfo? = null
+  private val downloadReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+      val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+      if (id <= 0L) return
+      val info = downloadIds.remove(id) ?: return
+      var ok = false
+      try {
+        val manager = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val cursor = manager.query(DownloadManager.Query().setFilterById(id))
+        if (cursor != null) {
+          cursor.use {
+            if (it.moveToFirst()) {
+              val status = it.getInt(
+                it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+              )
+              ok = status == DownloadManager.STATUS_SUCCESSFUL
+            }
+          }
+        }
+      } catch (e: Exception) {
+        ok = false
+      }
+      val label = downloadTypeLabel(info.type)
+      val text = if (ok) "$label guardado" else "No se pudo guardar $label"
+      /* Con la app visible el popup animado lo muestra la web; este
+         Toast cubre el caso de segundo plano o app cerrada. */
+      activity.runOnUiThread {
+        try {
+          if (!activity.hasWindowFocus()) {
+            Toast.makeText(activity, text, Toast.LENGTH_SHORT).show()
+          }
+        } catch (e: Exception) {}
+      }
+      notifyDownloadResult(ok, info)
+    }
+  }
+
   init {
+    current = this
+    try {
+      val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+      if (Build.VERSION.SDK_INT >= 33) {
+        activity.registerReceiver(downloadReceiver, filter, Context.RECEIVER_EXPORTED)
+      } else {
+        activity.registerReceiver(downloadReceiver, filter)
+      }
+    } catch (e: Exception) {
+      // Si el fabricante limita receptores dinámicos, la descarga igual
+      // se completa y DownloadManager muestra su propia notificación.
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       val sound = NotificationChannel(
@@ -408,7 +666,7 @@ class AndroidNotifier(private val activity: Activity) {
   @JavascriptInterface
   @Keep
   fun notify(title: String?, body: String?, chatId: String?, sound: String?) {
-    enqueue(title, body, chatId, sound, null)
+    enqueue(title, body, chatId, sound, null, null)
   }
 
   /* W56: la web envía la foto del remitente (URL absoluta y firmada). */
@@ -421,7 +679,33 @@ class AndroidNotifier(private val activity: Activity) {
     sound: String?,
     avatarUrl: String?
   ) {
-    enqueue(title, body, chatId, sound, avatarUrl)
+    enqueue(title, body, chatId, sound, avatarUrl, null)
+  }
+
+  /* W57: además del chat, el mensaje exacto para abrir el chat ahí. */
+  @JavascriptInterface
+  @Keep
+  fun notifyWithMessage(
+    title: String?,
+    body: String?,
+    chatId: String?,
+    sound: String?,
+    messageId: String?
+  ) {
+    enqueue(title, body, chatId, sound, null, messageId)
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun notifyWithAvatarAndMessage(
+    title: String?,
+    body: String?,
+    chatId: String?,
+    sound: String?,
+    avatarUrl: String?,
+    messageId: String?
+  ) {
+    enqueue(title, body, chatId, sound, avatarUrl, messageId)
   }
 
   private fun enqueue(
@@ -429,7 +713,8 @@ class AndroidNotifier(private val activity: Activity) {
     body: String?,
     chatId: String?,
     sound: String?,
-    avatarUrl: String?
+    avatarUrl: String?,
+    messageId: String?
   ) {
     if (permission() != "granted") return
     val safeTitle = if (title.isNullOrBlank()) "Foxinix" else title
@@ -440,7 +725,10 @@ class AndroidNotifier(private val activity: Activity) {
        WebView: primero se encola y la notificación sale al terminar. */
     avatarExecutor.execute {
       try {
-        showNotification(safeTitle, safeBody, safeChatId, withSound, avatarUrl)
+        showNotification(
+          safeTitle, safeBody, safeChatId, withSound, avatarUrl,
+          if (messageId.isNullOrBlank()) null else messageId
+        )
       } catch (e: Exception) {
         // Un avatar roto no puede hacer desaparecer el aviso.
       }
@@ -452,17 +740,23 @@ class AndroidNotifier(private val activity: Activity) {
     body: String,
     chatId: String?,
     withSound: Boolean,
-    avatarUrl: String?
+    avatarUrl: String?,
+    messageId: String?
   ) {
     val channelId = if (withSound) soundChannelId else silentChannelId
 
     val intent = Intent(activity, MainActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+      action = "foxinix.open." + (chatId ?: "") + "." + (messageId ?: "")
       if (chatId != null) putExtra("foxinix_chat_id", chatId)
+      if (messageId != null) putExtra("foxinix_message_id", messageId)
     }
+    /* W57: cada chat/mensaje tiene su propio PendingIntent; con uno solo
+       todos los avisos abrirían el último chat que notificó. */
+    val requestCode = (chatId + ":" + messageId).hashCode()
     val pending = PendingIntent.getActivity(
       activity,
-      0,
+      requestCode,
       intent,
       PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
@@ -585,7 +879,184 @@ class AndroidNotifier(private val activity: Activity) {
     }
   }
 
+  /* W57: destino pendiente de una notificación (se vacía al leerlo). */
+  @JavascriptInterface
+  @Keep
+  fun pendingTarget(): String {
+    val value = pendingTargetJson
+    pendingTargetJson = ""
+    return value
+  }
+
+  /* W57: red activa para decidir las descargas automáticas. */
+  @JavascriptInterface
+  @Keep
+  fun networkType(): String {
+    return try {
+      val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+      val net = cm.activeNetwork ?: return "none"
+      val caps = cm.getNetworkCapabilities(net) ?: return "none"
+      when {
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+        else -> "other"
+      }
+    } catch (e: Exception) {
+      "none"
+    }
+  }
+
+  /* W57: guarda la URL firmada en Downloads/Foxinix con DownloadManager.
+     silent=true evita el aviso nativo de inicio (descarga automática). */
+  @JavascriptInterface
+  @Keep
+  fun download(
+    url: String?,
+    name: String?,
+    mime: String?,
+    type: String?,
+    silent: Boolean
+  ): Boolean {
+    val cleanUrl = url ?: return false
+    val parsed = try { Uri.parse(cleanUrl) } catch (e: Exception) { return false }
+    val scheme = parsed.scheme ?: return false
+    if (scheme != "https" && scheme != "http") return false
+    val info = DownloadInfo(
+      cleanUrl,
+      sanitizeName(name),
+      mime ?: "",
+      if (type.isNullOrBlank()) "file" else type,
+      silent
+    )
+    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+      ContextCompat.checkSelfPermission(
+        activity,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE
+      ) != PackageManager.PERMISSION_GRANTED
+    ) {
+      pendingDownload = info
+      activity.runOnUiThread {
+        activity.requestPermissions(
+          arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+          7320
+        )
+      }
+      return true
+    }
+    return startDownload(info)
+  }
+
+  private fun startDownload(info: DownloadInfo): Boolean {
+    return try {
+      val manager = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+      val unique = uniqueName(info.name)
+      val request = DownloadManager.Request(Uri.parse(info.url))
+        .setTitle(unique)
+        .setDescription("Descarga de Foxinix")
+        .setNotificationVisibility(
+          DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+        )
+        .setDestinationInExternalPublicDir(
+          Environment.DIRECTORY_DOWNLOADS,
+          "Foxinix/$unique"
+        )
+        .setAllowedOverMetered(true)
+        .setAllowedOverRoaming(false)
+      if (info.mime.isNotBlank()) request.setMimeType(info.mime)
+      val id = manager.enqueue(request)
+      downloadIds[id] = info
+      true
+    } catch (e: Exception) {
+      notifyDownloadResult(false, info)
+      false
+    }
+  }
+
+  private fun storageResult(granted: Boolean) {
+    val info = pendingDownload
+    pendingDownload = null
+    if (info == null) return
+    if (granted) {
+      startDownload(info)
+    } else {
+      notifyDownloadResult(false, info)
+    }
+  }
+
+  private fun notifyDownloadResult(ok: Boolean, info: DownloadInfo) {
+    val json = JSONObject()
+      .put("ok", ok)
+      .put("type", info.type)
+      .put("name", info.name)
+      .toString()
+    val fn = if (ok) "__foxinixDownloadDone" else "__foxinixDownloadError"
+    val js = "window.$fn&&window.$fn(" + JSONObject.quote(json) + ")"
+    (activity as? MainActivity)?.runJs(js)
+  }
+
+  private fun sanitizeName(raw: String?): String {
+    var name = (raw ?: "archivo").replace(
+      Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"),
+      "_"
+    ).trim()
+    if (name.isBlank()) name = "archivo"
+    if (name.length > 120) {
+      val dot = name.lastIndexOf('.')
+      name = if (dot > 0) name.substring(0, 120) + name.substring(dot) else name.substring(0, 120)
+    }
+    return name
+  }
+
+  private fun uniqueName(raw: String): String {
+    val name = sanitizeName(raw)
+    val dir = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      "Foxinix"
+    )
+    try { if (!dir.exists()) dir.mkdirs() } catch (e: Exception) {}
+    val dot = name.lastIndexOf('.')
+    val base = if (dot > 0) name.substring(0, dot) else name
+    val ext = if (dot > 0) name.substring(dot) else ""
+    var candidate = name
+    var n = 1
+    while (File(dir, candidate).exists() && n < 1000) {
+      candidate = "$base ($n)$ext"
+      n++
+    }
+    return candidate
+  }
+
+  private fun downloadTypeLabel(type: String): String {
+    return when (type) {
+      "video" -> "Video"
+      "image" -> "Imagen"
+      "audio" -> "Audio"
+      "document" -> "Documento"
+      else -> "Archivo"
+    }
+  }
+
   companion object {
+    /* W57: MainActivity guarda acá el aviso tocado; la web lo consume
+       cuando termina de arrancar, incluso en arranque frío. */
+    @Volatile
+    private var pendingTargetJson = ""
+
+    @Volatile
+    private var current: AndroidNotifier? = null
+
+    fun setPendingTarget(chatId: String?, messageId: String?) {
+      if (chatId.isNullOrBlank()) return
+      pendingTargetJson = JSONObject()
+        .put("chat_id", chatId)
+        .put("message_id", messageId ?: "")
+        .toString()
+    }
+
+    fun onStoragePermissionResult(granted: Boolean) {
+      current?.storageResult(granted)
+    }
+
     /* W56: MainActivity actualiza este valor en el hilo de la interfaz
        desde su listener de WindowInsets; la llamada JS lo lee sin tocar
        Views fuera del hilo principal. */

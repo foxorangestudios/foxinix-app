@@ -15,6 +15,7 @@ import { startCall, acceptCall, rejectCall, hangupCall,
 import { chatKey as e2eChatKey } from '../e2e.js';
 import {
   listDownloads, saveDownloadToDisk, deleteDownload, clearDownloads,
+  DL_TYPES, autoDlPrefs, setAutoDl, nativeDownloadAvailable, nativeDownload,
 } from '../downloads.js';
 import {
   openChat, closeChat, loadChats, loadOlder, sendText, sendMedia,
@@ -27,12 +28,15 @@ import {
   /* W8 */
   editMessage, askDeleteMessage,
   searchUsers, notifyTyping, chatTitle, mediaUrl, fmtSize,
+  preloadImage,   /* W57: precarga sin repetir recursos */
   /* W11 */
   cancelUpload, retryUpload,
   /* W13 */
   setPinned, setMuted, forwardMessage, mergeMessages,
   /* W22 */
   resolvePendingChat,
+  /* W57: destinos de notificaciones */
+  openNotificationTarget,
   /* W27: panel Personas/Amigos */
   loadPeople, sendFriendRequest, acceptFriendRequest,
   rejectFriendRequest, cancelFriendRequest, unfriend,
@@ -402,6 +406,13 @@ function chatMenu(e, c, key) {
         label: 'Cambiar foto del grupo', icon: 'i-image',
         fn: function () { pickGroupPhoto(c); },
       });
+      items.push({
+        label: 'Renombrar grupo', icon: 'i-pencil',
+        fn: function () {
+          store.renameGroupId = c.id;
+          store.renameGroupTitle = chatTitle(c);
+        },
+      });
     }
     items.push({
       label: 'Salir del grupo', icon: 'i-back', danger: true,
@@ -760,7 +771,7 @@ const toggleLibGif = function (name) {
 const EmojiPicker = {
   /* W29g: embed = embebido en el panel unificado del compositor (3
      pestañas); ahí el tamaño y el clamp los lleva el padre. */
-  props: { embed: Boolean },
+  props: { embed: Boolean, anchored: Boolean },
   emits: ['pick'],
   setup: function (props, ctxEmit) {
     const q = Vue.ref('');
@@ -825,11 +836,15 @@ const EmojiPicker = {
     /* W16: el panel queda fijo y clampeado al área de mensajes; se recalcula
        al abrir (sin la animación de entrada) y al redimensionar la ventana. */
     const rootEl = Vue.ref(null);
-    const doClamp = function (first) { clampPanel(rootEl.value, !!first); };
+    const doClamp = function (first) {
+      clampPanel(rootEl.value, !!first);
+    };
     /* W29g: embebido, el padre (.st-panel) hace el clamp; aquí la
-       posición no se toca. */
-    if (!props.embed) Vue.onMounted(function () { doClamp(true); });
-    const onPanelResize = function () { if (!props.embed) doClamp(false); };
+       posición no se toca. W57: anchored = el picker de reacciones ya
+       viaja teletransportado y lo coloca su contenedor. */
+    const noClamp = function () { return props.embed || props.anchored; };
+    if (!noClamp()) Vue.onMounted(function () { doClamp(true); });
+    const onPanelResize = function () { if (!noClamp()) doClamp(false); };
     window.addEventListener('resize', onPanelResize);
     /* W16: el panel puede crecer después de montar (fuentes, lista, etc.):
        el ResizeObserver vuelve a ajustarlo, dejando pasar la animación
@@ -837,9 +852,9 @@ const EmojiPicker = {
     let roTimer = 0;
     const roPanel = new ResizeObserver(function () {
       clearTimeout(roTimer);
-      roTimer = setTimeout(function () { doClamp(false); }, 180);
+      roTimer = setTimeout(function () { if (!noClamp()) doClamp(false); }, 180);
     });
-    if (!props.embed) Vue.onMounted(function () { roPanel.observe(rootEl.value); });
+    if (!noClamp()) Vue.onMounted(function () { roPanel.observe(rootEl.value); });
     Vue.onUnmounted(function () {
       window.removeEventListener('resize', onPanelResize);
       clearTimeout(roTimer);
@@ -999,23 +1014,81 @@ const MessageRow = {
     const openMenu = function (row, ev) {
       emit('menu', { row: row, ev: ev });
     };
-    /* W17: al cerrar el picker se resetea el panel completo. */
-    Vue.watch(function () { return store.reactFor; }, function () {
-      if (!pickerOpen(props.row)) fullReact.value = false;
-    });
 
     /* W17: los 12 chips rápidos ordenados por uso (reactRank es reactivo:
        al reaccionar se reordena al instante). */
     const emojis = Vue.computed(function () { return reactRank(12); });
 
-    /* W16: al abrir los chips se clampean al área de mensajes (si no, en
-       mensajes cortos a la izquierda o arriba del todo quedaban cortados
-       por el overflow de .msgs). */
+    /* W57: el picker se teletransporta a <body> y se coloca con
+       position:fixed. Antes vivía dentro de la burbuja; cuando un
+       ancestro tenía transform/animación, Gecko tomaba ese ancestro como
+       bloque contenedor y el clamp terminaba mandando el panel fuera de
+       la pantalla. Ahora la referencia es siempre el viewport. */
     const rpEl = Vue.ref(null);
+    const rpPos = Vue.ref({ left: '0px', top: '0px' });
+    const placeRp = function () {
+      Vue.nextTick(function () {
+        const el = rpEl.value;
+        if (!el) return;
+        const msg = document.querySelector(
+          '.msg[data-msg-id="' + props.row.ref.id + '"]');
+        const bub = msg && msg.querySelector('.bubble');
+        const msgs = document.querySelector('.msgs');
+        if (!bub || !msgs) return;
+        const br = bub.getBoundingClientRect();
+        const mb = msgs.getBoundingClientRect();
+        /* El ancho se decide por el estado, no por offsetWidth: al abrir
+           el panel completo la clase .rp-wide puede aplicarse un instante
+           después de esta medición. */
+        const w = fullReact.value ? 320 : (el.offsetWidth || 216);
+        const h = el.offsetHeight || 81;
+        const m = 4;
+        const gap = 6;
+        /* Alinear a la derecha de la burbuja, sin salir del área de
+           mensajes. */
+        let x = br.right - w;
+        x = Math.max(mb.left + m, Math.min(x, mb.right - m - w));
+        /* Preferencia: encima; si no cabe, debajo; y al final se limita
+           al área visible incluso en ventanas muy bajas. */
+        let y = br.top - gap - h;
+        if (y < mb.top + m) y = br.bottom + gap;
+        y = Math.min(y, mb.bottom - m - h);
+        y = Math.max(mb.top + m, y);
+        rpPos.value = {
+          left: Math.round(x) + 'px',
+          top: Math.round(y) + 'px',
+        };
+      });
+    };
+    /* W57: si el usuario desplaza el área de mensajes o cambia el
+       tamaño de la ventana, el panel fijo sigue pegado a su burbuja. */
+    let rpScrollEl = null;
+    const rpMove = function () { placeRp(); };
+    const bindRpMove = function (on) {
+      if (on && !rpScrollEl) {
+        rpScrollEl = document.querySelector('.msgs');
+        if (rpScrollEl) rpScrollEl.addEventListener('scroll', rpMove, { passive: true });
+        window.addEventListener('resize', rpMove);
+      } else if (!on && rpScrollEl) {
+        rpScrollEl.removeEventListener('scroll', rpMove);
+        window.removeEventListener('resize', rpMove);
+        rpScrollEl = null;
+      }
+    };
     Vue.watch(function () { return store.reactFor; }, function () {
-      if (!pickerOpen(props.row)) return;
-      Vue.nextTick(function () { clampPanel(rpEl.value, false); });
+      if (!pickerOpen(props.row)) {
+        fullReact.value = false;
+        bindRpMove(false);
+        return;
+      }
+      fullReact.value = false;
+      bindRpMove(true);
+      placeRp();
     });
+    Vue.watch(fullReact, function () {
+      if (pickerOpen(props.row)) placeRp();
+    });
+    Vue.onUnmounted(function () { bindRpMove(false); });
 
     /* ---- W8: reproductor de audio propio (no usa <audio controls>) ---- */
     const aEl = Vue.ref(null);
@@ -1444,7 +1517,8 @@ const MessageRow = {
     const vDownload = function () {
       const m = props.row.ref.media;
       if (!m) return;
-      startDownload(mediaUrl(m.url), m.name || 'video', vWrapEl.value);
+      startDownload(mediaUrl(m.url, true), m.name || 'video', vWrapEl.value,
+        m.mime, 'file');
     };
     /* clic en el centro del video = play/pausa (como en los players
        comerciales); el botón central usa .stop para no duplicar */
@@ -1509,7 +1583,8 @@ const MessageRow = {
     const afDl = function () {
       const m = props.row.ref.media;
       if (!m) return;
-      startDownload(mediaUrl(m.url), m.name || 'audio');
+      startDownload(mediaUrl(m.url, true), m.name || 'audio', null,
+        m.mime, 'file');
     };
     const afMeta = function (e) {
       const d = e.target.duration;
@@ -1676,8 +1751,11 @@ const MessageRow = {
     const dlFile = function (row, ev) {
       if (ev && ev.preventDefault) ev.preventDefault();
       if (!row || !row.media || !row.media.url) return;
-      const frame = ev && ev.currentTarget ? ev.currentTarget : null;
-      startDownload(mediaUrl(row.media.url), row.media.name || 'archivo', frame);
+      let frame = ev && ev.currentTarget ? ev.currentTarget : null;
+      if (frame && !(frame.classList && frame.classList.contains('mframe')) &&
+          frame.closest) frame = frame.closest('.mframe');
+      startDownload(mediaUrl(row.media.url, true), row.media.name || 'archivo', frame,
+        row.media.mime, row.kind);
     };
 
     /* W29b: dentro de cada trozo de texto, los emojis salen como
@@ -1873,7 +1951,7 @@ const MessageRow = {
     };
 
     return {
-      store, emojis, rpEl,
+      store, emojis, rpEl, rpPos,
       bodySegs,
       /* W35a–c: enlaces, imagen inline y tarjetas */
       imgInline, linkCards,
@@ -1912,7 +1990,7 @@ const MessageRow = {
     };
   },
   template:
-    '<div class="msg" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in }" @animationend="animEnd">' +
+    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in }" @animationend="animEnd">' +
       /* W29c: columna de avatar en todos los entrantes de grupo; la
          cara (foto/letra) solo donde se ve el nombre del emisor */
       '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar }" ' +
@@ -1952,7 +2030,12 @@ const MessageRow = {
             '@click.stop="openMenu(row, $event)">' +
             '<svg class="ic ic-sm"><use href="#i-dots"></use></svg>' +
           '</button>' +
-          '<span class="react-picker" ref="rpEl" v-if="pickerOpen(row)" @click.stop>' +
+        '</div>' +
+        /* W57: picker teletransportado; su posición fixed se calcula
+           contra el viewport, sin heredar transforms de la burbuja. */
+        '<Teleport to="body">' +
+          '<span class="react-picker rp-portal" :class="{ \'rp-wide\': fullReact }" ' +
+            'ref="rpEl" v-if="pickerOpen(row)" :style="rpPos" @click.stop>' +
             '<button class="rp" :class="{ mine: myReaction(row.ref) === e }" type="button" ' +
               'v-for="e in emojis" :key="e" :title="titleOf(e)" @click="doReact(row, e)">' +
               '<img v-if="emoFile(e)" class="emo" :src="emoSrc(e)" ' +
@@ -1960,9 +2043,10 @@ const MessageRow = {
               '<span v-else>{{ e }}</span></button>' +
             '<button class="rp rp-more" type="button" :title="t(\'Más emojis\')" ' +
               '@click="toggleFull">{{ fullReact ? \'–\' : \'＋\' }}</button>' +
-            '<emoji-picker v-if="fullReact" @pick="doReact(row, $event)"></emoji-picker>' +
+            '<emoji-picker v-if="fullReact" :anchored="true" ' +
+              '@pick="doReact(row, $event)"></emoji-picker>' +
           '</span>' +
-        '</div>' +
+        '</Teleport>' +
         /* W29c: el nombre del emisor va ARRIBA de la cita (antes la
            cita se dibujaba primero y "tapaba" al nombre); después la
            etiqueta de reenviado, la cita y el cuerpo del mensaje. */
@@ -2059,6 +2143,9 @@ const MessageRow = {
           'role="button" :title="t(\'Ver con zoom\')" ' +
           '@click="$emit(\'zoom\', mediaUrl(row.ref.media.url))">' +
           '<img class="b-img" v-dl="mediaUrl(row.ref.media.url)" :alt="row.ref.media.name || \'\'" @load="$emit(\'imgload\')">' +
+          '<button class="b-dl-img" type="button" :title="t(\'Descargar\')" ' +
+            '@click.stop="dlFile(row.ref, $event)">' +
+            '<svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</span>' +
         /* W11: video adjunto → player inline (W15: baja con anillo y ✕).
            W29a: si el archivo NO tiene pista de video (vidOk=false tras
@@ -2176,6 +2263,8 @@ const MessageRow = {
           /* W37d: velocidad de la nota de voz (1×/1,5×/2×) */
           '<button class="au-rate" type="button" :title="t(\'Velocidad\')" ' +
             '@click="aRate">{{ aRateV }}×</button>' +
+          '<button class="au-rate" type="button" :title="t(\'Descargar\')" ' +
+            '@click.stop="dlFile(row.ref, $event)"><svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</div>' +
         '<div v-else-if="row.ref.kind === \'voice\'" class="b-voice">' +
           '<svg class="ic ic-sm"><use href="#i-mic"></use></svg> {{ t(\'Nota de voz\') }}' +
@@ -2256,6 +2345,68 @@ const MessageRow = {
         '</div>' +
       '</div>' +
     '</div>',
+};
+
+/* ------------------------------------------------------- RenameGroupModal (W57) */
+
+const RenameGroupModal = {
+  setup: function () {
+    const title = Vue.ref(store.renameGroupTitle || '');
+    const busy = Vue.ref(false);
+    const err = Vue.ref('');
+    const inputEl = Vue.ref(null);
+    Vue.onMounted(function () {
+      Vue.nextTick(function () { if (inputEl.value) inputEl.value.focus(); });
+    });
+    const close = function () {
+      if (busy.value) return;
+      store.renameGroupId = 0;
+      store.renameGroupTitle = '';
+    };
+    const save = async function () {
+      const id = store.renameGroupId;
+      const name = title.value.trim();
+      if (!id || !name) { err.value = t('Escribe un nombre para el grupo'); return; }
+      busy.value = true;
+      err.value = '';
+      try {
+        await api('PATCH', '/api/chats/' + id, { title: name });
+        store.renameGroupId = 0;
+        store.renameGroupTitle = '';
+        toast(t('Nombre del grupo actualizado'), 'ok');
+        await loadChats();
+      } catch (e) {
+        err.value = (e && e.detail) || t('No se pudo cambiar el nombre');
+      } finally {
+        busy.value = false;
+      }
+    };
+    return { store, title, busy, err, inputEl, close, save };
+  },
+  template: `
+    <div class="modal-veil" @click.self="close">
+      <div class="modal confirm" role="dialog" :aria-label="t('Renombrar grupo')">
+        <header>{{ t('Renombrar grupo') }}</header>
+        <div class="cf-body">
+          <p class="cf-text">{{ t('El nuevo nombre lo verán todos los miembros.') }}</p>
+          <div class="field">
+            <label>{{ t('Nombre del grupo') }}</label>
+            <input class="input group-rename-input" ref="inputEl" v-model="title"
+              maxlength="60" :placeholder="t('Nombre del grupo (máx. 60)')"
+              @keydown.enter.prevent="save">
+          </div>
+          <div class="form-err st-err" v-if="err" role="alert">
+            <svg class="ic ic-sm"><use href="#i-alert"></use></svg><span>{{ err }}</span>
+          </div>
+        </div>
+        <div class="m-foot st-btns">
+          <button class="btn btn-ghost" type="button" :disabled="busy" @click="close">
+            {{ t('Cancelar') }}</button>
+          <button class="btn" type="button" :disabled="busy || !title.trim()" @click="save">
+            {{ busy ? t('Guardando…') : t('Guardar') }}</button>
+        </div>
+      </div>
+    </div>`,
 };
 
 /* ------------------------------------------------------- NewChatModal */
@@ -2760,6 +2911,12 @@ const SettingsModal = {
     };
     const dlSave = function (item) {
       dlMsg.value = '';
+      /* W57: en Android un blob no se puede entregar a Descargas; se
+         reutiliza la URL firmada guardada con la ficha. */
+      if (dlNative && item.url) {
+        startDownload(item.url, item.name, null, item.mime, 'file');
+        return;
+      }
       saveDownloadToDisk(item.key, item.name).then(function (ok) {
         if (!ok) {
           dlMsg.value = t('El archivo ya no está disponible');
@@ -2783,6 +2940,14 @@ const SettingsModal = {
         return new Date(item.saved_at).toLocaleDateString(store.lang === 'en' ? 'en' : 'es');
       } catch (e) { return ''; }
     };
+    /* W57: descarga automática por tipo y red (solo APK Android; en la
+       web el navegador no permite guardar sin interacción). */
+    const dlNative = nativeDownloadAvailable();
+    const dlAuto = Vue.ref(autoDlPrefs());
+    const dlAutoSet = function (type, network, ev) {
+      setAutoDl(type, network, !!(ev && ev.target && ev.target.checked));
+      dlAuto.value = autoDlPrefs();
+    };
     Vue.onMounted(dlLoad);
 
     return {
@@ -2796,8 +2961,9 @@ const SettingsModal = {
       sendEmCode, confirmEmCode, cancelEmCode,
       notifOn, notifPerm, notifLabel, notifTitle, askNotif,
       nativeNotifAvail, openNotifSettings,
-      /* W50: descargas persistentes */
+      /* W50/W57: descargas persistentes + automáticas */
       dlList, dlTotal, dlBusy, dlMsg, dlSave, dlDelete, dlClear, dlDate, fmtSize,
+      dlNative, dlAuto, dlAutoSet, dlTypes: DL_TYPES,
       doLogout: askLogout, doDelete: askDeleteAccount,
     };
   },
@@ -2806,7 +2972,7 @@ const SettingsModal = {
       <div class="modal settings" role="dialog" :aria-label="t('Ajustes')">
         <header>
           <span class="m-head-title">
-            <img class="mobile-page-logo" src="/static/icon.svg" alt="">
+            <svg class="mobile-page-logo" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
             <b>{{ t('Ajustes') }}</b>
           </span>
           <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
@@ -2992,6 +3158,23 @@ const SettingsModal = {
           <!-- ============ descargas (W50) ============ -->
           <template v-else-if="store.settingsTab === 'descargas'">
             <div class="st-title">{{ t('Descargas') }}</div>
+            <div class="st-sec" v-if="dlNative">
+              <div class="st-h">{{ t('Descargas automáticas') }}</div>
+              <p class="st-hint">{{ t('Elige qué tipos se guardan solos en Downloads/Foxinix. Las descargas manuales siempre están disponibles.') }}</p>
+              <div class="dl-auto-row" v-for="tp in dlTypes" :key="tp.id">
+                <b class="dl-auto-name">{{ t(tp.label) }}</b>
+                <label class="dl-auto-opt">
+                  <span class="tgl"><input type="checkbox" :checked="dlAuto[tp.id].wifi"
+                    @change="dlAutoSet(tp.id, 'wifi', $event)"><span class="tgl-track"><span class="tgl-knob"></span></span></span>
+                  <span>Wi-Fi</span>
+                </label>
+                <label class="dl-auto-opt">
+                  <span class="tgl"><input type="checkbox" :checked="dlAuto[tp.id].mobile"
+                    @change="dlAutoSet(tp.id, 'mobile', $event)"><span class="tgl-track"><span class="tgl-knob"></span></span></span>
+                  <span>{{ t('Datos móviles') }}</span>
+                </label>
+              </div>
+            </div>
             <div class="st-sec">
               <div class="st-h">{{ t('Archivos guardados') }}</div>
               <p class="st-hint">{{ t('Se guardan en este dispositivo para abrirlos sin volver a descargarlos.') }}</p>
@@ -3152,7 +3335,7 @@ const MeProfileModal = {
             <span class="av-wrap" :class="dotClass(store.user, store.ws === 'on')">
               <span class="avatar mp-av">
                 <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">
-                <img v-else class="fox" src="/static/icon.svg" alt="">
+                <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
               </span>
             </span>
             <div class="pp-name">{{ store.user.display_name || store.user.username }}</div>
@@ -3329,7 +3512,7 @@ const MeProfileEditModal = {
               <img v-if="preview" :src="preview" alt="">
               <img v-else-if="hasPhoto && store.user && store.user.avatar_url"
                 :src="mediaUrl(store.user.avatar_url)" alt="">
-              <img v-else class="fox" src="/static/icon.svg" alt="">
+              <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
             </div>
             <label class="av-btn" :title="t('Elegir foto')">
               <svg class="ic ic-sm"><use href="#i-image"></use></svg>
@@ -4704,7 +4887,7 @@ const PeoplePanel = {
 /* ------------------------------------------------------- ChatShell */
 
 export const ChatShell = {
-  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, ConfirmBox, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel },
+  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, ConfirmBox, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
   setup: function () {
     const scroller = Vue.ref(null);
     const input = Vue.ref(null);
@@ -5559,6 +5742,57 @@ export const ChatShell = {
       retryUpload(store.activeChatId, row.client_msg_id);
     };
 
+    /* W57: el APK entrega el chat/mensaje de la notificación por el
+       puente nativo. Se consume al terminar el arranque y cada vez que la
+       app vuelve a primer plano (una notificación pudo tocarse mientras
+       el WebView estaba suspendido). */
+    const consumeNativeTarget = function () {
+      const an = window.FoxinixAndroid;
+      if (!an || typeof an.pendingTarget !== 'function') return;
+      let raw = '';
+      try { raw = an.pendingTarget(); } catch (e) { return; }
+      if (!raw) return;
+      try {
+        const o = JSON.parse(raw);
+        openNotificationTarget(o.chat_id, o.message_id);
+      } catch (e) {}
+    };
+    window.__foxinixNativeTarget = consumeNativeTarget;
+
+    /* W57: popups animados al terminar/fallar una descarga nativa. El
+       APK manda el tipo (video, imagen…), no un texto ya conjugado. */
+    const dlDoneText = function (type) {
+      for (let i = 0; i < DL_TYPES.length; i++) {
+        if (DL_TYPES[i].id === type) return t(DL_TYPES[i].done);
+      }
+      return t('Archivo guardado');
+    };
+    const dlFailText = function (type) {
+      for (let i = 0; i < DL_TYPES.length; i++) {
+        if (DL_TYPES[i].id === type) {
+          return t('No se pudo guardar {type}', { type: t(DL_TYPES[i].label) });
+        }
+      }
+      return t('No se pudo guardar el archivo');
+    };
+    window.__foxinixDownloadDone = function (raw) {
+      let o = raw;
+      try { if (typeof raw === 'string') o = JSON.parse(raw); } catch (e) { return; }
+      if (!o) return;
+      toast(dlDoneText(o.type), 'ok');
+    };
+    window.__foxinixDownloadError = function (raw) {
+      let o = raw;
+      try { if (typeof raw === 'string') o = JSON.parse(raw); } catch (e) { return; }
+      if (!o) return;
+      toast(dlFailText(o.type), 'err');
+    };
+    const onNativeVisible = function () {
+      if (!document.hidden) consumeNativeTarget();
+    };
+    document.addEventListener('visibilitychange', onNativeVisible);
+    window.addEventListener('focus', onNativeVisible);
+
     /* ---------- ciclo de vida ---------- */
 
     /* W38: la fase "Cargando vista previas…" precarga las fotos de la
@@ -5569,7 +5803,9 @@ export const ChatShell = {
       const urls = [];
       const seen = {};
       const push = function (u) {
-        if (u && !seen[u] && urls.length < 40) { seen[u] = 1; urls.push(u); }
+        if (!u) return;
+        const key = String(u).split('?')[0];
+        if (!seen[key] && urls.length < 40) { seen[key] = 1; urls.push(u); }
       };
       const list = store.chats || [];
       for (let i = 0; i < list.length; i++) {
@@ -5586,13 +5822,7 @@ export const ChatShell = {
         const arr = groups[g] || [];
         for (let i = 0; i < arr.length; i++) push(arr[i] && arr[i].avatar_url);
       }
-      const loads = urls.map(function (u) {
-        return new Promise(function (res) {
-          const im = new Image();
-          im.onload = im.onerror = function () { res(); };
-          im.src = mediaUrl(u);
-        });
-      });
+      const loads = urls.map(function (u) { return preloadImage(u); });
       return Promise.race([
         Promise.all(loads),
         new Promise(function (r) { setTimeout(r, 3000); }),
@@ -5624,7 +5854,7 @@ export const ChatShell = {
 
     Vue.onMounted(function () {
       startWS();
-      bootAll();       // W27h: chats + gente + mensajes del deep link
+      bootAll().then(consumeNativeTarget);   // W27h + W57: aviso nativo al final
       initInfoPanel();                            // W7: info por defecto si hay lugar
       /* W55: en el APK pedimos una vez el permiso de avisos de Android.
          Si el usuario lo niega, Ajustes → Chat permite reintentarlo. */
@@ -5665,6 +5895,13 @@ export const ChatShell = {
       stopWS();
       window.removeEventListener('resize', onPickResize);   // W29g
       window.removeEventListener('resize', onKeyboardViewport);
+      window.removeEventListener('focus', onNativeVisible);   // W57
+      document.removeEventListener('visibilitychange', onNativeVisible);
+      if (window.__foxinixNativeTarget === consumeNativeTarget) {
+        window.__foxinixNativeTarget = null;
+      }
+      window.__foxinixDownloadDone = null;
+      window.__foxinixDownloadError = null;
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', onKeyboardViewport);
       }
@@ -5955,6 +6192,18 @@ export const ChatShell = {
       const c = activeChat.value;
       return c && c.type === 'dm' ? t('Ver perfil') : t('Info del chat');
     });
+
+    /* W57: actividad sin leer en OTROS chats, para el contador discreto
+       del botón atrás (móvil). No estorba dentro del chat abierto. */
+    const backUnread = Vue.computed(function () {
+      let n = 0;
+      const list = store.chats || [];
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].id === store.activeChatId) continue;
+        n += parseInt(list[i].unread, 10) || 0;
+      }
+      return n;
+    });
     const onHeadClick = function () {
       const c = activeChat.value;
       if (!c) return;
@@ -6040,6 +6289,17 @@ export const ChatShell = {
           label: 'Agregar miembros', icon: 'i-userplus',
           fn: function () { openAddMember(); },
         });
+        /* W57: en el APK/móvil el menú ⋮ es la vía natural para
+           renombrar el grupo (solo owner/admin, el server revalida). */
+        if (c.my_role === 'owner' || c.my_role === 'admin') {
+          items.push({
+            label: 'Renombrar grupo', icon: 'i-pencil',
+            fn: function () {
+              store.renameGroupId = c.id;
+              store.renameGroupTitle = chatTitle(c);
+            },
+          });
+        }
       }
       items.push({
         label: c.pinned ? 'Desfijar chat' : 'Fijar chat',
@@ -6633,6 +6893,10 @@ export const ChatShell = {
       if (store.pwOpen) { store.pwOpen = false; return; }       // W8
       if (store.emOpen) { store.emOpen = false; return; }       // W8
       if (store.settingsOpen) { store.settingsOpen = false; return; }
+      if (store.renameGroupId) {
+        store.renameGroupId = 0; store.renameGroupTitle = '';
+        return;
+      }
       if (store.wallPanelOpen) { store.wallPanelOpen = false; return; }  // W21c
       if (store.newChatOpen) { store.newChatOpen = false; return; }
       if (store.profile) { store.profile = null; return; }
@@ -6689,6 +6953,7 @@ export const ChatShell = {
       onComposerKey, askLogout,
       /* W7 */
       myDot, headDotClass, headTitle, onHeadClick, toggleInfo,
+      backUnread,   /* W57: (N) en el botón atrás */
       chatMenu, msgMenu, runCtx, dotClass,
       /* W27 */
       menuKey,
@@ -6727,8 +6992,8 @@ export const ChatShell = {
          sidebar en desktop; en celular CSS lo convierte en hoja inferior */
       '<aside class="sidebar" v-if="!store.wallPanelOpen">' +
         '<header class="side-head">' +
-          '<img class="side-logo side-logo-word" src="/static/logo.svg" alt="Foxinix" />' +
-          '<img class="side-logo-mark" src="/static/icon.svg" alt="" />' +
+          '<svg class="side-logo side-logo-word" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg>' +
+          '<svg class="side-logo-mark" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>' +
           '<span class="side-title">{{ t(\'Chats\') }}</span>' +
           '<span class="ws-dot" v-if="store.ws !== \'on\'" :title="wsLabel"></span>' +
           '<button class="icon-btn side-new" type="button" :title="t(\'Nuevo chat\')" @click="startNewChat">' +
@@ -6842,6 +7107,8 @@ export const ChatShell = {
           '</button>' +
           '<button class="icon-btn back" type="button" :title="t(\'Volver\')" @click="close">' +
             '<svg class="ic"><use href="#i-back"></use></svg>' +
+            '<span class="back-unread" v-if="backUnread > 0" ' +
+              ':title="t(\'Mensajes sin leer en otros chats\')">{{ backUnread > 99 ? \'99+\' : backUnread }}</span>' +
           '</button>' +
           '<span class="av-wrap" :class="headDotClass" :title="headTitle" @click="onHeadClick">' +
             '<span class="avatar av36">' +
@@ -7093,8 +7360,9 @@ export const ChatShell = {
       '<main class="chat-pane people-pane" v-else>' +
         /* W54: título de pantalla en móvil (en escritorio Personas vive
            en el centro y no necesita app bar propia). */
-        '<header class="mobile-page-head"><img class="mobile-page-logo" ' +
-          'src="/static/icon.svg" alt=""><b>{{ t(\'Personas\') }}</b></header>' +
+        '<header class="mobile-page-head"><svg class="mobile-page-logo" ' +
+          'viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>' +
+          '<b>{{ t(\'Personas\') }}</b></header>' +
         /* W19: sin chat abierto también se puede devolver el sidebar */
         '<button class="icon-btn side-open" type="button" :title="t(\'Mostrar chats\')" ' +
           '@click="unfoldSide">' +
@@ -7142,6 +7410,9 @@ export const ChatShell = {
       '</transition>' +
       '<transition name="veil">' +
       '<settings-modal v-if="store.settingsOpen"></settings-modal>' +
+      '</transition>' +
+      '<transition name="veil">' +
+      '<rename-group-modal v-if="store.renameGroupId"></rename-group-modal>' +
       '</transition>' +
       '<transition name="veil">' +
       '<me-profile-modal v-if="store.meProfileOpen"></me-profile-modal>' +

@@ -415,9 +415,16 @@ def main():
             "function av(cls){const w=document.createElement('span');"
             "w.className='av-wrap on '+cls;document.body.appendChild(w);"
             "const c=getComputedStyle(w,'::after');"
-            "return {bg:c.backgroundColor,img:c.backgroundImage,border:c.borderTopColor};}"
+            "const b=getComputedStyle(w,'::before');"
+            "return {bg:c.backgroundColor,img:c.backgroundImage,border:c.borderTopColor,"
+            "right:c.right,bottom:c.bottom,beforeBg:b.backgroundColor,"
+            "mask:b.maskImage||b.webkitMaskImage||''};}"
+            "function preset(){const d=document.createElement('span');"
+            "d.className='sdot sd-online';document.body.appendChild(d);"
+            "const c=getComputedStyle(d);"
+            "return {w:c.width,h:c.height,r:c.borderRadius,border:c.borderTopColor};}"
             "return JSON.stringify({count:dots.length,online:by['sd-online'],"
-            "busy:by['sd-busy'],dnd:by['sd-dnd'],off:by['sd-off'],"
+            "busy:by['sd-busy'],dnd:by['sd-dnd'],off:by['sd-off'],desktop:preset(),"
             "avOnline:av('st-online'),avBusy:av('st-busy'),"
             "avDnd:av('st-dnd'),avOff:av('st-off')})})()")
         ok, js_res, _, log = run_shot(
@@ -438,13 +445,29 @@ def main():
             raise SystemExit(f"✗ No molestar no es rojo: {st}")
         if st["off"].get("bg") != "rgba(0, 0, 0, 0)" or st["off"].get("border") != "rgb(128, 132, 142)":
             raise SystemExit(f"✗ Invisible no es un aro gris: {st}")
-        if "radial-gradient" not in (st["avBusy"].get("img") or ""):
-            raise SystemExit(f"✗ el badge de Ausente no tiene luna: {st}")
+        # W57: todos los badges llevan el color de fondo del tema detrás.
+        if st["avOnline"].get("bg") != "rgb(35, 165, 90)":
+            raise SystemExit(f"✗ En línea no es verde lleno: {st}")
+        if st["avBusy"].get("bg") != "rgb(240, 178, 50)":
+            raise SystemExit(f"✗ Ausente no es naranja lleno: {st}")
+        if "data:image/svg+xml" not in (st["avBusy"].get("mask") or ""):
+            raise SystemExit(f"✗ el badge de Ausente no tiene la luna SVG: {st}")
         if "linear-gradient" not in (st["avDnd"].get("img") or ""):
             raise SystemExit(f"✗ el badge de No molestar no tiene barra: {st}")
-        if (st["avOff"].get("bg") != "rgba(0, 0, 0, 0)"
-                or st["avOff"].get("border") != "rgb(128, 132, 142)"):
-            raise SystemExit(f"✗ el badge desconectado no es hueco: {st}")
+        if st["avDnd"].get("bg") != "rgb(242, 63, 67)":
+            raise SystemExit(f"✗ No molestar no es rojo lleno: {st}")
+        if st["avOff"].get("bg") != "rgb(30, 31, 34)":
+            raise SystemExit(f"✗ el badge desconectado no tiene relleno del tema: {st}")
+        if st["avOff"].get("border") != "rgb(128, 132, 142)":
+            raise SystemExit(f"✗ el badge desconectado no tiene aro gris: {st}")
+        if st["avOnline"].get("border") != "rgb(30, 31, 34)":
+            raise SystemExit(f"✗ el badge no lleva aro del color del tema: {st}")
+        if (st["avOnline"].get("right") in ("0px", "auto")
+                or st["avOnline"].get("bottom") in ("0px", "auto")):
+            raise SystemExit(f"✗ el badge no está abajo a la derecha: {st}")
+        if (st["desktop"].get("w") != "14px" or st["desktop"].get("h") != "14px"
+                or st["desktop"].get("r") != "50%"):
+            raise SystemExit(f"✗ el preset de escritorio no es círculo: {st}")
 
         # 7) Editor de foto móvil: grande, sin barra/botón y sin el
         # formulario de abajo hasta pulsar Aplicar.
@@ -582,7 +605,9 @@ def main():
             "requestPermission:function(){},openSettings:function(){},"
             "notify:function(t,b,c,snd){window.__lastNotify={t:t,b:b,c:c,s:snd};},"
             "notifyWithAvatar:function(t,b,c,snd,a){window.__lastNotify="
-            "{t:t,b:b,c:c,s:snd,avatar:a};}};"
+            "{t:t,b:b,c:c,s:snd,avatar:a};},"
+            "notifyWithAvatarAndMessage:function(t,b,c,snd,a,m){window.__lastNotify="
+            "{t:t,b:b,c:c,s:snd,avatar:a,m:m};}};"
             "let t=Date.now();"
             "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))await s(120);"
             "const item=document.querySelector('.chat-list .chat-item');"
@@ -614,6 +639,8 @@ def main():
             raise SystemExit(f"✗ el APK no recibió el aviso nativo: {st}")
         if str(note.get("c")) != str(cid):
             raise SystemExit(f"✗ el aviso nativo no identifica el chat: {st}")
+        if not note.get("m"):
+            raise SystemExit(f"✗ el aviso nativo no incluye el mensaje exacto: {st}")
         av = note.get("avatar") or ""
         if not av.startswith("http") or "/media/profile/" not in av:
             raise SystemExit(f"✗ el aviso nativo no recibió el avatar de B: {st}")
@@ -627,7 +654,9 @@ def main():
             "requestPermission:function(){},openSettings:function(){},"
             "notify:function(t,b,c,snd){window.__notes.push({t:t,b:b,c:c,s:snd});},"
             "notifyWithAvatar:function(t,b,c,snd,a){window.__notes.push("
-            "{t:t,b:b,c:c,s:snd,avatar:a});}};"
+            "{t:t,b:b,c:c,s:snd,avatar:a});},"
+            "notifyWithAvatarAndMessage:function(t,b,c,snd,a,m){window.__notes.push("
+            "{t:t,b:b,c:c,s:snd,avatar:a,m:m});}};"
             "let t=Date.now();"
             "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))await s(120);"
             "const item=document.querySelector('.chat-list .chat-item');"

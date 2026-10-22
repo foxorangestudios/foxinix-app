@@ -41,6 +41,9 @@
   --st-dnd: #f23f43;
   --st-off: #80848e;
   --st-slash: #ffffff;   /* W56: barra del estado No molestar */
+  /* W57: relleno del aro del badge de estado (se ajusta al fondo real
+     en cada contexto: sidebar, cabecera, ficha de perfil…). */
+  --st-ring: var(--bg);
   /* W56: Android no expone env(safe-area-inset-*) en el WebView; boot.js
      reemplaza esta variable con el inset nativo de la barra de gestos. */
   --sab: 0px;
@@ -742,43 +745,87 @@ input[type="range"].wp-range::-moz-range-thumb {
   line-height: 1.6;
 }
 
+/* W57: en segundo plano el APK oculta el WebView; además congelamos las
+   animaciones para no gastar CPU (solo se reanudan al volver). */
+html.native-bg *,
+html.native-bg *::before,
+html.native-bg *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+
 /* ---------- avatares ---------- */
 .av-wrap { position: relative; display: inline-flex; flex: none; }
+/* W57: todos los estados llevan un círculo de fondo del color del tema
+   (aro sólido, nunca transparente), abajo a la derecha y apenas
+   superpuesto al avatar. Nunca centrado. */
 .av-wrap.on::after {
   content: '';
   position: absolute;
-  /* W7: un pelín más abajo y a la derecha */
-  right: -1px; bottom: -1px;
-  width: 11px; height: 11px;
+  z-index: 2;
+  right: -2px; bottom: -2px;
+  width: 14px; height: 14px;
   border-radius: 50%;
   background: var(--online);
+  border: 2.5px solid var(--st-ring);
   background-origin: border-box;
-  border: 2px solid transparent;
 }
-/* W7/W56: color y forma del puntito según el estado.
-   - En línea: círculo verde.
-   - Ausente: círculo naranja con una luna (recorte transparente).
-   - No molestar: círculo rojo con barra blanca/oscura según el tema.
-   - Invisible/desconectado: aro gris sin relleno. */
-.av-wrap.on.st-busy::after {
-  background: radial-gradient(circle at 72% 28%,
-    transparent 0 30%, var(--st-busy) 31%);
+/* W57: Ausente = naranja lleno + luna Material recortada en el color
+   del tema. La luna va en ::before (encima del círculo). */
+.av-wrap.on.st-busy::after { background: var(--st-busy); }
+.av-wrap.on.st-busy::before {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  right: 1px; bottom: 1px;
+  width: 8px; height: 8px;
+  background: var(--st-ring);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
+/* W57: No molestar = rojo lleno con barra gruesa del color del tema.
+   Sin aro transparente: el borde también es del color del tema. */
 .av-wrap.on.st-dnd::after {
   background:
-    linear-gradient(var(--st-slash), var(--st-slash)) center / 62% 16% no-repeat,
+    linear-gradient(var(--st-ring), var(--st-ring)) center / 70% 22% no-repeat,
     var(--st-dnd);
 }
+/* W57: Invisible/desconectado = aro más grueso con relleno del tema. */
 .av-wrap.on.st-off::after {
-  background: transparent;
+  width: 15px; height: 15px;
+  background: var(--st-ring);
+  border-width: 3px;
   border-color: var(--st-off);
 }
+
+/* W57: el aro coincide con la superficie donde vive cada avatar. */
+.sidebar .av-wrap,
+.side-head .av-wrap,
+.user-panel .av-wrap,
+.profile-panel .av-wrap,
+.people-pane .av-wrap { --st-ring: var(--panel); }
+.chat-head .av-wrap { --st-ring: var(--chat-bg); }
+
 /* W27: en el panel de info del chat PRIVADO el puntito va al doble de
    tamaño (ficha del contacto); las filas de miembros de un grupo lo
    mantienen del mismo tamaño que la lista de chats (W27b). */
 .profile-panel .pp-body > .av-wrap.on::after {
   width: 22px; height: 22px;
   border-width: 3px;
+}
+.profile-panel .pp-body > .av-wrap.on.st-off::after {
+  width: 23px; height: 23px;
+  border-width: 3.5px;
+}
+.profile-panel .pp-body > .av-wrap.on.st-busy::before {
+  right: 3px; bottom: 3px;
+  width: 12px; height: 12px;
 }
 .avatar {
   width: 48px; height: 48px;
@@ -815,7 +862,25 @@ input[type="range"].wp-range::-moz-range-thumb {
   box-shadow: 0 1px 0 rgba(4, 4, 5, .2), 0 1.5px 0 rgba(6, 6, 7, .05);
   flex: none;
 }
-.back { display: none; margin-left: -6px; }
+.back { display: none; margin-left: -6px; position: relative; }
+/* W57: actividad sin leer en otros chats; discreto, sobre el botón atrás. */
+.back-unread {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--err);
+  color: #fff;
+  font-size: 9px;
+  line-height: 15px;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--chat-bg);
+  pointer-events: none;
+}
 .ch-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ch-name {
   font-weight: 600; font-size: 15.5px;
@@ -1031,6 +1096,25 @@ input[type="range"].wp-range::-moz-range-thumb {
 }
 
 .b-media { display: block; }
+/* W57: acceso directo a guardar la imagen (también en mensajes propios);
+   el clic no abre el zoom. */
+.b-dl-img {
+  position: absolute;
+  top: 8px; right: 8px;
+  z-index: 3;
+  width: 30px; height: 30px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .58);
+  color: #fff;
+  cursor: pointer;
+  opacity: .82;
+  transition: opacity .12s, transform .12s;
+}
+.b-dl-img:hover { opacity: 1; transform: scale(1.08); }
 .b-img {
   display: block;
   /* W22: min() evita que la imagen se salga de la burbuja en celular
@@ -1702,6 +1786,26 @@ audio.b-audio { display: none; }
   right: 0;
   bottom: auto;
   margin-top: 4px;
+}
+/* W57: el picker de reacciones viaja teletransportado a <body>. Así el
+   position:fixed se mide contra el viewport y no contra una burbuja con
+   transform (lo que descolocaba el panel fuera de la pantalla). */
+.react-picker.rp-portal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: auto;
+  z-index: 80;
+}
+.react-picker.rp-portal.rp-wide { width: 320px; }
+.react-picker.rp-portal > .emo-picker {
+  position: static;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  max-width: 100%;
+  margin: 6px 0 0;
+  animation: none;
 }
 /* W28b: popup de @menciones (flota sobre el composer como el de :código:) */
 .m-mention {
@@ -2627,6 +2731,27 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 .st-col b { font-size: 14px; font-weight: 600; }
 .st-col span { font-size: 12.5px; line-height: 1.45; color: var(--t2); }
 /* W50: lista de descargas guardadas */
+/* W57: filas de descarga automática (tipo + Wi-Fi + datos) */
+.dl-auto-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.dl-auto-name { flex: 1; min-width: 84px; color: var(--t1); font-size: 13px; }
+.dl-auto-opt {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  color: var(--t2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.dl-auto-opt > .tgl { margin-right: 5px; }
+.dl-auto-opt .tgl-track { width: 32px; height: 18px; }
+.dl-auto-opt .tgl-knob { width: 12px; height: 12px; }
+.dl-auto-opt .tgl input:checked + .tgl-track .tgl-knob { transform: translateX(14px); }
 .dl-list { margin-top: 4px; }
 .dl-item {
   display: flex;
@@ -2794,30 +2919,48 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 }
 
 /* W9: puntito de estado dentro de cada preset (colores Discord).
-   W10: ya no existe "Sin estado" (el default es En línea). */
+   W10: ya no existe "Sin estado" (el default es En línea).
+   W57: en escritorio es un círculo con aro sólido del fondo; en el
+   teléfono la media query lo convierte en silueta de teléfono. */
 .sdot {
+  position: relative;
   display: inline-block;
-  width: 9px; height: 9px;
+  width: 14px; height: 14px;
   border-radius: 50%;
-  border: 2px solid transparent;
-  background: var(--t2);
+  border: 2px solid var(--panel);
+  background: var(--online);
   background-origin: border-box;
   margin-right: 7px;
   flex: none;
 }
-.sdot.sd-online { background: var(--online); }
-.sdot.sd-busy {
-  background: radial-gradient(circle at 72% 28%,
-    transparent 0 30%, var(--st-busy) 31%);
-}
+.sdot.sd-busy { background: var(--st-busy); }
 .sdot.sd-dnd {
   background:
-    linear-gradient(var(--st-slash), var(--st-slash)) center / 62% 16% no-repeat,
+    linear-gradient(var(--panel), var(--panel)) center / 70% 22% no-repeat,
     var(--st-dnd);
 }
 .sdot.sd-off {
-  background: transparent;
-  border-color: var(--st-off);
+  background: var(--panel);
+  border: 3px solid var(--st-off);
+}
+/* Luna Material del preset "Ausente" en escritorio. En móvil el ::before
+   se reutiliza como pantalla del teléfono (la media query lo redefine). */
+@media (min-width: 761px) {
+  .sdot.sd-busy::before {
+    content: '';
+    position: absolute;
+    left: 2px; top: 2px;
+    width: 6px; height: 6px;
+    background: var(--panel);
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
 }
 
 /* W56: en el teléfono los estados del editor se dibujan como teléfonos

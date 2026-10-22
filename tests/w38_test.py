@@ -118,10 +118,12 @@ JS_SPLASH = """(async () => {
   const el = document.querySelector('.app-boot .bp-screen');
   if (!el) return 'FAIL: sin .bp-screen';
   const logo = el.querySelector('.bp-logo');
+  const logoUse = logo ? logo.querySelector('use') : null;
   const e2e = el.querySelector('.bp-e2e');
   const use = e2e ? e2e.querySelector('use') : null;
   const out = {
     logo: logo ? (logo.getAttribute('src') || '') : '',
+    logoMark: logoUse ? (logoUse.getAttribute('href') || '') : '',
     e2eTxt: e2e ? e2e.textContent.trim() : '',
     key: use ? (use.getAttribute('href') || '') : '',
     bar: !!el.querySelector('.bp-bar'),
@@ -255,7 +257,7 @@ def main():
     except Exception:
         pass
     step("el overlay lleva icono de la app + sello de cifrado + i-key",
-         ok and "icon.svg" in (r.get("logo") or "")
+         ok and r.get("logoMark") == "#i-logo-mark"
          and r.get("e2eTxt") == "Cifrado de extremo a extremo"
          and r.get("key") == "#i-key" and r.get("ikey") is True,
          f"res={res!r}")

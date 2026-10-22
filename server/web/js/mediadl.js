@@ -12,8 +12,10 @@
 
    Sin dependencias. FF78: XHR + Blob + IntersectionObserver (todo disponible). */
 import { t } from './i18n.js';
+import { toast } from './store.js';
 import {
   getDownloadBlob, saveDownload, saveBlobToDisk, requestPersistence,
+  dlCategory, dlTypeInfo, nativeDownload, nativeDownloadAvailable,
 } from './downloads.js';
 
 const RING = 132;                 // circunferencia del círculo (r=21, igual que subidas)
@@ -465,26 +467,56 @@ function saveBlob(obj, name) {
 /* Descarga de archivo con anillo + ✕; si ya está en memoria o en el
    almacén persistente, guarda al toque. W50: las descargas explícitas
    quedan en Cache Storage + IndexedDB para reabrirse sin red. */
-export function startDownload(url, filename, frame) {
+export function startDownload(url, filename, frame, mime, kind) {
   if (!url) return;
-  if (url.indexOf('blob:') === 0) { saveBlob(url, filename); return; }
+  const type = dlCategory(kind, mime, filename);
+  const info = dlTypeInfo(type);
+  const label = t(info.label);
+  const doneMsg = t(info.done);
+  const startMsg = t('Descargando {type}...', { type: label });
+  /* W57: el APK no puede guardar un blob del WebView en Descargas; el
+     DownloadManager nativo baja la URL firmada y la deja en
+     Downloads/Foxinix. */
+  if (nativeDownload(url, filename, mime, type, false)) {
+    toast(startMsg, 'info');
+    return;
+  }
+  if (url.indexOf('blob:') === 0) {
+    saveBlob(url, filename);
+    toast(doneMsg, 'ok');
+    return;
+  }
   const raw = getBlob(url);
   if (raw) {
     requestPersistence();
     saveDownload(url, filename, raw).catch(function () {});
     saveBlobToDisk(raw, filename);
+    toast(doneMsg, 'ok');
     return;
   }
   const download = function () {
     if (!frame || !frame.appendChild) { window.open(url, '_blank'); return; }
     requestPersistence();
+    toast(startMsg, 'info');
     runDl(url, frame, function (obj, blob) {
       saveDownload(url, filename, blob).catch(function () {});
       saveBlob(obj, filename);
+      toast(doneMsg, 'ok');
     }, true);
   };
   getDownloadBlob(url).then(function (blob) {
-    if (blob) { saveBlobToDisk(blob, filename); return; }
+    if (blob) {
+      /* Si ya está cacheado pero el APK no puede guardar blobs, se deja
+         que el DownloadManager baje la URL firmada a Descargas. */
+      if (nativeDownloadAvailable() &&
+          nativeDownload(url, filename, mime, type, false)) {
+        toast(startMsg, 'info');
+        return;
+      }
+      saveBlobToDisk(blob, filename);
+      toast(doneMsg, 'ok');
+      return;
+    }
     download();
   }).catch(function () { download(); });
 }

@@ -65,7 +65,7 @@ export const LoginView = {
   template: `
   <div class="auth-wrap">
     <div class="auth-card">
-      <div class="auth-logo"><img class="auth-logo-img" src="/static/logo.svg" alt="Foxinix"></div>
+      <div class="auth-logo"><svg class="auth-logo-img" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg></div>
       <p class="auth-sub">{{ t('Inicia sesión en tu cuenta') }}</p>
 
       <form @submit.prevent="submit" novalidate>
@@ -156,7 +156,7 @@ export const RegisterView = {
   template: `
   <div class="auth-wrap">
     <div class="auth-card">
-      <div class="auth-logo"><img class="auth-logo-img" src="/static/logo.svg" alt="Foxinix"></div>
+      <div class="auth-logo"><svg class="auth-logo-img" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg></div>
       <h1 class="auth-title">{{ t('Crear cuenta') }}</h1>
       <p class="auth-sub">{{ t('Tres pasos y estás adentro') }}</p>
 
@@ -296,7 +296,7 @@ export const ProfileView = {
       <div class="avatar-pick" v-if="!edSrc">
         <div class="av-img">
           <img v-if="preview" :src="preview" alt="">
-          <img v-else class="fox" src="/static/icon.svg" alt="">
+          <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
         </div>
         <label class="av-btn" :title="t('Elegir foto')">
           <svg class="ic ic-sm"><use href="#i-image"></use></svg>
@@ -430,7 +430,7 @@ export const VerifyView = {
   template: `
   <div class="auth-wrap">
     <div class="auth-card">
-      <div class="auth-logo"><img class="auth-logo-img" src="/static/logo.svg" alt="Foxinix"></div>
+      <div class="auth-logo"><svg class="auth-logo-img" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg></div>
       <h1 class="auth-title">{{ t('Verifica tu correo') }}</h1>
       <p class="verify-mail">
         {{ t('Enviamos un código de 6 dígitos a') }}<br><strong>{{ pendingEmail || t('tu correo') }}</strong>
@@ -496,7 +496,7 @@ export const ForgotView = {
   template: `
   <div class="auth-wrap">
     <div class="auth-card">
-      <div class="auth-logo"><img class="auth-logo-img" src="/static/logo.svg" alt="Foxinix"></div>
+      <div class="auth-logo"><svg class="auth-logo-img" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg></div>
       <h1 class="auth-title">{{ t('Recuperar contraseña') }}</h1>
       <p class="auth-sub">{{ t('Te enviamos un código de verificación a tu correo') }}</p>
 
@@ -561,7 +561,7 @@ export const ResetView = {
   template: `
   <div class="auth-wrap">
     <div class="auth-card">
-      <div class="auth-logo"><img class="auth-logo-img" src="/static/logo.svg" alt="Foxinix"></div>
+      <div class="auth-logo"><svg class="auth-logo-img" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg></div>
       <h1 class="auth-title">{{ t('Nueva contraseña') }}</h1>
       <p class="auth-sub">{{ t('Introduce el código que te enviamos y la contraseña nueva') }}</p>
 

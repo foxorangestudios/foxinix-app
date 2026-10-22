@@ -531,6 +531,10 @@ class CreateGroupIn(BaseModel):
     members: list[str] = Field(default_factory=list, max_length=100)
 
 
+class RenameChatIn(BaseModel):
+    title: str = Field(min_length=1, max_length=60)
+
+
 class E2EBlob(BaseModel):
     """W29f: cuerpo cifrado (AES-GCM). El server NO ve el texto: sólo
     valida tamaño/base64 (blob ≤32 KB) y guarda IV + cifrado."""
@@ -720,6 +724,27 @@ def create_group(body: CreateGroupIn, user: dict = Depends(current_user)) -> dic
     chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
     hub.notify_chat_created(chat_id, member_ids)
     return {"chat": chat_brief(chat, user["id"])}
+
+
+# W57: nombre del grupo — solo owner o admin. Los miembros reciben
+# 'chat_updated' para refrescar la lista y la cabecera sin recargar.
+@router.patch("/{chat_id}")
+def rename_chat(chat_id: int, body: RenameChatIn,
+                user: dict = Depends(current_user)) -> dict[str, Any]:
+    chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
+    if not chat or chat["type"] != "group":
+        raise HTTPException(404, "Grupo no encontrado")
+    mine = _member_row(chat_id, user["id"])
+    if not mine:
+        raise HTTPException(403, "No eres miembro del grupo")
+    if mine.get("role") not in ("owner", "admin"):
+        raise HTTPException(403, "Solo el owner o un admin pueden cambiar el nombre")
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(422, "El nombre no puede estar vacío")
+    db.run("UPDATE chats SET title = ? WHERE id = ?", (title, chat_id))
+    hub.emit_to_chat(chat_id, {"type": "chat_updated", "chat_id": chat_id})
+    return {"chat_id": chat_id, "title": title}
 
 
 # W27: foto del grupo — solo owner o admin. El pipeline es el mismo que la

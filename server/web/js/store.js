@@ -28,6 +28,9 @@ export const store = reactive({
   /* W22: chat pendiente de abrir desde la URL (deep link o botón atrás):
      {kind:'user'|'group', id} — lo resuelve actions.resolvePendingChat. */
   pendingPath: null,
+  /* W57: destino de una notificación {chatId, msgId, tries}. Se resuelve
+     cuando la lista de chats ya está cargada (también en arranque frío). */
+  notifyTarget: null,
   jumpMsg: 0,             // W22: id de mensaje al que saltar (?m= en la URL)
   /* W29d: spoilers revelados por chat — se vacía al salir del chat */
   spoilSeen: {},           // chatId → {msgId: 1}
@@ -74,6 +77,9 @@ export const store = reactive({
   grpEdit: { chatId: 0, src: '' },
   profile: null,          // ventana flotante de perfil: {loading, user, error} | null
   confirmBox: null,       // {title, text, danger, requireUser, requirePassword, ...}
+  /* W57: renombrar grupo (solo owner/admin) */
+  renameGroupId: 0,
+  renameGroupTitle: '',
   readsBox: null,         // W28f: {chatId, msgId, rows: null|[usuarios], total, loading, error}
   lb: null,               // W8: visor de imágenes {url} — W29l: también desde la info
   pwOpen: false,          // W8: ventana "cambiar contraseña" (desde Ajustes)

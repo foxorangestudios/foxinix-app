@@ -17,8 +17,9 @@ export const hooks = { sendSeen: null };
    de cuenta (W11); a las viejas /api/media/{id} les seguimos pegando
    ?token= por compatibilidad. */
 import { cachedUrl } from './mediadl.js';
+import { nativeDownload, dlCategory, shouldAutoDownload } from './downloads.js';
 
-export function mediaUrl(url) {
+export function mediaUrl(url, noCache) {
   if (!url) return '';
   let u = url;
   if (!/[?&](sig|token)=/.test(u) && u.indexOf('/media/') !== 0) {
@@ -32,7 +33,24 @@ export function mediaUrl(url) {
   }
   /* W15: si el archivo ya se bajó en esta sesión, sirve el blob (memoria);
      la identidad sigue siendo la RUTA (el blob lo guarda mediadl.js). */
-  return cachedUrl(u) || u;
+  return (!noCache && cachedUrl(u)) || u;
+}
+
+/* W57: precarga de imágenes/avatares por RUTA (la firma cambia, el
+   archivo no). Reutiliza la misma promesa e Image para no pedir dos veces
+   el mismo recurso durante el arranque. */
+const imgPreloads = {};
+export function preloadImage(url) {
+  const u = mediaUrl(url);
+  if (!u) return Promise.resolve();
+  const key = u.split('?')[0];
+  if (imgPreloads[key]) return imgPreloads[key];
+  imgPreloads[key] = new Promise(function (resolve) {
+    const im = new Image();
+    im.onload = im.onerror = function () { resolve(im); };
+    im.src = u;
+  });
+  return imgPreloads[key];
 }
 
 /* uuid (crypto.randomUUID llegó en FF92; acá fallback para FF78). */
@@ -108,6 +126,7 @@ async function loadChatsOnce() {
     sortChats();
     decryptChatPreviews();   // W30c: previews de la lista en claro (si hay clave)
     resolvePendingChat();   // W22: el deep link pendiente ya tiene la lista
+    resolveNotificationTarget();  // W57: aviso tocado durante el arranque
   } catch (e) {
     if (e && e.status !== 401) toast(e.detail || 'No se pudo cargar la lista', 'err');
   }
@@ -152,6 +171,42 @@ export function resolvePendingChat() {
     return false;
   }
   openChat(id, true);   // keepJump: el ?m= de la URL se aplica después
+  return true;
+}
+
+/* W57: una notificación trae chat + mensaje. En Android puede llegar en
+   arranque frío antes de que exista la lista, así que se guarda como
+   destino pendiente y loadChats lo resuelve al terminar. */
+export function openNotificationTarget(chatId, msgId) {
+  const cid = parseInt(chatId, 10) || 0;
+  const mid = parseInt(msgId, 10) || 0;
+  if (!cid) return false;
+  store.notifyTarget = { chatId: cid, msgId: mid, tries: 0 };
+  if (!store.hasSession) return false;   // se resuelve tras iniciar sesión
+  return resolveNotificationTarget();
+}
+
+export function resolveNotificationTarget() {
+  const p = store.notifyTarget;
+  if (!p) return false;
+  if (!store.hasSession || !store.chats.length) return false;
+  const chat = findChat(p.chatId);
+  if (!chat) {
+    /* La lista pudo quedar vieja (me agregaron a un grupo): recargarla
+       una vez; si de verdad ya no existe, descartar el destino. */
+    p.tries = (p.tries || 0) + 1;
+    if (p.tries > 2) { store.notifyTarget = null; return false; }
+    loadChats();
+    return false;
+  }
+  store.notifyTarget = null;
+  store.pendingPath = null;
+  store.route = 'app';
+  store.settingsOpen = false;
+  store.peopleMobile = false;
+  store.infoOpen = false;
+  store.jumpMsg = p.msgId || 0;
+  openChat(p.chatId, !!p.msgId);
   return true;
 }
 
@@ -567,6 +622,18 @@ export function onIncomingMessage(m) {
   finishIncoming(m);
 }
 
+/* W57: descarga automática en Android según tipo y red. En web/desktop
+   no hay puente nativo y no se hace nada (el navegador no permite bajar
+   archivos en silencio). */
+function maybeAutoDownload(m) {
+  if (!m || !m.media || !m.media.url || m.kind === 'system') return;
+  const name = m.media.name || 'archivo';
+  const type = dlCategory(m.kind, m.media.mime, name);
+  if (!shouldAutoDownload(type)) return;
+  const url = mediaUrl(m.media.url, true);
+  nativeDownload(url, name, m.media.mime || '', type, true);
+}
+
 function finishIncoming(m) {
   const mine = !!(m.sender && store.user && m.sender.id === store.user.id);
   const open = store.activeChatId === m.chat_id;
@@ -614,6 +681,7 @@ function finishIncoming(m) {
   } else if (!mine) {
     loadChats();   // chat que no conocí (me lo crearon): refrescar lista
   }
+  if (!mine) maybeAutoDownload(m);
 }
 
 /* Stub de respuesta para el mensaje optimista (el real llega del server). */

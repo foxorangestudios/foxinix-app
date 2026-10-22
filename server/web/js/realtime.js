@@ -3,7 +3,7 @@
 import { store, toast } from './store.js';
 import { session, refreshTokens, authLost, ApiError, sessionHooks } from './api.js';
 import { hooks, loadChats, loadMembers, loadPeople, loadBlocks,
-  onIncomingMessage, catchUpChat, mediaUrl } from './actions.js';
+  onIncomingMessage, catchUpChat, mediaUrl, openNotificationTarget } from './actions.js';
 import { t } from './i18n.js';
 /* W37a: los avisos y las citas muestran el texto DESCIFRADO (igual que
    el chat); si no hay clave, el aviso usa un texto neutro. */
@@ -319,11 +319,16 @@ function browserNotify(m) {
   if (native) {
     try {
       const cid = String(m.chat_id == null ? '' : m.chat_id);
+      const mid = String(m.id == null ? '' : m.id);
       const snd = store.prefs && store.prefs.sound ? '1' : '0';
       const body = previewBody(m);
-      if (typeof native.notifyWithAvatar === 'function') {
-        native.notifyWithAvatar(title, body, cid, snd,
-          avatarRaw ? nativeAvatarUrl(avatarRaw) : '');
+      const avatar = avatarRaw ? nativeAvatarUrl(avatarRaw) : '';
+      if (typeof native.notifyWithAvatarAndMessage === 'function') {
+        native.notifyWithAvatarAndMessage(title, body, cid, snd, avatar, mid);
+      } else if (typeof native.notifyWithMessage === 'function') {
+        native.notifyWithMessage(title, body, cid, snd, mid);
+      } else if (typeof native.notifyWithAvatar === 'function') {
+        native.notifyWithAvatar(title, body, cid, snd, avatar);
       } else {
         native.notify(title, body, cid, snd);
       }
@@ -340,6 +345,7 @@ function browserNotify(m) {
     n.onclick = function () {
       window.focus();
       try { n.close(); } catch (e) {}
+      openNotificationTarget(m.chat_id, m.id);
     };
   } catch (e) {}
 }
