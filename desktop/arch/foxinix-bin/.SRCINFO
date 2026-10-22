@@ -34,7 +34,7 @@ pkgbase = foxinix-bin
 	options = !debug
 	source = Foxinix-0.1.7-linux-x86_64.AppImage::https://github.com/foxorangestudios/foxinix-app/releases/download/v0.1.7/Foxinix-0.1.7-linux-x86_64.AppImage
 	source = LICENSE::https://raw.githubusercontent.com/foxorangestudios/foxinix-app/v0.1.7/LICENSE
-	sha256sums = 00852caba1f572c8ee57350df21a97dde7728dc93b1f82b9e4d7aa259813a0ae
+	sha256sums = 48467f92fc16726adfa47ea8a14199a5e266e6b5282c825ae871b5e291b63f41
 	sha256sums = cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 
 pkgname = foxinix-bin
