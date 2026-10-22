@@ -465,8 +465,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -679,28 +677,6 @@ class AndroidNotifier(private val activity: Activity) {
   @JavascriptInterface
   @Keep
   fun storagePermission(): String = storageState()
-
-  /* W58: red activa para las descargas automáticas por Wi-Fi/datos.
-     En WebView el Network Information API no siempre está disponible,
-     así que el APK la consulta por ConnectivityManager. */
-  @JavascriptInterface
-  @Keep
-  fun networkType(): String {
-    return try {
-      val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE)
-        as? ConnectivityManager ?: return "off"
-      val net = cm.activeNetwork ?: return "off"
-      val caps = cm.getNetworkCapabilities(net) ?: return "off"
-      when {
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "wifi"
-        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
-        else -> "off"
-      }
-    } catch (e: Exception) {
-      "off"
-    }
-  }
 
   @JavascriptInterface
   @Keep
