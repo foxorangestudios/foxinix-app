@@ -996,7 +996,7 @@ class AndroidNotifier(private val activity: Activity) {
 
   private fun sanitizeName(raw: String?): String {
     var name = (raw ?: "archivo").replace(
-      Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"),
+      Regex("[\\\\/:*?\\\"<>|\\\\p{Cntrl}]"),
       "_"
     ).trim()
     if (name.isBlank()) name = "archivo"
