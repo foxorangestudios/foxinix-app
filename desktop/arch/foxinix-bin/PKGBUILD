@@ -25,6 +25,9 @@ package() {
 
   cd "$srcdir"
   rm -rf squashfs-root
+  # makepkg descarga las fuentes sin permiso de ejecución; el AppImage
+  # necesita ejecutarse para extraerse.
+  chmod 755 "$srcdir/Foxinix-${pkgver}-linux-x86_64.AppImage"
   "$srcdir/Foxinix-${pkgver}-linux-x86_64.AppImage" --appimage-extract >/dev/null
 
   # Mover el árbol extraído evita duplicar ~427 MB durante el empaquetado.
