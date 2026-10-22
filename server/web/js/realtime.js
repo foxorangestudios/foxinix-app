@@ -18,6 +18,23 @@ let backoff = 1000;
 let stopped = true;
 let hasOpened = false;
 
+/* W55: el APK inyecta este puente; en web/escritorio no existe y se
+   sigue usando la Notification del navegador. Se consulta en cada aviso
+   porque el objeto nativo puede inyectarse después del módulo. */
+function androidNotifier() {
+  if (typeof window === 'undefined' || !window.FoxinixAndroid) return null;
+  if (typeof window.FoxinixAndroid.notify !== 'function') return null;
+  return window.FoxinixAndroid;
+}
+
+/* Solo cuenta como aviso nativo si Android ya concedió el permiso. Si no,
+   el bip sigue sonando y el usuario puede activarlo desde Ajustes. */
+function nativeNotifyReady() {
+  const a = androidNotifier();
+  if (!a) return null;
+  try { return a.permission() === 'granted' ? a : null; } catch (e) { return null; }
+}
+
 /* W45g: cualquier clearSession() (logout, 401 real, cancelación) corta
    la WS en el acto; no queda recibiendo eventos de una cuenta cerrada. */
 sessionHooks.onLogout = stopWS;
@@ -213,8 +230,11 @@ function previewBody(m) {
 /* Aviso del navegador — se extrae para poder esperar al descifrado
    (W37a): con E2E el cuerpo es el MISMO texto que ve el chat. */
 function browserNotify(m) {
-  if (typeof Notification === 'undefined' ||
-      Notification.permission !== 'granted') return;
+  /* W55: resolver el puente ANTES del guard de Notification: el WebView
+     de Android no define Notification, pero sí FoxinixAndroid. */
+  const native = nativeNotifyReady();
+  if (!native && (typeof Notification === 'undefined' ||
+      Notification.permission !== 'granted')) return;
   const who = m.sender ? (m.sender.display_name || m.sender.username) : '';
   /* W34c: más contexto — quién escribió, en qué grupo, y su foto de
      perfil como icono de la notificación. */
@@ -228,6 +248,21 @@ function browserNotify(m) {
     : (chatName || 'Foxinix');
   const icon = (m.sender && m.sender.avatar_url) ||
     (c && c.avatar_url) || '/static/icon-192.png';
+
+  /* W55: dentro del APK, Android WebView no tiene Notification. Usamos
+     la notificación nativa (funciona con la app en segundo plano). */
+  if (native) {
+    try {
+      native.notify(
+        title,
+        previewBody(m),
+        String(m.chat_id == null ? '' : m.chat_id),
+        store.prefs && store.prefs.sound ? '1' : '0'
+      );
+    } catch (e) {}
+    return;
+  }
+
   try {
     const n = new Notification(title, {
       body: previewBody(m),
@@ -255,7 +290,8 @@ function notifyIncoming(m) {
     if (store.chats[i].id === m.chat_id) { muted = !!store.chats[i].muted; break; }
   }
   if (muted) return;
-  if (store.prefs.sound && (!open || document.hidden)) blip();
+  /* W55: el sonido del aviso nativo lo pone Android; no duplicamos el bip. */
+  if (store.prefs.sound && (!open || document.hidden) && !nativeNotifyReady()) blip();
   if (document.hidden) {
     /* W37a: con cifrado E2E se espera a descifrar (si hay clave) para
        avisar con el texto real — igual que en el chat. Sin clave

@@ -2666,17 +2666,63 @@ const SettingsModal = {
       emErr.value = '';
     };
 
-    /* ---- notificaciones del navegador ---- */
-    const notifOn = typeof Notification !== 'undefined';
-    const notifPerm = Vue.ref(notifOn ? Notification.permission : 'unsupported');
+    /* ---- notificaciones (navegador o APK Android) ---- */
+    const nativeNotif = (function () {
+      try {
+        const a = window.FoxinixAndroid;
+        return a && typeof a.notify === 'function' ? a : null;
+      } catch (e) { return null; }
+    })();
+    const nativeNotifAvail = !!nativeNotif;
+    const nativeNotifPerm = function () {
+      if (!nativeNotif) return 'unsupported';
+      try { return nativeNotif.permission() || 'prompt'; } catch (e) { return 'prompt'; }
+    };
+    const notifOn = nativeNotifAvail || typeof Notification !== 'undefined';
+    const notifPerm = Vue.ref(nativeNotifAvail
+      ? nativeNotifPerm()
+      : (typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'));
+    const notifTitle = Vue.computed(function () {
+      return nativeNotifAvail
+        ? t('Notificaciones de Android')
+        : t('Notificaciones del navegador');
+    });
     const notifLabel = Vue.computed(function () {
       if (!notifOn) return t('Este navegador no las soporta');
-      if (notifPerm.value === 'granted') return t('Activas: avisan con la pestaña oculta');
-      if (notifPerm.value === 'denied') return t('Bloqueadas: actívalas en el navegador');
-      return t('El navegador te va a pedir permiso');
+      if (notifPerm.value === 'granted') {
+        return nativeNotifAvail
+          ? t('Activas: avisan con la app en segundo plano')
+          : t('Activas: avisan con la pestaña oculta');
+      }
+      if (notifPerm.value === 'denied') {
+        return nativeNotifAvail
+          ? t('Bloqueadas: actívalas en Ajustes de Android')
+          : t('Bloqueadas: actívalas en el navegador');
+      }
+      return nativeNotifAvail
+        ? t('Android te va a pedir permiso')
+        : t('El navegador te va a pedir permiso');
     });
+    const refreshNotif = function () {
+      if (nativeNotif) notifPerm.value = nativeNotifPerm();
+    };
+    const openNotifSettings = function () {
+      if (!nativeNotif) return;
+      try { nativeNotif.openSettings(); } catch (e) {}
+    };
     const askNotif = function () {
       if (!notifOn) return;
+      if (nativeNotif) {
+        try { nativeNotif.requestPermission(); } catch (e) {}
+        refreshNotif();
+        let tries = 0;
+        const timer = setInterval(function () {
+          refreshNotif();
+          tries++;
+          if (tries >= 8) clearInterval(timer);
+        }, 750);
+        return;
+      }
       try {
         const p = Notification.requestPermission(function (r) { notifPerm.value = r; });
         if (p && typeof p.then === 'function') {
@@ -2684,6 +2730,14 @@ const SettingsModal = {
         }
       } catch (e) {}
     };
+    Vue.onMounted(function () {
+      window.addEventListener('focus', refreshNotif);
+      document.addEventListener('visibilitychange', refreshNotif);
+    });
+    Vue.onUnmounted(function () {
+      window.removeEventListener('focus', refreshNotif);
+      document.removeEventListener('visibilitychange', refreshNotif);
+    });
 
     /* ---- W50: descargas persistentes (Cache Storage + IndexedDB) ---- */
     const dlList = Vue.ref([]);
@@ -2738,7 +2792,8 @@ const SettingsModal = {
       pwCur, pwNew, pwRep, pwErr, pwBusy, pwReady, changePw,
       emNew, emCode, emMask, emStep, emErr, emBusy,
       sendEmCode, confirmEmCode, cancelEmCode,
-      notifOn, notifPerm, notifLabel, askNotif,
+      notifOn, notifPerm, notifLabel, notifTitle, askNotif,
+      nativeNotifAvail, openNotifSettings,
       /* W50: descargas persistentes */
       dlList, dlTotal, dlBusy, dlMsg, dlSave, dlDelete, dlClear, dlDate, fmtSize,
       doLogout: askLogout, doDelete: askDeleteAccount,
@@ -2918,10 +2973,14 @@ const SettingsModal = {
               </div>
             </div>
             <div class="st-sec" v-if="notifOn">
-              <div class="st-h">{{ t('Notificaciones del navegador') }}</div>
+              <div class="st-h">{{ notifTitle }}</div>
               <div class="st-row">
                 <div class="st-col"><b>{{ t('Avisos del sistema') }}</b><span>{{ notifLabel }}</span></div>
-                <button class="btn btn-ghost btn-sm" type="button" v-if="notifPerm !== 'granted'"
+                <button class="btn btn-ghost btn-sm" type="button"
+                  v-if="nativeNotifAvail && notifPerm === 'denied'"
+                  @click="openNotifSettings">{{ t('Abrir ajustes') }}</button>
+                <button class="btn btn-ghost btn-sm" type="button"
+                  v-else-if="notifPerm !== 'granted'"
                   @click="askNotif">{{ t('Activar') }}</button>
                 <span class="st-ok" v-else>{{ t('Activas ✓') }}</span>
               </div>
@@ -5564,6 +5623,19 @@ export const ChatShell = {
       startWS();
       bootAll();       // W27h: chats + gente + mensajes del deep link
       initInfoPanel();                            // W7: info por defecto si hay lugar
+      /* W55: en el APK pedimos una vez el permiso de avisos de Android.
+         Si el usuario lo niega, Ajustes → Chat permite reintentarlo. */
+      try {
+        const an = window.FoxinixAndroid;
+        if (an && typeof an.requestPermission === 'function' &&
+            an.permission() === 'prompt' &&
+            localStorage.getItem('fm.nativeNotifAsked') !== '1') {
+          localStorage.setItem('fm.nativeNotifAsked', '1');
+          setTimeout(function () {
+            try { an.requestPermission(); } catch (e) {}
+          }, 1500);
+        }
+      } catch (e) {}
       document.addEventListener('click', onDocClick);
       window.addEventListener('keydown', onEsc);
       /* W54d: teclado de Android (resize del WebView o viewport visual) */

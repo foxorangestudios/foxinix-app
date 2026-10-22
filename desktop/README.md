@@ -21,8 +21,8 @@ compilar en macOS.
 Para ejecutar el AppImage en Arch Linux:
 
 ```bash
-chmod +x Foxinix-0.1.4-linux-x86_64.AppImage
-./Foxinix-0.1.4-linux-x86_64.AppImage
+chmod +x Foxinix-0.1.5-linux-x86_64.AppImage
+./Foxinix-0.1.5-linux-x86_64.AppImage
 ```
 
 Los paquetes `.deb` y `.rpm` recomiendan los plugins de GStreamer para

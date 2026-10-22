@@ -312,6 +312,41 @@ def main():
         if not st["opened"] or not st["closed"] or st["active"] != "Chats":
             raise SystemExit(f"✗ la barra no navega desde Ajustes: {st}")
 
+        # 5c) En el APK, Ajustes muestra el permiso nativo de Android
+        # en lugar del permiso de notificaciones del navegador.
+        js_native_set = (
+            "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+            "window.FoxinixAndroid={permission:function(){return 'granted';},"
+            "requestPermission:function(){},openSettings:function(){},"
+            "notify:function(){}};"
+            "let t=Date.now();"
+            "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
+            "document.querySelector('.mobile-tabs .mt-btn:nth-child(3)').click();"
+            "await s(500);"
+            "const tabs=Array.from(document.querySelectorAll('.m-tab'));"
+            "const chat=tabs.find(function(b){return b.textContent.trim()==='Chat';});"
+            "if(chat)chat.click(); await s(400);"
+            "const secs=Array.from(document.querySelectorAll('.st-sec'));"
+            "let sec=null;"
+            "for(const x of secs){const h=x.querySelector('.st-h');"
+            "if(h&&h.textContent.indexOf('Notificaciones de Android')>=0)sec=x;}"
+            "return JSON.stringify({found:!!sec,"
+            "head:sec?sec.querySelector('.st-h').textContent:'',"
+            "label:sec?sec.querySelector('.st-col span').textContent:'',"
+            "button:sec&&sec.querySelector('button')?sec.querySelector('button').textContent:'',"
+            "ok:sec&&sec.querySelector('.st-ok')?sec.querySelector('.st-ok').textContent:''})})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-native-settings", SHOTS / "mov-5c-ajustes-android.png",
+            js=js_native_set, wait=400)
+        print("paso5c ajustes Android:", js_res)
+        if not ok or not isinstance(js_res, dict) or not js_res.get("found"):
+            print(log[-1800:])
+            raise SystemExit("✗ Ajustes no muestra el aviso nativo de Android")
+        if js_res.get("button"):
+            raise SystemExit(f"✗ Ajustes ofrece activar con permiso concedido: {js_res}")
+        if js_res.get("label") != "Activas: avisan con la app en segundo plano":
+            raise SystemExit(f"✗ estado nativo inesperado: {js_res}")
+
         # 7) Editor de foto móvil: grande, sin barra/botón y sin el
         # formulario de abajo hasta pulsar Aplicar.
         js_avatar = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
@@ -437,6 +472,47 @@ def main():
             raise SystemExit(f"✗ burbuja propia inesperada en claro: {js_res}")
         if js_res.get("color") != "rgb(255, 255, 255)" or js_res.get("text") != "rgb(255, 255, 255)":
             raise SystemExit(f"✗ texto oscuro sobre burbuja naranja: {js_res}")
+
+        # 10) Puente de notificaciones del APK: con el objeto nativo
+        # inyectado, un mensaje entrante oculto debe llamar a notify()
+        # (Android WebView no define Notification).
+        tok = json.dumps(B["access"])
+        js_native = (
+            "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+            "window.FoxinixAndroid={permission:function(){return 'granted';},"
+            "requestPermission:function(){},openSettings:function(){},"
+            "notify:function(t,b,c,snd){window.__lastNotify={t:t,b:b,c:c,s:snd};}};"
+            "let t=Date.now();"
+            "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))await s(120);"
+            "const item=document.querySelector('.chat-list .chat-item');"
+            "if(!item)return JSON.stringify({fail:'sin lista'});"
+            "item.click(); await s(1100);"
+            "try{Object.defineProperty(document,'hidden',{configurable:true,"
+            "get:function(){return true;}});}catch(e){return JSON.stringify({fail:e.message});}"
+            "const token=" + tok + ";let status=0;"
+            "for(let i=0;i<3;i++){const r=await fetch('/api/chats/" + str(cid) + "/messages',"
+            "{method:'POST',headers:{'Content-Type':'application/json',"
+            "'Authorization':'Bearer '+token},"
+            "body:JSON.stringify({kind:'text',body:'Aviso nativo móvil'})});"
+            "status=r.status;if(status===201)break;await s(1200);}"
+            "await s(2200);"
+            "return JSON.stringify({hidden:document.hidden,status:status,"
+            "note:window.__lastNotify||null});})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-native-notify", SHOTS / "mov-10-aviso.png",
+            js=js_native, wait=400)
+        print("paso10 aviso Android:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1800:])
+            raise SystemExit("✗ no se pudo probar el aviso nativo")
+        st = js_res
+        if st.get("status") != 201 or st.get("hidden") is not True:
+            raise SystemExit(f"✗ no llegó el mensaje de prueba: {st}")
+        note = st.get("note")
+        if not note or note.get("b") != "Aviso nativo móvil":
+            raise SystemExit(f"✗ el APK no recibió el aviso nativo: {st}")
+        if str(note.get("c")) != str(cid):
+            raise SystemExit(f"✗ el aviso nativo no identifica el chat: {st}")
 
         # 6) Escritorio: nada exclusivo de móvil.
         ok, js_res, ev, log = run_shot(

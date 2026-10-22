@@ -7,6 +7,7 @@ prepara el workflow, sin guardar credenciales en el repositorio.
 """
 
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path("src-tauri/gen/android")
@@ -80,6 +81,10 @@ for permission in (
     # paquete de permisos y la nota de voz queda sin acceso.
     "android.permission.MODIFY_AUDIO_SETTINGS",
     "android.permission.CAMERA",
+    # W55: Android 13+ pide permiso explícito para avisos; VIBRATE es
+    # normal y permite que el canal de mensajes vibre.
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.VIBRATE",
 ):
     if permission not in manifest:
         tag = f'    <uses-permission android:name="{permission}" />\n'
@@ -147,3 +152,250 @@ if main_activity:
         print("El inset del teclado ya estaba presente")
 else:
     print("Aviso: no se encontró MainActivity.kt para ajustar el teclado")
+
+# W55: Android WebView no implementa Web Notifications. Exponemos un puente
+# JS mínimo que crea notificaciones nativas, respeta el permiso de Android
+# 13+, usa un icono propio y abre la app al tocarlas.
+if main_activity:
+    activity = main_activity.read_text(encoding="utf-8")
+    package_match = re.search(r"^package\s+([\w.]+)", activity, re.MULTILINE)
+    package_name = package_match.group(1) if package_match else "io.foxinix.app"
+
+    if "import android.webkit.WebView" not in activity:
+        activity = activity.replace(
+            "import androidx.activity.enableEdgeToEdge",
+            "import android.webkit.WebView\nimport androidx.activity.enableEdgeToEdge",
+            1,
+        )
+
+    if "addJavascriptInterface" not in activity:
+        if "override fun onWebViewCreate" in activity:
+            activity = activity.replace(
+                "    override fun onWebViewCreate(webView: WebView) {\n"
+                "        super.onWebViewCreate(webView)\n",
+                "    override fun onWebViewCreate(webView: WebView) {\n"
+                "        super.onWebViewCreate(webView)\n"
+                '        webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n',
+                1,
+            )
+        else:
+            bridge_method = (
+                "\n  private var appWebView: WebView? = null\n"
+                "\n  override fun onWebViewCreate(webView: WebView) {\n"
+                "    super.onWebViewCreate(webView)\n"
+                "    appWebView = webView\n"
+                '    webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
+                "  }\n"
+                "\n  /* W55: Wry pausa el WebView al pasar a segundo plano; eso\n"
+                "     detiene los timers del WebSocket y dejarían de llegar los\n"
+                "     avisos. Lo reanudamos para mantener la conexión viva. */\n"
+                "  override fun onPause() {\n"
+                "    super.onPause()\n"
+                "    appWebView?.onResume()\n"
+                "  }\n"
+            )
+            closing = activity.rfind("}")
+            if closing == -1:
+                print("Aviso: no se encontró el cierre de MainActivity.kt")
+            else:
+                activity = activity[:closing] + bridge_method + activity[closing:]
+        print("Puente de notificaciones agregado a MainActivity.kt")
+    main_activity.write_text(activity, encoding="utf-8")
+
+    notifier = main_activity.parent / "AndroidNotifier.kt"
+    notifier.write_text(
+        '''package PACKAGE_NAME
+
+import android.Manifest
+import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.webkit.JavascriptInterface
+import androidx.annotation.Keep
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+
+/* W55: avisos nativos del APK. La web llama a FoxinixAndroid.notify()
+   cuando está oculta; la notificación abre la app al tocarla. */
+@Keep
+class AndroidNotifier(private val activity: Activity) {
+  private val prefs = activity.getSharedPreferences("foxinix", Context.MODE_PRIVATE)
+  private val soundChannelId = "foxinix_messages_v1"
+  private val silentChannelId = "foxinix_messages_silent_v1"
+
+  init {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      val sound = NotificationChannel(
+        soundChannelId,
+        "Mensajes de Foxinix",
+        NotificationManager.IMPORTANCE_HIGH
+      )
+      sound.description = "Mensajes nuevos de Foxinix"
+      sound.enableVibration(true)
+      manager.createNotificationChannel(sound)
+
+      val silent = NotificationChannel(
+        silentChannelId,
+        "Mensajes silenciosos",
+        NotificationManager.IMPORTANCE_DEFAULT
+      )
+      silent.description = "Mensajes nuevos sin sonido"
+      silent.setSound(null, null)
+      silent.enableVibration(false)
+      manager.createNotificationChannel(silent)
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun permission(): String {
+    if (Build.VERSION.SDK_INT >= 33 &&
+      ContextCompat.checkSelfPermission(
+        activity,
+        Manifest.permission.POST_NOTIFICATIONS
+      ) != PackageManager.PERMISSION_GRANTED
+    ) {
+      val asked = prefs.getBoolean("notif_asked", false)
+      val rationale = activity.shouldShowRequestPermissionRationale(
+        Manifest.permission.POST_NOTIFICATIONS
+      )
+      return if (asked && !rationale) "denied" else "prompt"
+    }
+    if (!NotificationManagerCompat.from(activity).areNotificationsEnabled()) {
+      return "denied"
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      val channel = manager.getNotificationChannel(soundChannelId)
+      if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
+        return "denied"
+      }
+    }
+    return "granted"
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun requestPermission() {
+    if (Build.VERSION.SDK_INT < 33) return
+    if (ContextCompat.checkSelfPermission(
+        activity,
+        Manifest.permission.POST_NOTIFICATIONS
+      ) == PackageManager.PERMISSION_GRANTED
+    ) {
+      return
+    }
+    prefs.edit().putBoolean("notif_asked", true).apply()
+    activity.runOnUiThread {
+      activity.requestPermissions(
+        arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+        7319
+      )
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun openSettings() {
+    activity.runOnUiThread {
+      try {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+        } else {
+          Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:" + activity.packageName)
+          )
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        activity.startActivity(intent)
+      } catch (e: Exception) {
+        // Si el fabricante no expone esa pantalla, no bloqueamos la app.
+      }
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun notify(title: String?, body: String?, chatId: String?, sound: String?) {
+    if (permission() != "granted") return
+    val safeTitle = if (title.isNullOrBlank()) "Foxinix" else title
+    val safeBody = body ?: ""
+    val withSound = sound == "1"
+    val channelId = if (withSound) soundChannelId else silentChannelId
+
+    val intent = Intent(activity, MainActivity::class.java).apply {
+      flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+      if (!chatId.isNullOrBlank()) putExtra("foxinix_chat_id", chatId)
+    }
+    val pending = PendingIntent.getActivity(
+      activity,
+      0,
+      intent,
+      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    val builder = NotificationCompat.Builder(activity, channelId)
+      .setSmallIcon(R.drawable.ic_stat_foxinix)
+      .setContentTitle(safeTitle)
+      .setContentText(safeBody)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(safeBody))
+      .setContentIntent(pending)
+      .setAutoCancel(true)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+      .setOnlyAlertOnce(false)
+      .setWhen(System.currentTimeMillis())
+      .setColor(0xFFFF751F.toInt())
+
+    if (withSound) {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        builder.setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+      }
+    } else {
+      builder.setSilent(true)
+    }
+
+    val id = if (chatId.isNullOrBlank()) {
+      System.currentTimeMillis().toInt()
+    } else {
+      chatId.hashCode()
+    }
+    try {
+      NotificationManagerCompat.from(activity).notify(id, builder.build())
+    } catch (e: SecurityException) {
+      // Sin permiso del sistema no hay nada más que hacer.
+    }
+  }
+}
+'''.replace("PACKAGE_NAME", package_name),
+        encoding="utf-8",
+    )
+    print("AndroidNotifier.kt listo")
+
+    drawable = ROOT / "app/src/main/res/drawable/ic_stat_foxinix.xml"
+    drawable.parent.mkdir(parents=True, exist_ok=True)
+    drawable.write_text(
+        '''<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <path
+      android:fillColor="#FFFFFFFF"
+      android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2z" />
+</vector>
+''',
+        encoding="utf-8",
+    )
+    print("Icono de notificación listo")

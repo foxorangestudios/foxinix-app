@@ -266,6 +266,9 @@ jobs:
               firma comercial.
             - Linux y Windows incluyen el envoltorio Tauri; Android usa el
               WebView del sistema.
+            - En Android 13 o superior, acepta el permiso de notificaciones
+              cuando la app lo pida. Si lo bloqueaste, actívalo en Ajustes >
+              Aplicaciones > Foxinix > Permisos > Notificaciones.
             - Para actualizar en Android hace falta conservar la misma clave
               de firma. Las claves no se publican.
           files: dist/*
