@@ -1,6 +1,6 @@
 pkgbase = foxinix-bin
 	pkgdesc = Cliente de mensajería Foxinix (binario oficial)
-	pkgver = 0.1.5
+	pkgver = 0.1.6
 	pkgrel = 1
 	url = https://github.com/foxorangestudios/foxinix-app
 	arch = x86_64
@@ -29,12 +29,12 @@ pkgbase = foxinix-bin
 	optdepends = libnotify: notificaciones de escritorio
 	provides = foxinix
 	conflicts = foxinix
-	noextract = Foxinix-0.1.5-linux-x86_64.AppImage
+	noextract = Foxinix-0.1.6-linux-x86_64.AppImage
 	options = !strip
 	options = !debug
-	source = Foxinix-0.1.5-linux-x86_64.AppImage::https://github.com/foxorangestudios/foxinix-app/releases/download/v0.1.5/Foxinix-0.1.5-linux-x86_64.AppImage
-	source = LICENSE::https://raw.githubusercontent.com/foxorangestudios/foxinix-app/v0.1.5/LICENSE
-	sha256sums = 31112b76be8039339562ace461e0266728c7b2f9f6cb04cb319f9921054f6a93
+	source = Foxinix-0.1.6-linux-x86_64.AppImage::https://github.com/foxorangestudios/foxinix-app/releases/download/v0.1.6/Foxinix-0.1.6-linux-x86_64.AppImage
+	source = LICENSE::https://raw.githubusercontent.com/foxorangestudios/foxinix-app/v0.1.6/LICENSE
+	sha256sums = 00852caba1f572c8ee57350df21a97dde7728dc93b1f82b9e4d7aa259813a0ae
 	sha256sums = cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 
 pkgname = foxinix-bin

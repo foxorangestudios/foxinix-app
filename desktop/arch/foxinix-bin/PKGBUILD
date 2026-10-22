@@ -1,6 +1,6 @@
 # Maintainer: Foxinix <soporte@foxinix.qzz.io>
 pkgname=foxinix-bin
-pkgver=0.1.5
+pkgver=0.1.6
 pkgrel=1
 pkgdesc="Cliente de mensajería Foxinix (binario oficial)"
 arch=('x86_64')
@@ -17,7 +17,7 @@ options=('!strip' '!debug')
 noextract=("Foxinix-${pkgver}-linux-x86_64.AppImage")
 source=("Foxinix-${pkgver}-linux-x86_64.AppImage::https://github.com/foxorangestudios/foxinix-app/releases/download/v${pkgver}/Foxinix-${pkgver}-linux-x86_64.AppImage"
         "LICENSE::https://raw.githubusercontent.com/foxorangestudios/foxinix-app/v${pkgver}/LICENSE")
-sha256sums=('31112b76be8039339562ace461e0266728c7b2f9f6cb04cb319f9921054f6a93'
+sha256sums=('00852caba1f572c8ee57350df21a97dde7728dc93b1f82b9e4d7aa259813a0ae'
             'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30')
 
 package() {

@@ -14,7 +14,7 @@ makepkg -si
 O instalar un paquete ya compilado:
 
 ```bash
-sudo pacman -U foxinix-bin-0.1.5-1-x86_64.pkg.tar.zst
+sudo pacman -U foxinix-bin-0.1.6-1-x86_64.pkg.tar.zst
 ```
 
 ## AUR
@@ -30,6 +30,6 @@ git clone ssh://aur@aur.archlinux.org/foxinix-bin.git
 cp PKGBUILD .SRCINFO foxinix-bin/
 cd foxinix-bin
 git add PKGBUILD .SRCINFO
-git commit -m "foxinix-bin 0.1.5-1"
+git commit -m "foxinix-bin 0.1.6-1"
 git push
 ```
