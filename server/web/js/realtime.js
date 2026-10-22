@@ -427,44 +427,57 @@ function clearTyping(chatId, userId) {
 /* W15: aplica un cambio de perfil (evento 'profile') a todo lo cargado:
    lista de chats (DM), mensajes ya renderizados (incl. respuestas),
    panel de miembros y el perfil propio si cambió en otra pestaña. */
+function applyProfileFields(target, u) {
+  if (!target || typeof target !== 'object') return;
+  target.display_name = u.display_name;
+  target.username = u.username;
+  target.avatar_url = u.avatar_url;
+  target.banner_url = u.banner_url || null;
+  target.bio = u.bio;
+  target.status_text = u.status_text || '';
+  target.status_preset = u.status_preset || '';
+  if (u.online !== undefined) target.online = u.online;
+  if (u.last_seen !== undefined) target.last_seen = u.last_seen;
+}
+
 function applyProfileUpdate(u) {
   if (!u || u.id == null) return;
-  if (store.user && store.user.id === u.id) {
-    store.user.display_name = u.display_name;
-    store.user.avatar_url = u.avatar_url;
-  }
+  if (store.user && store.user.id === u.id) applyProfileFields(store.user, u);
   for (let i = 0; i < store.chats.length; i++) {
     const c = store.chats[i];
     if (c.type === 'dm' && c.title && c.title.id === u.id) {
-      c.title.display_name = u.display_name;
-      c.title.username = u.username;
-      c.title.avatar_url = u.avatar_url;
+      applyProfileFields(c.title, u);
     }
   }
   for (const k in store.msgs) {
     const arr = store.msgs[k];
     for (let j = 0; j < arr.length; j++) {
       const s = arr[j].sender;
-      if (s && typeof s === 'object' && s.id === u.id) {
-        s.display_name = u.display_name;
-        s.username = u.username;
-        s.avatar_url = u.avatar_url;
-      }
+      if (s && typeof s === 'object' && s.id === u.id) applyProfileFields(s, u);
       const r = arr[j].ref && arr[j].ref.sender;
-      if (r && typeof r === 'object' && r.id === u.id) {
-        r.display_name = u.display_name;
-        r.username = u.username;
-        r.avatar_url = u.avatar_url;
-      }
+      if (r && typeof r === 'object' && r.id === u.id) applyProfileFields(r, u);
     }
   }
   if (store.info && store.info.members) {
     for (let m = 0; m < store.info.members.length; m++) {
       const mb = store.info.members[m];
-      if (mb.id === u.id) {
-        mb.display_name = u.display_name;
-        mb.username = u.username;
-        mb.avatar_url = u.avatar_url;
+      if (mb.id === u.id) applyProfileFields(mb, u);
+    }
+  }
+  if (store.profile && store.profile.user && store.profile.user.id === u.id) {
+    applyProfileFields(store.profile.user, u);
+  }
+  /* W58: Personas (amigos/enviadas/recibidas) también se actualiza en
+     vivo. Las filas envueltas guardan el usuario en `user`. */
+  const ppl = store.people;
+  if (ppl) {
+    const groups = [ppl.friends, ppl.sent, ppl.received];
+    for (let g = 0; g < groups.length; g++) {
+      const arrG = groups[g] || [];
+      for (let i = 0; i < arrG.length; i++) {
+        const row = arrG[i];
+        if (row && row.id === u.id) applyProfileFields(row, u);
+        else if (row && row.user && row.user.id === u.id) applyProfileFields(row.user, u);
       }
     }
   }

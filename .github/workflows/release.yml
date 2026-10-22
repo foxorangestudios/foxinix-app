@@ -282,22 +282,30 @@ jobs:
             https://chat.foxinix.qzz.io/. Los APK de Android están firmados
             y cubren dispositivos arm64 y armv7 (32 bits).
 
-            ## Novedades W57
-            - Tocar un aviso abre el chat y el mensaje exactos, también si la
-              app estaba cerrada.
-            - El botón atrás muestra un contador rojo discreto con los
-              mensajes sin leer de otros chats.
-            - El APK detiene el dibujo del WebView en segundo plano sin
-              cortar la conexión ni las notificaciones.
-            - Descargas en `Downloads/Foxinix` con permiso de almacenamiento,
-              popups de “Descargando…” / “… guardado” y descarga automática
-              por tipo para Wi-Fi o datos móviles.
-            - Iconos de descarga directos sobre imágenes, videos, audios y
-              archivos; las imágenes y avatares se reutilizan desde caché.
-            - Los dueños y administradores pueden renombrar grupos.
-            - Estados con aro del color del tema, luna de Ausente y barra de
-              No molestar; presets móviles en forma de teléfono.
-            - Logos e iconos SVG inline para un arranque más rápido.
+            ## Novedades W58
+            - Las descargas ahora se guardan en los datos de la app (Android,
+              web y escritorio) y se abren sin volver a bajarlas. La copia
+              pública en `Downloads/Foxinix` solo se crea con “Guardar en el
+              dispositivo”.
+            - Ajustes → Descargas muestra todo agrupado por categoría
+              (Videos, Imágenes, Audios, Archivos, Documentos) con conteo,
+              tamaño total y acciones Abrir/Eliminar.
+            - Bajo cada archivo, imagen, video, audio o documento aparece
+              siempre “Descargar · tamaño” o “Guardado · tamaño”; descargar
+              nunca abre una pestaña nueva.
+            - Perfil renovado: portada (imagen propia o degradado del tema)
+              con el avatar solapado, estado en burbuja citada y un menú
+              estilo Discord con presets y mensaje personalizado.
+            - Los presets muestran una luna amarilla sobre el relleno del
+              color del tema en todos los tamaños, y el punto de desconectado
+              mide lo mismo que el de en línea.
+            - Los cambios de estado se ven al instante en la lista de chats,
+              los miembros, Personas y los perfiles abiertos.
+            - Al arrancar, la app pide micrófono, cámara, notificaciones y
+              almacenamiento (Android antiguo) con explicación, ícono y
+              botones “Conceder”/“Saltar por ahora”; si se salta, la función
+              queda disponible al pedir el permiso y se puede revisar en
+              Ajustes.
 
             ## Notas
             - El AppImage incluye GStreamer para reproducir audio y video; los

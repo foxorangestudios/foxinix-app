@@ -53,6 +53,14 @@ export const store = reactive({
   chatLoading: false,
   typing: {},             // chatId → true mientras el peer escribe
   presence: {},           // W26: userId → online (eventos WS + snapshot al reconectar)
+  /* W58: descargas de la app (clave de ruta → tamaño). Se hidrata al
+     arrancar y la actualizan las descargas automáticas/manuales. */
+  dlSaved: {},
+  dlRev: 0,
+  dlAutoRev: 0,
+  /* W58: puerta de permisos a pantalla completa. */
+  permGate: null,         // {kind, icon, title, text, state, index, total, busy, error}
+  permStates: {},         // kind → granted | denied | prompt | unavailable
   readSeqs: {},           // chatId → {userId: seq} (eventos 'read' recibidos)
   deliveredSeqs: {},      // chatId → {userId: seq} (eventos 'delivered', W12)
   ws: 'off',              // off | connecting | on

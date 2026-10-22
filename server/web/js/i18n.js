@@ -80,6 +80,89 @@ const EN = {
   'Agregar un texto…': 'Add a caption…',
   'Suelta los archivos para enviarlos': 'Drop files to send them',
   'Descargar': 'Download',
+  /* ---------- W58: descargas, permisos, portada y estado ---------- */
+  'Guardado': 'Saved',
+  'Abrir': 'Open',
+  'Guardar en el dispositivo': 'Save to device',
+  'Automática': 'Automatic',
+  'Permisos del dispositivo': 'Device permissions',
+  'Si saltaste un permiso al entrar, puedes concederlo aquí. La app sigue funcionando sin él.':
+    'If you skipped a permission at startup you can grant it here. The app keeps working without it.',
+  'Revisar permisos': 'Review permissions',
+  'Actualizar': 'Refresh',
+  'Permisos actualizados': 'Permissions updated',
+  'Concedido': 'Granted',
+  'Bloqueado': 'Blocked',
+  'No disponible': 'Unavailable',
+  'Permiso {n} de {total}': 'Permission {n} of {total}',
+  'Saltar por ahora': 'Skip for now',
+  'Solicitando…': 'Requesting…',
+  'Conceder': 'Grant',
+  'Abrir ajustes del sistema': 'Open system settings',
+  'Usar el micrófono': 'Use the microphone',
+  'Usar la cámara': 'Use the camera',
+  'Recibir notificaciones': 'Receive notifications',
+  'Micrófono': 'Microphone',
+  'Cámara': 'Camera',
+  'Notificaciones': 'Notifications',
+  'Almacenamiento': 'Storage',
+  'Sirve para grabar notas de voz y hablar en llamadas. Solo se activa cuando tú lo pides.':
+    'Used to record voice notes and talk on calls. It only turns on when you ask for it.',
+  'Sirve para videollamadas y para enviar fotos o videos desde la cámara.':
+    'Used for video calls and to send photos or videos from the camera.',
+  'Avisa de mensajes nuevos aunque Foxinix esté en segundo plano. Nunca muestra el contenido cifrado.':
+    'Alerts you about new messages even when Foxinix is in the background. It never shows encrypted content.',
+  'Permite guardar una copia de tus descargas en Descargas/Foxinix. Las descargas normales ya quedan en los datos de la app.':
+    'Lets you save a copy of your downloads to Downloads/Foxinix. Regular downloads already stay in the app data.',
+  'El micrófono está bloqueado. Puedes activarlo en los ajustes del sistema.':
+    'The microphone is blocked. You can enable it in the system settings.',
+  'La cámara está bloqueada. Puedes activarla en los ajustes del sistema.':
+    'The camera is blocked. You can enable it in the system settings.',
+  'Las notificaciones están bloqueadas. Puedes activarlas en los ajustes del sistema.':
+    'Notifications are blocked. You can enable them in the system settings.',
+  'El almacenamiento está bloqueado. Puedes activarlo en los ajustes del sistema.':
+    'Storage is blocked. You can enable it in the system settings.',
+  'Permiso de micrófono necesario para la nota de voz':
+    'Microphone permission is needed for voice notes',
+  'Permiso de micrófono necesario para probar el micrófono':
+    'Microphone permission is needed to test the microphone',
+  'Permiso de micrófono necesario para llamar':
+    'Microphone permission is needed to call',
+  'Permiso de cámara necesario para videollamada':
+    'Camera permission is needed for video calls',
+  'Permiso de almacenamiento necesario para guardar en el dispositivo':
+    'Storage permission is needed to save to the device',
+  'No se pudo guardar en el dispositivo': 'Could not save to the device',
+  'No se pudo descargar el archivo': 'Could not download the file',
+  'Guardado en Descargas/Foxinix': 'Saved to Downloads/Foxinix',
+  'Elige qué tipos se guardan solos en los datos de la app. No se crea una copia pública hasta que pulses “Guardar en el dispositivo”.':
+    'Choose which types are saved automatically in the app data. No public copy is created until you press “Save to device”.',
+  'Se guardan en este dispositivo para abrirlos sin volver a descargarlos. Puedes exportar una copia a Descargas cuando quieras.':
+    'They are stored on this device so you can open them without downloading again. You can export a copy to Downloads whenever you want.',
+  'Videos': 'Videos',
+  'Imágenes': 'Images',
+  'Audios': 'Audio',
+  'Archivos': 'Files',
+  'Documentos': 'Documents',
+  'Video guardado': 'Video saved',
+  'Imagen guardada': 'Image saved',
+  'Audio guardado': 'Audio saved',
+  'Archivo guardado': 'File saved',
+  'Documento guardado': 'Document saved',
+  'Cambiar estado': 'Change status',
+  'Estado actualizado': 'Status updated',
+  'No se pudo actualizar el estado': 'Could not update the status',
+  'Mensaje personalizado': 'Custom message',
+  '¿Qué estás haciendo?': 'What are you doing?',
+  'Quitar mensaje': 'Clear message',
+  'Guardar mensaje': 'Save message',
+  'No molestar silencia los avisos; Invisible te deja conectado sin aparecer en línea.':
+    'Do Not Disturb silences alerts; Invisible keeps you connected without appearing online.',
+  'Cambiar portada': 'Change banner',
+  'Quitar portada': 'Remove banner',
+  'No se pudo guardar el favorito': 'Could not save the favorite',
+  'No se pudo quitar el favorito': 'Could not remove the favorite',
+  'No se pudo enviar el GIF': 'Could not send the GIF',
   'Video': 'Video',
   'archivo': 'file',
   'No se pudo enviar el archivo': 'Could not send the file',

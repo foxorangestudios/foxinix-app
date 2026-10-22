@@ -7,15 +7,17 @@
      2. si no, difumina la miniatura (?thumb=1) en imágenes, baja el archivo
         con XHR (progreso real: loaded/total) y pinta un anillo; ✕ cancela y
         si falla el ✕ se convierte en ↻ de reintento.
-   Para archivos sueltos está startDownload(): mismo flujo y al terminar
-   guarda el archivo con un <a download> temporal (blob = memoria).
+   Para archivos sueltos está startDownload(): mismo flujo, guarda los
+   bytes en los datos de la app y crea la copia pública solo cuando el
+   usuario pide "Guardar en el dispositivo".
 
    Sin dependencias. FF78: XHR + Blob + IntersectionObserver (todo disponible). */
 import { t } from './i18n.js';
 import { toast } from './store.js';
 import {
-  getDownloadBlob, saveDownload, saveBlobToDisk, requestPersistence,
-  dlCategory, dlTypeInfo, nativeDownload, nativeDownloadAvailable,
+  getDownloadBlob, saveDownload, requestPersistence,
+  saveBlobToDevice, fetchBlob,
+  dlCategory, dlTypeInfo,
 } from './downloads.js';
 
 const RING = 132;                 // circunferencia del círculo (r=21, igual que subidas)
@@ -455,18 +457,26 @@ export const dlDirective = {
   },
 };
 
-function saveBlob(obj, name) {
-  const a = document.createElement('a');
-  a.href = obj;
-  a.download = name || 'archivo';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+/* W58: guarda una copia pública en el dispositivo. La copia de la app
+   ya está hecha; si Android necesita el permiso de almacenamiento,
+   downloads.js lo pide por el flujo de permisos y reintenta. */
+function exportToDevice(blob, filename, mime, doneMsg) {
+  return saveBlobToDevice(blob, filename, mime).then(function (r) {
+    if (r && r.ok) {
+      toast(r.native ? t('Guardado en Descargas/Foxinix') : doneMsg, 'ok');
+    } else if (r && r.permission) {
+      toast(t('Permiso de almacenamiento necesario para guardar en el dispositivo'), 'err');
+    } else if (!(r && r.error === 'missing')) {
+      toast(t('No se pudo guardar en el dispositivo'), 'err');
+    }
+    return r;
+  }).catch(function () {
+    toast(t('No se pudo guardar en el dispositivo'), 'err');
+  });
 }
 
-/* Descarga de archivo con anillo + ✕; si ya está en memoria o en el
-   almacén persistente, guarda al toque. W50: las descargas explícitas
-   quedan en Cache Storage + IndexedDB para reabrirse sin red. */
+/* Descarga manual: guarda en los datos de la app y, además, crea la
+   copia pública en el dispositivo (esa es la acción del botón). */
 export function startDownload(url, filename, frame, mime, kind) {
   if (!url) return;
   const type = dlCategory(kind, mime, filename);
@@ -474,49 +484,45 @@ export function startDownload(url, filename, frame, mime, kind) {
   const label = t(info.label);
   const doneMsg = t(info.done);
   const startMsg = t('Descargando {type}...', { type: label });
-  /* W57: el APK no puede guardar un blob del WebView en Descargas; el
-     DownloadManager nativo baja la URL firmada y la deja en
-     Downloads/Foxinix. */
-  if (nativeDownload(url, filename, mime, type, false)) {
-    toast(startMsg, 'info');
-    return;
-  }
   if (url.indexOf('blob:') === 0) {
-    saveBlob(url, filename);
-    toast(doneMsg, 'ok');
+    fetchBlob(url).then(function (blob) {
+      exportToDevice(blob, filename, mime, doneMsg);
+    }).catch(function () {
+      toast(t('No se pudo descargar el archivo'), 'err');
+    });
     return;
   }
-  const raw = getBlob(url);
-  if (raw) {
+
+  const fromBlob = function (blob) {
     requestPersistence();
-    saveDownload(url, filename, raw).catch(function () {});
-    saveBlobToDisk(raw, filename);
-    toast(doneMsg, 'ok');
-    return;
-  }
+    saveDownload(url, filename, blob, type, false).catch(function () {});
+    return exportToDevice(blob, filename, mime, doneMsg);
+  };
+
   const download = function () {
-    if (!frame || !frame.appendChild) { window.open(url, '_blank'); return; }
     requestPersistence();
     toast(startMsg, 'info');
-    runDl(url, frame, function (obj, blob) {
-      saveDownload(url, filename, blob).catch(function () {});
-      saveBlob(obj, filename);
-      toast(doneMsg, 'ok');
-    }, true);
-  };
-  getDownloadBlob(url).then(function (blob) {
-    if (blob) {
-      /* Si ya está cacheado pero el APK no puede guardar blobs, se deja
-         que el DownloadManager baje la URL firmada a Descargas. */
-      if (nativeDownloadAvailable() &&
-          nativeDownload(url, filename, mime, type, false)) {
-        toast(startMsg, 'info');
-        return;
-      }
-      saveBlobToDisk(blob, filename);
-      toast(doneMsg, 'ok');
+    if (frame && frame.appendChild) {
+      runDl(url, frame, function (obj, blob) {
+        fromBlob(blob);
+      }, true);
       return;
     }
+    /* Sin reproductor visible: XHR silencioso. Nunca window.open: la
+       descarga no debe abrir una pestaña nueva. */
+    fetchBlob(url).then(fromBlob).catch(function () {
+      toast(t('No se pudo descargar el archivo'), 'err');
+    });
+  };
+
+  getDownloadBlob(url).then(function (blob) {
+    if (blob) {
+      requestPersistence();
+      exportToDevice(blob, filename, mime, doneMsg);
+      return;
+    }
+    const raw = getBlob(url);
+    if (raw) { fromBlob(raw); return; }
     download();
   }).catch(function () { download(); });
 }

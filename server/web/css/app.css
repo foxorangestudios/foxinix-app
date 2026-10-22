@@ -770,16 +770,17 @@ html.native-bg *::after {
   border: 2.5px solid var(--st-ring);
   background-origin: border-box;
 }
-/* W57: Ausente = naranja lleno + luna Material recortada en el color
-   del tema. La luna va en ::before (encima del círculo). */
-.av-wrap.on.st-busy::after { background: var(--st-busy); }
+/* W58: Ausente = relleno del color del tema + luna amarilla. La luna
+   va en ::before (encima del círculo) y se usa en TODOS los avatares,
+   no solo en el grande del perfil. */
+.av-wrap.on.st-busy::after { background: var(--st-ring); }
 .av-wrap.on.st-busy::before {
   content: '';
   position: absolute;
   z-index: 3;
   right: 1px; bottom: 1px;
   width: 8px; height: 8px;
-  background: var(--st-ring);
+  background: var(--st-busy);
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
   -webkit-mask-position: center;
@@ -796,11 +797,12 @@ html.native-bg *::after {
     linear-gradient(var(--st-ring), var(--st-ring)) center / 70% 22% no-repeat,
     var(--st-dnd);
 }
-/* W57: Invisible/desconectado = aro más grueso con relleno del tema. */
+/* W58: Invisible/desconectado ocupa EXACTAMENTE lo mismo que en línea:
+   el tamaño no cambia entre estados. */
 .av-wrap.on.st-off::after {
-  width: 15px; height: 15px;
+  width: 14px; height: 14px;
   background: var(--st-ring);
-  border-width: 3px;
+  border-width: 2.5px;
   border-color: var(--st-off);
 }
 
@@ -812,18 +814,24 @@ html.native-bg *::after {
 .people-pane .av-wrap { --st-ring: var(--panel); }
 .chat-head .av-wrap { --st-ring: var(--chat-bg); }
 
-/* W27: en el panel de info del chat PRIVADO el puntito va al doble de
-   tamaño (ficha del contacto); las filas de miembros de un grupo lo
-   mantienen del mismo tamaño que la lista de chats (W27b). */
-.profile-panel .pp-body > .av-wrap.on::after {
+/* W27/W58: en las fichas de perfil (panel de info, perfil propio y
+   perfil abierto) el puntito va al doble de tamaño. En línea y
+   desconectado comparten medidas; la luna de Ausente también. */
+.profile-panel .pf-avwrap.on::after,
+.meprof .pf-avwrap.on::after,
+.pmodal .pf-avwrap.on::after {
   width: 22px; height: 22px;
   border-width: 3px;
 }
-.profile-panel .pp-body > .av-wrap.on.st-off::after {
-  width: 23px; height: 23px;
-  border-width: 3.5px;
+.profile-panel .pf-avwrap.on.st-off::after,
+.meprof .pf-avwrap.on.st-off::after,
+.pmodal .pf-avwrap.on.st-off::after {
+  width: 22px; height: 22px;
+  border-width: 3px;
 }
-.profile-panel .pp-body > .av-wrap.on.st-busy::before {
+.profile-panel .pf-avwrap.on.st-busy::before,
+.meprof .pf-avwrap.on.st-busy::before,
+.pmodal .pf-avwrap.on.st-busy::before {
   right: 3px; bottom: 3px;
   width: 12px; height: 12px;
 }
@@ -1250,6 +1258,31 @@ audio.b-audio { display: none; }
   line-height: 1;
 }
 .msg.mine .b-meta { color: var(--meta-mine, rgba(255, 255, 255, .92)); }
+/* W58: control de descarga visible bajo cualquier adjunto. */
+.b-dl-state {
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
+  padding: 2px 6px 2px 5px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, .12);
+  color: var(--t2);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.b-dl-state .ic { width: 12px; height: 12px; margin-right: 4px; flex: none; }
+.b-dl-state:hover { background: rgba(0, 0, 0, .22); color: var(--t1); }
+.b-dl-state.saved { color: var(--online); }
+.msg.mine .b-dl-state {
+  background: rgba(0, 0, 0, .16);
+  color: rgba(255, 255, 255, .82);
+}
+.msg.mine .b-dl-state:hover { background: rgba(0, 0, 0, .26); color: #fff; }
+.msg.mine .b-dl-state.saved { color: #c9ffd9; }
 /* W47: el blanco azulado de W45 se percibía blanco y las palomitas de
    "leído" dejaban de distinguirse. Se usa un azul medio, visible pero
    sin el brillo agresivo del azul puro. También cubre stickers, emojis
@@ -2777,6 +2810,126 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 .dl-info span { font-size: 11.5px; color: var(--t2); }
 .dl-item .btn-sm { flex: none; margin-right: 4px; }
 .dl-empty { padding: 10px 0; color: var(--t2); font-size: 13px; }
+/* W58: descargas agrupadas por categoría */
+.dl-groups { margin-top: 4px; }
+.dl-group + .dl-group { margin-top: 4px; }
+.dl-group-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 3px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--t1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dl-group-head > .ic:first-child { color: var(--t2); margin-right: 7px; }
+.dl-group-head b { font-size: 13.5px; }
+.dl-gcount { margin-left: 5px; color: var(--t2); font-size: 12px; }
+.dl-gsize { margin-left: auto; margin-right: 8px; color: var(--t2); font-size: 11.5px; }
+.dl-gchev { color: var(--t2); transition: transform .14s; }
+.dl-gchev.open { transform: rotate(180deg); }
+.dl-group-body { padding-left: 20px; }
+.dl-group-body .dl-item:first-child { border-top: 0; }
+.dl-item .btn-sm { font-size: 11.5px; }
+.dl-info { min-width: 0; }
+.dl-info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* W58: puerta de permisos a pantalla completa */
+.perm-gate {
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg);
+  animation: perm-in .2s ease-out;
+}
+@keyframes perm-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.perm-card {
+  width: min(450px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 28px 26px 22px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.perm-step {
+  margin-bottom: 14px;
+  color: var(--t2);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.perm-icon {
+  width: 92px; height: 92px;
+  margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-wash, rgba(255,117,31,.14));
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+.perm-icon .ic { width: 44px; height: 44px; }
+.perm-card h2 { margin: 0 0 10px; font-size: 21px; line-height: 1.25; }
+.perm-card p {
+  margin: 0 auto;
+  max-width: 360px;
+  color: var(--t1);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.perm-error {
+  display: flex;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  background: var(--err-wash, rgba(237,66,69,.12));
+  color: var(--t1);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+}
+.perm-error .ic { flex: none; color: var(--err); margin: 1px 7px 0 0; }
+.perm-actions { display: flex; align-items: stretch; margin-top: 22px; }
+.perm-actions .btn { flex: 1; min-height: 40px; }
+.perm-actions .btn + .btn { margin-left: 10px; }
+.perm-settings {
+  margin-top: 12px;
+  border: 0;
+  background: none;
+  color: var(--t2);
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.perm-row .perm-row-ic { flex: none; margin-right: 9px; color: var(--t2); }
+.perm-row .st-col { flex: 1; }
+.perm-state {
+  flex: none;
+  margin-left: 8px;
+  color: var(--t2);
+  font-size: 11.5px;
+}
+.perm-state.is-granted { color: var(--online); }
+.perm-state.is-denied { color: var(--err); }
+.st-btns-left { justify-content: flex-start; }
+.st-btns-left .btn + .btn { margin-left: 8px; }
 .st-err { margin-bottom: 10px; }
 .st-ok { font-size: 13px; font-weight: 600; color: var(--ok); }
 .st-btns { display: flex; }
@@ -2933,7 +3086,7 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
   margin-right: 7px;
   flex: none;
 }
-.sdot.sd-busy { background: var(--st-busy); }
+.sdot.sd-busy { background: var(--panel); }
 .sdot.sd-dnd {
   background:
     linear-gradient(var(--panel), var(--panel)) center / 70% 22% no-repeat,
@@ -2951,7 +3104,7 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
     position: absolute;
     left: 2px; top: 2px;
     width: 6px; height: 6px;
-    background: var(--panel);
+    background: var(--st-busy);
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
     -webkit-mask-position: center;
@@ -3854,6 +4007,212 @@ body { font-size: calc(15px * var(--fs)); }
 .mp-view .pp-pill { display: inline-block; }
 .mp-view .pp-bio { margin: 10px auto 0; max-width: 340px; }
 .modal header .mp-edit-open { margin-left: auto; }
+
+/* ---- W58: portada, avatar solapado y estado citado ---------------- */
+.pf-view { text-align: left; }
+.pf-banner {
+  position: relative;
+  width: 100%;
+  height: 132px;
+  overflow: hidden;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.mp-body > .pf-banner {
+  margin: -4px -16px 0;
+  width: calc(100% + 32px);
+}
+.pf-banner > img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pf-banner.is-empty {
+  background:
+    linear-gradient(135deg, var(--accent-d), var(--panel2) 58%, var(--panel) 100%);
+}
+.pf-banner-art {
+  position: absolute;
+  right: 14px; bottom: -22px;
+  width: 128px; height: 128px;
+  opacity: .18;
+  color: var(--on-accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.pf-banner-art .fox { width: 100%; height: 100%; }
+.pf-banner-sm { height: 84px; }
+.pf-banner-sm .pf-banner-art { width: 82px; height: 82px; right: 8px; bottom: -14px; }
+.pf-idrow {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 2;
+  padding: 0 2px;
+}
+.pf-avwrap { margin-top: -48px; margin-left: 2px; flex: none; }
+.pf-idcol {
+  flex: 1 1 120px;
+  min-width: 0;
+  padding: 12px 0 0 14px;
+  text-align: left;
+}
+.pf-idcol .pp-name { margin-top: 0; }
+.pf-idcol .pp-user { margin-top: 1px; }
+.pf-quote {
+  position: relative;
+  flex: 1 1 132px;
+  max-width: 168px;
+  margin: 12px 0 0 10px;
+  padding: 9px 12px 8px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--t1);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+.pf-quote::before,
+.pf-quote::after {
+  content: '“';
+  position: absolute;
+  color: var(--accent);
+  font: 700 26px/1 Georgia, serif;
+  opacity: .9;
+}
+.pf-quote::before { left: 4px; top: -13px; }
+.pf-quote::after { content: '”'; right: 4px; bottom: -16px; }
+.pf-quote-text { display: block; overflow-wrap: anywhere; }
+.pf-quote-static { cursor: default; }
+.pf-status-wrap {
+  position: relative;
+  flex: 1 1 150px;
+  max-width: 190px;
+  margin: 8px 0 0 8px;
+}
+.pf-status-wrap .pf-quote {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.pf-status-btn { text-align: left; }
+.pf-status-btn:hover { background: var(--panel); border-color: var(--accent); }
+.pf-status-btn .pf-quote-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pf-quote-chev { flex: none; margin-left: 4px; color: var(--t2); transition: transform .14s; }
+.pf-quote-chev.open { transform: rotate(180deg); }
+.pf-status-wrap .sdot { margin-right: 6px; }
+.pf-status-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 60;
+  width: min(320px, calc(100vw - 64px));
+  padding: 12px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+.pf-menu-title { font-size: 14px; font-weight: 700; margin-bottom: 9px; }
+.pf-menu-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--t2);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.pf-status-input { min-height: 34px; font-size: 13.5px; }
+.pf-menu-meta {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+  color: var(--t2);
+  font-size: 11px;
+}
+.pf-menu-meta .pf-link { margin-left: auto; }
+.pf-link {
+  border: 0; background: none; padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.pf-menu-presets { margin-top: 6px; border-top: 1px solid var(--border); }
+.pf-preset {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--t1);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pf-preset:hover { background: var(--panel); }
+.pf-preset.on { color: var(--accent); font-weight: 600; }
+.pf-preset-check { margin-left: auto; color: var(--accent); }
+.pf-menu-error {
+  margin-top: 8px;
+  color: var(--err);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.pf-menu-save { margin-top: 10px; }
+.pf-menu-hint { margin: 8px 0 0; color: var(--t2); font-size: 11px; line-height: 1.4; }
+.pf-bio-wrap { margin-top: 14px; padding: 0 2px; text-align: left; }
+.pf-bio-wrap .pp-bio { margin-top: 0; max-width: none; }
+.pf-rows { margin-top: 10px; }
+.pf-body { padding-top: 0; }
+
+/* La ficha del panel derecho es más estrecha: el estado va debajo. */
+.profile-panel .pf-body { padding: 0 14px 8px; text-align: left; }
+.profile-panel .pf-idrow { padding-top: 0; }
+.profile-panel .pf-avwrap { margin-top: -36px; }
+.profile-panel .avatar.pp-av { width: 72px; height: 72px; font-size: 26px; }
+.profile-panel .avatar.pp-av .fox { width: 48px; height: 48px; }
+.profile-panel .pf-idcol { padding-top: 8px; }
+.profile-panel .pf-quote {
+  flex-basis: 100%;
+  max-width: none;
+  margin: 9px 0 0;
+}
+.profile-panel .pf-status-wrap { max-width: none; }
+
+/* Editor de portada */
+.pf-edit-banner { margin: 2px 0 12px; }
+.pf-edit-banner-img {
+  position: relative;
+  height: 96px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+}
+.pf-edit-banner-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pf-edit-banner-img.is-empty {
+  background: linear-gradient(135deg, var(--accent-d), var(--panel2) 60%, var(--panel));
+}
+.pf-edit-banner-actions { display: flex; flex-wrap: wrap; margin-top: 7px; }
+.pf-edit-banner-actions .btn { margin: 0 6px 4px 0; }
+.pf-edit-banner-actions .ic { margin-right: 5px; }
 
 /* ---- W27b: móvil — Personas a pantalla completa con botón de volver
    (la entrada es la opción del sidebar, visible en todas las
@@ -4886,6 +5245,33 @@ body { font-size: calc(15px * var(--fs)); }
   .av-ed-zoom,
   .av-ed-rotate { display: none; }
   .mp-edit.is-cropping .mp-body { padding: 10px 12px 4px; }
+}
+
+/* W58: perfil y menú de estado en pantallas chicas */
+@media (max-width: 760px) {
+  .pf-view .pf-idrow { padding-left: 0; padding-right: 0; }
+  .pf-view .pf-idcol { flex-basis: calc(100% - 122px); padding-top: 10px; }
+  .pf-status-wrap,
+  .pf-view .pf-status-wrap {
+    flex-basis: 100%;
+    max-width: none;
+    margin: 8px 0 0;
+  }
+  .pf-status-wrap .pf-quote { width: 100%; }
+  .pf-status-menu {
+    width: 100%;
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+  .pf-quote { flex-basis: 100%; max-width: none; margin-left: 0; }
+  .pf-banner { height: 112px; }
+  .pf-banner-art { width: 104px; height: 104px; }
+  .pf-edit-banner-img { height: 86px; }
+  .perm-gate { padding: 12px; }
+  .perm-card { padding: 22px 18px 18px; max-height: calc(100vh - 24px); }
+  .perm-icon { width: 78px; height: 78px; margin-bottom: 13px; }
+  .perm-icon .ic { width: 38px; height: 38px; }
+  .perm-actions .btn { min-height: 42px; }
 }
 
 /* W54d: teclado de Android. boot.js detecta el viewport visual más

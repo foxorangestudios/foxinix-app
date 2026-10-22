@@ -366,7 +366,9 @@ def main():
         # en lugar del permiso de notificaciones del navegador.
         js_native_set = (
             "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
-            "window.FoxinixAndroid={permission:function(){return 'granted';},"
+            "window.FoxinixAndroid={permissionState:function(){return 'granted';},"
+            "storagePermission:function(){return 'unavailable';},"
+            "permission:function(){return 'granted';},"
             "requestPermission:function(){},openSettings:function(){},"
             "notify:function(){}};"
             "let t=Date.now();"
@@ -416,7 +418,8 @@ def main():
             "w.className='av-wrap on '+cls;document.body.appendChild(w);"
             "const c=getComputedStyle(w,'::after');"
             "const b=getComputedStyle(w,'::before');"
-            "return {bg:c.backgroundColor,img:c.backgroundImage,border:c.borderTopColor,"
+            "return {w:c.width,h:c.height,bg:c.backgroundColor,img:c.backgroundImage,"
+            "border:c.borderTopColor,"
             "right:c.right,bottom:c.bottom,beforeBg:b.backgroundColor,"
             "mask:b.maskImage||b.webkitMaskImage||''};}"
             "function preset(){const d=document.createElement('span');"
@@ -448,10 +451,16 @@ def main():
         # W57: todos los badges llevan el color de fondo del tema detrás.
         if st["avOnline"].get("bg") != "rgb(35, 165, 90)":
             raise SystemExit(f"✗ En línea no es verde lleno: {st}")
-        if st["avBusy"].get("bg") != "rgb(240, 178, 50)":
-            raise SystemExit(f"✗ Ausente no es naranja lleno: {st}")
+        if st["avBusy"].get("bg") != "rgb(30, 31, 34)":
+            raise SystemExit(f"✗ Ausente no tiene relleno del tema: {st}")
+        if st["avBusy"].get("beforeBg") != "rgb(240, 178, 50)":
+            raise SystemExit(f"✗ la luna de Ausente no es amarilla: {st}")
         if "data:image/svg+xml" not in (st["avBusy"].get("mask") or ""):
             raise SystemExit(f"✗ el badge de Ausente no tiene la luna SVG: {st}")
+        # W58: desconectado ocupa exactamente lo mismo que en línea.
+        if (st["avOff"].get("w") != st["avOnline"].get("w")
+                or st["avOff"].get("h") != st["avOnline"].get("h")):
+            raise SystemExit(f"✗ el badge desconectado no mide igual que en línea: {st}")
         if "linear-gradient" not in (st["avDnd"].get("img") or ""):
             raise SystemExit(f"✗ el badge de No molestar no tiene barra: {st}")
         if st["avDnd"].get("bg") != "rgb(242, 63, 67)":
@@ -479,7 +488,7 @@ def main():
                      "const pencil=document.querySelector('.mp-edit-open');"
                      "if(!pencil)return 'FAIL: no abrió el perfil';"
                      "pencil.click(); await s(500);"
-                     "const inp=document.querySelector('.mp-edit input[type=file]');"
+                     "const inp=document.querySelector('.mp-edit .avatar-pick input[type=file]');"
                      "if(!inp)return 'FAIL: sin selector de foto';"
                      "const blob=await (await fetch('/static/icon-192.png')).blob();"
                      "const dt=new DataTransfer();"
@@ -601,7 +610,9 @@ def main():
         tok = json.dumps(B["access"])
         js_native = (
             "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
-            "window.FoxinixAndroid={permission:function(){return 'granted';},"
+            "window.FoxinixAndroid={permissionState:function(){return 'granted';},"
+            "storagePermission:function(){return 'unavailable';},"
+            "permission:function(){return 'granted';},"
             "requestPermission:function(){},openSettings:function(){},"
             "notify:function(t,b,c,snd){window.__lastNotify={t:t,b:b,c:c,s:snd};},"
             "notifyWithAvatar:function(t,b,c,snd,a){window.__lastNotify="
@@ -650,7 +661,9 @@ def main():
         js_dnd = (
             "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
             "window.__notes=[];"
-            "window.FoxinixAndroid={permission:function(){return 'granted';},"
+            "window.FoxinixAndroid={permissionState:function(){return 'granted';},"
+            "storagePermission:function(){return 'unavailable';},"
+            "permission:function(){return 'granted';},"
             "requestPermission:function(){},openSettings:function(){},"
             "notify:function(t,b,c,snd){window.__notes.push({t:t,b:b,c:c,s:snd});},"
             "notifyWithAvatar:function(t,b,c,snd,a){window.__notes.push("

@@ -957,6 +957,10 @@ def main():
     dm = g["chat"]["id"]
 
     # =================== sesión de A en el navegador ==================
+    # Limpia una sesión vieja (usuario borrado por otra suite) antes de
+    # inyectar, para evitar la carrera con el bootstrap.
+    shot(a.base + "/", SHOTS / "w29-0-prep.png",
+         js="localStorage.removeItem('fm.session'); 'limpia'", wait=200)
     ok, res, log = shot(a.base + "/", SHOTS / "w29-0-injectar.png",
                         js=sess_js(A))
     step("sesión inyectada", ok and res == "sesión inyectada", log[-300:])

@@ -423,6 +423,8 @@ def _chat_briefs(chats: list[dict[str, Any]], me_id: int) -> list[dict[str, Any]
     for u in users.values():
         if u.get("avatar_media_id"):
             media_ids.append(u["avatar_media_id"])
+        if u.get("banner_media_id"):
+            media_ids.append(u["banner_media_id"])
     medias = {md["id"]: md for md in _rows_in(
         "SELECT * FROM media WHERE id IN ", media_ids
     )}

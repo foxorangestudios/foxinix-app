@@ -25,13 +25,16 @@ def user_brief(
     # solo SELECT; con media=None se mantiene el acceso puntual de siempre.
     if media is None:
         avatar = medialink.media_url_by_id(u.get("avatar_media_id"), "profile")
+        banner = medialink.media_url_by_id(u.get("banner_media_id"), "profile")
     else:
         avatar = medialink.media_url(media.get(u.get("avatar_media_id")), "profile")
+        banner = medialink.media_url(media.get(u.get("banner_media_id")), "profile")
     return {
         "id": u["id"],
         "username": u["username"],
         "display_name": u["display_name"] or u["username"],
         "avatar_url": avatar,
+        "banner_url": banner,
         "bio": u.get("bio", ""),
         "status_text": u.get("status_text", ""),
         "status_preset": u.get("status_preset", ""),

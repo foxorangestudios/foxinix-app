@@ -20,11 +20,15 @@ def _pub(u: dict[str, Any], online: bool) -> dict[str, Any]:
     avatar = None
     if u.get("avatar_media_id"):
         avatar = medialink.media_url_by_id(u["avatar_media_id"], "profile")
+    banner = None
+    if u.get("banner_media_id"):
+        banner = medialink.media_url_by_id(u["banner_media_id"], "profile")
     return {
         "id": u["id"],
         "username": u["username"],
         "display_name": u["display_name"] or u["username"],
         "avatar_url": avatar,
+        "banner_url": banner,
         "online": online,
         "last_seen": u.get("last_seen") or 0,
         "status_text": u.get("status_text") or "",

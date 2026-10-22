@@ -12,6 +12,10 @@ import { BootScreen } from './views/bootscreen.js';
 import { dlDirective } from './mediadl.js';
 import { startWS, stopWS } from './realtime.js';
 import { markChatRead } from './actions.js';
+import {
+  dlCategory, saveDownload, listDownloads, deleteDownload,
+  hasDownload, clearDownloads, DL_TYPES,
+} from './downloads.js';
 import { prefetchEmojis } from './emoji.js';
 import { ensurePublishedKey } from './e2e.js';
 
@@ -134,5 +138,7 @@ if ('serviceWorker' in navigator) {
 /* Ayuda de prueba/desarrollo: permite conducir la UI desde fuera
    (herramientas de screenshot, tests). No usar en lógica de producto. */
 window.__fm = { store, go: goRef, goReplace: goReplaceRef, bootstrap,
-                rt: { start: startWS, stop: stopWS } };
+                rt: { start: startWS, stop: stopWS },
+                dl: { dlCategory, saveDownload, listDownloads, deleteDownload,
+                      hasDownload, clearDownloads, types: DL_TYPES } };
 

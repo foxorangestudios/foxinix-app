@@ -836,6 +836,10 @@ def main():
                      "client_msg_id": str(uuid.uuid4())})
 
     # ============ sesión de A en el navegador =====================
+    # Limpia una sesión vieja (usuario ya borrado por otra suite): el
+    # bootstrap la borraría DESPUÉS de inyectar y pisaría la nueva.
+    shot(a.base + "/", SHOTS / "w37-0-prep.png",
+         js="localStorage.removeItem('fm.session'); 'limpia'", wait=200)
     ok, res, log = shot(a.base + "/", SHOTS / "w37-0-injectar.png",
                         js=sess_js(A))
     step("sesión inyectada", ok and res == "sesión inyectada", log[-300:])

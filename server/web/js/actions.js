@@ -17,7 +17,30 @@ export const hooks = { sendSeen: null };
    de cuenta (W11); a las viejas /api/media/{id} les seguimos pegando
    ?token= por compatibilidad. */
 import { cachedUrl } from './mediadl.js';
-import { nativeDownload, dlCategory, shouldAutoDownload } from './downloads.js';
+import {
+  autoDownload, dlCategory, listDownloads, hooks as dlHooks,
+} from './downloads.js';
+
+/* W58: las descargas guardadas en los datos de la app se reflejan en la
+   UI (los botones de medios se ocultan cuando la automática ya terminó). */
+export function hydrateDownloads() {
+  return listDownloads().then(function (list) {
+    const map = {};
+    for (let i = 0; i < list.length; i++) {
+      map[list[i].key] = list[i].size || 0;
+    }
+    store.dlSaved = map;
+    store.dlRev++;
+  }).catch(function () {});
+}
+
+dlHooks.onSaved = function (meta) {
+  if (!meta || !meta.key) return;
+  if (store.dlSaved[meta.key] == null) {
+    store.dlSaved[meta.key] = meta.size || 0;
+  }
+  store.dlRev++;
+};
 
 export function mediaUrl(url, noCache) {
   if (!url) return '';
@@ -63,11 +86,16 @@ export function uuid() {
   });
 }
 
+function dec(s) {
+  /* Español neutro: separador decimal con coma (2,4 MB). */
+  return s.indexOf('.') >= 0 ? s.replace('.', ',') : s;
+}
+
 export function fmtSize(n) {
   if (!n && n !== 0) return '';
   if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
-  return (n / 1048576).toFixed(1) + ' MB';
+  if (n < 1024 * 1024) return dec((n / 1024).toFixed(n < 10240 ? 1 : 0)) + ' KB';
+  return dec((n / 1048576).toFixed(1)) + ' MB';
 }
 
 /* Orden de la lista: fijados primero (W13); después, por actividad;
@@ -276,6 +304,7 @@ export async function openChat(id, keepJump) {
         await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
       }
       mergeMessages(id, list);
+      autoDownloadMessages(list);
       store.hasMore[id] = list.length >= 50;
       store.loaded[id] = true;
       sendSeen(id, maxSeq(store.msgs[id]));
@@ -316,6 +345,7 @@ export async function catchUpChat(chatId) {
         await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
       }
       mergeMessages(chatId, list);
+      autoDownloadMessages(list);
       added += list.length;
       if (list.length < 100) break;
       /* Si el eco de la WS ya insertó todo, maxSeq no cambió: cortar. */
@@ -357,6 +387,7 @@ export async function loadOlder(chatId) {
         await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
       }
       store.msgs[chatId] = list.concat(arr);
+      autoDownloadMessages(list);
     }
     store.hasMore[chatId] = list.length >= 50;
   } catch (e) {
@@ -622,16 +653,26 @@ export function onIncomingMessage(m) {
   finishIncoming(m);
 }
 
-/* W57: descarga automática en Android según tipo y red. En web/desktop
-   no hay puente nativo y no se hace nada (el navegador no permite bajar
-   archivos en silencio). */
+/* W57/W58: descarga automática según tipo y red. Se guarda en los datos
+   de la app (web, PWA, escritorio y APK); nunca crea por sí sola una
+   copia pública en Descargas. */
 function maybeAutoDownload(m) {
   if (!m || !m.media || !m.media.url || m.kind === 'system') return;
   const name = m.media.name || 'archivo';
   const type = dlCategory(m.kind, m.media.mime, name);
-  if (!shouldAutoDownload(type)) return;
   const url = mediaUrl(m.media.url, true);
-  nativeDownload(url, name, m.media.mime || '', type, true);
+  autoDownload(url, name, m.media.mime || '', type);
+}
+
+/* W58: al abrir un chat también se completan las descargas automáticas
+   de los adjuntos que ya estaban en el historial (no solo los que
+   llegan por WS). La cola evita ráfagas y `hasDownload` evita repetir. */
+function autoDownloadMessages(list) {
+  if (!list || !list.length) return;
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i];
+    if (m && m.media) maybeAutoDownload(m);
+  }
 }
 
 function finishIncoming(m) {

@@ -35,12 +35,15 @@ Regla: el **primer registro es abierto**; el usuario queda `email_verified=false
 ### `PUT /api/auth/profile` — pending o full
 ```json
 {"display_name": "Ana Pérez", "bio": "...", "status_text": "...",
- "status_preset": "online", "avatar_media_id": 1}
+ "status_preset": "online", "avatar_media_id": 1, "banner_media_id": 2}
 ```
 - `display_name` opcional (si vacío se usa el `username`), `bio` opcional ≤150, `status_text` ≤80.
 - `status_preset` (W6): `"" | "online" | "busy" | "dnd" | "invisible"`. `invisible` además
   avisa a los contactos que dejo de aparecer en línea (`online: false` en sus briefs).
 - `avatar_media_id`: id de un archivo subido por vos; `null` explícito → quitar avatar.
+- `banner_media_id` (W58): id de un archivo **imagen** subido por vos para la portada del
+  perfil; `null` explícito → quitarla. Si el id no existe, es de otro usuario o no es una
+  imagen → `400`. La respuesta y los briefs incluyen `banner_url` firmada (`/media/profile/...`).
 - Para saber si el campo fue enviado, el servidor usa `model_fields_set` (no confundir `null` con ausente).
 
 ### `POST /api/auth/verify` — pending
@@ -105,7 +108,7 @@ pasa a ser el correo definitivo (y el código queda borrado).
 - `GET /api/users/search?q=an` → `{"results": [user]}` (mín. 2 chars, solo verificados, excluye yo)
 - `GET /api/users/{username}` → `{"user": {...}}` (404 si no existe o no está verificado)
 
-**user**: `{id, username, display_name, avatar_url, bio, status_text, status_preset, online, last_seen, created_at}`
+**user**: `{id, username, display_name, avatar_url, banner_url, bio, status_text, status_preset, online, last_seen, created_at}`
 - `status_preset`: `"" | online | busy | dnd | invisible` (W6); con `invisible` el servidor
   lo reporta `online: false` a los demás aunque tenga la sesión abierta.
 

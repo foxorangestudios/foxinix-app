@@ -88,6 +88,7 @@ class ProfileIn(BaseModel):
     status_text: Optional[str] = Field(default=None, max_length=80)
     status_preset: Optional[str] = None  # '' | online | busy | dnd | invisible (W6)
     avatar_media_id: Optional[int] = None  # null = quitar avatar
+    banner_media_id: Optional[int] = None  # W58: null = quitar portada
 
     @field_validator("status_preset")
     @classmethod

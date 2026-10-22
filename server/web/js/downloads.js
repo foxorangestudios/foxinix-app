@@ -1,29 +1,37 @@
-/* Foxinix — descargas persistentes (W50).
+/* Foxinix — descargas persistentes (W50/W58).
 
-   Los bytes de una descarga explícita se guardan en Cache Storage
-   (`foxinix-downloads-v1`) y la ficha (nombre, tamaño, fecha) en
-   IndexedDB. Así se pueden volver a guardar o abrir sin bajarlos de
-   nuevo, incluso después de recargar la app.
+   Los bytes de una descarga se guardan en los datos de la app: Cache
+   Storage (`foxinix-downloads-v1`) + ficha (nombre, tamaño, tipo, fecha)
+   en IndexedDB. Así se pueden abrir o volver a guardar sin bajarlos de
+   nuevo, incluso después de recargar. La copia pública en
+   `Downloads/Foxinix` (Android) o en la carpeta de descargas del
+   navegador SOLO se crea con "Guardar en el dispositivo".
 
    El caché de medios que usa el service worker es distinto y se poda
-   por tamaño; las descargas explícitas NO se podan automáticamente.
+   por tamaño; las descargas de la app NO se podan automáticamente.
    Si el navegador borra el almacenamiento, la ficha se limpia sola al
    abrir la lista y se puede volver a descargar.
 
-   Sin dependencias. FF78: Cache API + IndexedDB + Blob disponibles. */
+   Sin dependencias. FF78: Cache API + IndexedDB + Blob + XHR. */
 export const DL_CACHE = 'foxinix-downloads-v1';
 
-/* W57: tipos de descarga y preferencias de descarga automática por red.
-   Se guardan en el dispositivo (localStorage), igual que el resto de
-   preferencias locales. */
+/* Tipos de descarga y preferencias automáticas por red. Se guardan en
+   el dispositivo (localStorage), igual que el resto de preferencias. */
 export const DL_TYPES = [
-  { id: 'video', label: 'Video', done: 'Video guardado' },
-  { id: 'image', label: 'Imagen', done: 'Imagen guardada' },
-  { id: 'audio', label: 'Audio', done: 'Audio guardado' },
-  { id: 'file', label: 'Archivo', done: 'Archivo guardado' },
-  { id: 'document', label: 'Documento', done: 'Documento guardado' },
+  { id: 'video', label: 'Videos', done: 'Video guardado' },
+  { id: 'image', label: 'Imágenes', done: 'Imagen guardada' },
+  { id: 'audio', label: 'Audios', done: 'Audio guardado' },
+  { id: 'file', label: 'Archivos', done: 'Archivo guardado' },
+  { id: 'document', label: 'Documentos', done: 'Documento guardado' },
 ];
 const DL_AUTO_KEY = 'fm.dl.auto';
+
+/* Permite que permisos.js conecte la verificación de almacenamiento sin
+   crear un ciclo de imports. */
+export const hooks = {
+  ensurePermission: null,   // async (kind) -> bool
+  onSaved: null,            // (meta) -> void
+};
 
 export function dlTypeInfo(type) {
   for (let i = 0; i < DL_TYPES.length; i++) {
@@ -91,29 +99,57 @@ export function autoDlEnabled(type, network) {
 function androidBridge() {
   try {
     const a = window.FoxinixAndroid;
-    return a && typeof a.download === 'function' ? a : null;
+    return a || null;
   } catch (e) { return null; }
 }
 
 export function nativeDownloadAvailable() {
-  return !!androidBridge();
+  const a = androidBridge();
+  return !!(a && typeof a.download === 'function');
 }
 
 export function nativeNetwork() {
   const a = androidBridge();
   if (!a || typeof a.networkType !== 'function') return '';
-  try { return String(a.networkType() || ''); } catch (e) { return ''; }
+  try { return String(a.networkType() || '').toLowerCase(); } catch (e) { return ''; }
 }
 
-/* En Android los bytes los baja DownloadManager directamente a
-   Downloads/Foxinix. La web sigue usando blob + <a download>. */
+/* Red actual. En Android manda el puente nativo (ConnectivityManager);
+   en el navegador usamos Network Information API. Si el navegador no
+   expone `type`, en un teléfono asumimos datos móviles cuando la pista
+   es móvil; en un PC asumimos Wi-Fi. */
+export function currentNetwork() {
+  const native = nativeNetwork();
+  if (native === 'wifi' || native === 'mobile') return native;
+  try {
+    const conn = navigator.connection || navigator.mozConnection ||
+      navigator.webkitConnection;
+    if (conn) {
+      const type = String(conn.type || '').toLowerCase();
+      if (type === 'wifi' || type === 'ethernet' || type === 'bluetooth') return 'wifi';
+      if (type === 'cellular' || type === '4g' || type === '3g' || type === '2g') return 'mobile';
+      if (conn.saveData) return 'off';
+      if (conn.effectiveType) {
+        if (/^(slow-2g|2g|3g)$/.test(conn.effectiveType)) return 'mobile';
+        if (/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || '')) return 'mobile';
+      }
+    }
+  } catch (e) {}
+  return 'wifi';
+}
+
+export function shouldAutoDownload(type) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  return autoDlEnabled(type, currentNetwork());
+}
+
+/* Firma antigua conservada para las webs cacheadas de W57. Las descargas
+   nuevas usan `saveDownloadToDevice()`. */
 export function nativeDownload(url, name, mime, type, silent) {
   const a = androidBridge();
-  if (!a || !url || String(url).indexOf('blob:') === 0) return false;
+  if (!a || typeof a.download !== 'function' || !url ||
+      String(url).indexOf('blob:') === 0) return false;
   let full = String(url);
-  /* DownloadManager exige una URL absoluta. Las medias firmadas del
-     server vienen como /media/… (ruta relativa): se completa con el
-     origen real del WebView (https://chat.foxinix.qzz.io en el APK). */
   if (full.charAt(0) === '/' && full.charAt(1) !== '/') {
     full = window.location.origin + full;
   }
@@ -122,12 +158,6 @@ export function nativeDownload(url, name, mime, type, silent) {
       String(mime || ''), String(type || 'file'), !!silent);
   } catch (e) { return false; }
 }
-
-export function shouldAutoDownload(type) {
-  if (!nativeDownloadAvailable()) return false;
-  return autoDlEnabled(type, nativeNetwork());
-}
-
 
 const DB_NAME = 'foxinix-downloads';
 const DB_VERSION = 1;
@@ -162,6 +192,17 @@ function idbPut(meta) {
       tx.objectStore(STORE).put(meta);
       tx.oncomplete = function () { resolve(meta); };
       tx.onerror = function () { reject(tx.error); };
+    });
+  });
+}
+
+function idbGet(key) {
+  return dbOpen().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const tx = db.transaction(STORE, 'readonly');
+      const rq = tx.objectStore(STORE).get(key);
+      rq.onsuccess = function () { resolve(rq.result || null); };
+      rq.onerror = function () { reject(rq.error); };
     });
   });
 }
@@ -212,7 +253,7 @@ function cacheOpen() {
   return caches.open(DL_CACHE).catch(function () { return null; });
 }
 
-/* Blob -> archivo en disco. La objectURL se revoca al terminar el clic. */
+/* Blob -> archivo público. La objectURL se revoca al terminar el clic. */
 export function saveBlobToDisk(blob, name) {
   if (!blob) return false;
   const obj = URL.createObjectURL(blob);
@@ -227,7 +268,7 @@ export function saveBlobToDisk(blob, name) {
 }
 
 /* Guarda los bytes + la ficha. Devuelve la ficha o null si no se pudo. */
-export async function saveDownload(url, name, blob) {
+export async function saveDownload(url, name, blob, kind, auto) {
   if (!url || !blob) return null;
   const key = downloadKey(url);
   if (!key) return null;
@@ -244,15 +285,21 @@ export async function saveDownload(url, name, blob) {
   } catch (e) {
     return null;                       // cuota llena o Cache API bloqueada
   }
+  const cat = dlCategory(kind, mime, name);
   const meta = {
     key: key,
-    url: String(url),       // W57: URL firmada original (APK la usa)
+    url: String(url),       // URL firmada original (se renueva al listar)
     name: name || 'archivo',
     size: blob.size,
     mime: mime,
+    kind: cat,
+    auto: !!auto,
     saved_at: Date.now(),
   };
   try { await idbPut(meta); } catch (e) {}
+  if (hooks.onSaved) {
+    try { hooks.onSaved(meta); } catch (e) {}
+  }
   return meta;
 }
 
@@ -270,8 +317,23 @@ export async function getDownloadBlob(urlOrKey) {
   }
 }
 
+export async function downloadMeta(urlOrKey) {
+  const key = downloadKey(urlOrKey);
+  if (!key) return null;
+  try {
+    const meta = await idbGet(key);
+    if (!meta) return null;
+    const c = await cacheOpen();
+    if (!c) return null;
+    const hit = await c.match(key);
+    return hit ? meta : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function hasDownload(urlOrKey) {
-  return !!(await getDownloadBlob(urlOrKey));
+  return !!(await downloadMeta(urlOrKey));
 }
 
 /* Lista las fichas cuya entrada de caché sigue existiendo. */
@@ -283,6 +345,7 @@ export async function listDownloads() {
   const out = [];
   for (let i = 0; i < list.length; i++) {
     const item = list[i];
+    item.kind = item.kind || dlCategory('', item.mime, item.name);
     try {
       const hit = await c.match(item.key);
       if (hit) out.push(item);
@@ -314,11 +377,80 @@ export async function clearDownloads() {
   return true;
 }
 
-/* Vuelve a guardar una descarga ya almacenada, sin tocar la red. */
+/* Vuelve a guardar una descarga ya almacenada, sin tocar la red.
+   Web: <a download>. Android: MediaStore / carpeta pública. */
+export async function saveDownloadToDevice(urlOrKey, name, mime) {
+  const blob = await getDownloadBlob(urlOrKey);
+  if (!blob) return { ok: false, error: 'missing' };
+  return saveBlobToDevice(blob, name, mime);
+}
+
+export async function saveBlobToDevice(blob, name, mime) {
+  if (!blob) return { ok: false, error: 'missing' };
+  const a = androidBridge();
+  if (a && typeof a.beginSave === 'function') {
+    let state = '';
+    try {
+      if (typeof a.storagePermission === 'function') {
+        state = String(a.storagePermission() || '');
+      }
+    } catch (e) { state = ''; }
+    if (state && state !== 'granted' && state !== 'unavailable') {
+      if (hooks.ensurePermission) {
+        const allowed = await hooks.ensurePermission('storage');
+        if (!allowed) return { ok: false, permission: true };
+      } else {
+        return { ok: false, permission: true };
+      }
+    }
+    try {
+      let begin = String(a.beginSave(String(name || 'archivo'),
+        String(mime || blob.type || 'application/octet-stream'), blob.size) || '');
+      if (begin === 'permission') {
+        if (hooks.ensurePermission &&
+            await hooks.ensurePermission('storage')) {
+          begin = String(a.beginSave(String(name || 'archivo'),
+            String(mime || blob.type || 'application/octet-stream'), blob.size) || '');
+        }
+      }
+      if (begin !== 'ok') return { ok: false, permission: begin === 'permission' };
+      const step = 384 * 1024;
+      for (let off = 0; off < blob.size; off += step) {
+        const part = blob.slice(off, Math.min(blob.size, off + step));
+        const b64 = await blobToBase64(part);
+        if (!a.appendSave(b64)) {
+          try { a.cancelSave(); } catch (e) {}
+          return { ok: false, error: 'write' };
+        }
+      }
+      const done = String(a.finishSave() || '');
+      if (done.indexOf('ok:') !== 0) return { ok: false, error: 'finish' };
+      return { ok: true, name: done.slice(3) || name, native: true };
+    } catch (e) {
+      try { a.cancelSave(); } catch (e2) {}
+      return { ok: false, error: 'native' };
+    }
+  }
+  return saveBlobToDisk(blob, name) ? { ok: true, native: false } : { ok: false };
+}
+
+/* Compatibilidad con llamadas W50/W57. */
 export async function saveDownloadToDisk(key, name) {
-  const blob = await getDownloadBlob(key);
-  if (!blob) return false;
-  return saveBlobToDisk(blob, name);
+  const r = await saveDownloadToDevice(key, name);
+  return !!r.ok;
+}
+
+function blobToBase64(blob) {
+  return new Promise(function (resolve, reject) {
+    const fr = new FileReader();
+    fr.onload = function () {
+      const s = String(fr.result || '');
+      const i = s.indexOf(',');
+      resolve(i < 0 ? '' : s.slice(i + 1));
+    };
+    fr.onerror = function () { reject(fr.error); };
+    fr.readAsDataURL(blob);
+  });
 }
 
 /* Pide al navegador que no borre el almacenamiento si puede. */
@@ -329,4 +461,69 @@ export function requestPersistence() {
     }
   } catch (e) {}
   return Promise.resolve(false);
+}
+
+/* GET silencioso con XHR (FF78, progreso no necesario) para las
+   descargas automáticas, que no tienen un reproductor de fondo. */
+export function fetchBlob(url) {
+  return new Promise(function (resolve, reject) {
+    const x = new XMLHttpRequest();
+    x.open('GET', url, true);
+    x.responseType = 'blob';
+    x.timeout = 120000;
+    try { x.setRequestHeader('X-Fox-Download', '1'); } catch (e) {}
+    x.onload = function () {
+      if (x.status >= 200 && x.status < 300 && x.response) resolve(x.response);
+      else reject(new Error('HTTP ' + x.status));
+    };
+    x.onerror = function () { reject(new Error('red')); };
+    x.ontimeout = function () { reject(new Error('tiempo')); };
+    x.send();
+  });
+}
+
+const autoQueue = [];
+const autoPending = {};
+let autoActive = 0;
+
+/* Descarga automática a los datos de la app. No crea copia pública:
+   eso solo ocurre al pulsar "Guardar en el dispositivo". */
+export function autoDownload(url, name, mime, kind) {
+  if (!url || String(url).indexOf('blob:') === 0) return false;
+  const cat = dlCategory(kind, mime, name);
+  if (!shouldAutoDownload(cat)) return false;
+  const key = downloadKey(url);
+  if (!key || autoPending[key]) return false;
+  autoPending[key] = true;
+  autoQueue.push({
+    url: String(url), name: name || 'archivo', mime: mime || '', kind: cat, key: key,
+  });
+  pumpAuto();
+  return true;
+}
+
+function pumpAuto() {
+  while (autoActive < 2 && autoQueue.length) {
+    const job = autoQueue.shift();
+    autoActive++;
+    runAuto(job).then(function () {
+      autoActive--;
+      delete autoPending[job.key];
+      pumpAuto();
+    });
+  }
+}
+
+async function runAuto(job) {
+  if (!shouldAutoDownload(job.kind)) return;
+  if (await hasDownload(job.key)) return;
+  requestPersistence();
+  try {
+    const blob = await fetchBlob(job.url);
+    if (blob && blob.size > 0) {
+      await saveDownload(job.url, job.name, blob, job.kind, true);
+    }
+  } catch (e) {
+    /* Sin conexión o el medio caducó: se reintentará al abrir el chat. */
+  }
 }

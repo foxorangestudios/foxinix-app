@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS users (
     status_preset  TEXT NOT NULL DEFAULT 'online',  -- online | busy | dnd | invisible (W6/W10)
     pending_email  TEXT NOT NULL DEFAULT '',  -- correo nuevo esperando código (W6)
     avatar_media_id INTEGER,
+    banner_media_id INTEGER,                  -- W58: portada del perfil
     email_verified INTEGER NOT NULL DEFAULT 0,
     token_version  INTEGER NOT NULL DEFAULT 0,
     created_at     INTEGER NOT NULL,
@@ -238,6 +239,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN status_preset TEXT NOT NULL DEFAULT ''")
     if "pending_email" not in existing:
         conn.execute("ALTER TABLE users ADD COLUMN pending_email TEXT NOT NULL DEFAULT ''")
+    if "banner_media_id" not in existing:
+        conn.execute("ALTER TABLE users ADD COLUMN banner_media_id INTEGER")
     # W45: migración del contador monótono de secuencia. El backfill usa
     # MAX(seq) actual; a partir de aquí los borrados ya no lo hacen bajar.
     ccols = {r["name"] for r in conn.execute("PRAGMA table_info(chats)")}

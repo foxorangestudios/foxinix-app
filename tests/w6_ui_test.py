@@ -306,9 +306,14 @@ JS_PANEL = """(async () => {
   if (txt.indexOf('Beto W6') < 0) return 'FAIL: sin nombre de B';
   if (txt.indexOf('@' + '__BUSER__') < 0) return 'FAIL: sin @usuario';
   if (txt.indexOf('Bio de prueba B') < 0) return 'FAIL: sin bio';
-  // W27-6: B está desconectado → la píldora dice "Desconectado" aunque
-  // tenga estado guardado ("jugando al ajedrez" solo se ve en línea).
-  if (txt.indexOf('Desconectado') < 0) return 'FAIL: sin estado';
+  // W58: la ficha ya no tiene la fila "Conexión"; el estado va en una
+  // burbuja citada a la derecha del nombre (con el mensaje guardado).
+  if (txt.indexOf('Conexión') >= 0) return 'FAIL: quedó la fila Conexión';
+  const quote = modal.querySelector('.pf-quote');
+  if (!quote) return 'FAIL: sin burbuja de estado';
+  if (quote.textContent.indexOf('jugando al ajedrez') < 0)
+    return 'FAIL: la burbuja no muestra el estado guardado';
+  if (!modal.querySelector('.pf-banner')) return 'FAIL: sin portada';
   if (txt.indexOf('Miembro desde') < 0) return 'FAIL: sin fecha de alta';
   // W7: con este directo YA abierto no se ofrece "Mensaje".
   if (modal.querySelector('.pp-foot .btn')) {

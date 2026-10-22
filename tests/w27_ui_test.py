@@ -235,6 +235,8 @@ def main():
 
     # =================== 1. arranque por defecto en Personas ===========
     print("→ paso1 arranque por defecto (Personas)")
+    shot(a.base + "/", SHOTS / "w27-0-prep.png",
+         js="localStorage.removeItem('fm.session'); 'limpia'", wait=200)
     ok, res, log = shot(a.base + "/", SHOTS / "w27-0-injectar.png",
                         js=sess_js(A))
     step("sesión inyectada", ok and res == "sesión inyectada", log[-300:])
@@ -380,6 +382,8 @@ def main():
 
     # =================== 3. B acepta → DM abierto ======================
     print("→ paso3 B acepta la solicitud")
+    shot(a.base + "/", SHOTS / "w27-3-prep-b.png",
+         js="localStorage.removeItem('fm.session'); 'limpia'", wait=200)
     ok, res, log = shot(a.base + "/", SHOTS / "w27-3-inj-b.png",
                                js=sess_js(B))
     step("sesión de B inyectada", ok and res == "sesión inyectada", log[-300:])
@@ -521,22 +525,25 @@ def main():
       """ + W_WAIT + W_HELP + """
       if (!(await clickChatPoll('«BD»'))) return 'FAIL: sin DM con B';
       if (!(await ensureInfo())) return 'FAIL: sin panel de info';
-      const pill = await wait('.profile-panel .pp-pill', 6000);
-      const wrap = document.querySelector('.profile-panel .av-wrap.on');
+      const info = document.querySelector('.profile-panel');
+      const wrap = info ? info.querySelector('.pf-avwrap.on') : null;
       const dot = wrap ? getComputedStyle(wrap, '::after').width : '';
-      const inCard = !!(wrap && wrap.parentElement &&
-        wrap.parentElement.classList.contains('pp-body'));
-      return JSON.stringify({ pill: pill ? pill.textContent.trim() : '',
-                              dot: dot, inCard: inCard });
+      const inCard = !!(wrap && wrap.closest('.pp-body'));
+      const txt = info ? info.textContent : '';
+      return JSON.stringify({ conn: txt.indexOf('Conexión') >= 0 ||
+                              txt.indexOf('Desconectado') >= 0,
+                              dot: dot, inCard: inCard,
+                              banner: !!(info && info.querySelector('.pf-banner')) });
     })()"""
     js5 = js5.replace("«BD»", BD)
     ok, res, log = shot(a.base + "/", SHOTS / "w27-6-perfil-offline.png",
                                js=js5, wait=600)
     d = json.loads(res) if res and res.startswith("{") else {}
-    step("la píldora del perfil dice Desconectado (aunque el preset "
-         "guardado sea en línea)", d.get("pill") == "Desconectado", d)
-    step("el puntito del info mide 23px (doble) y es el de la ficha "
-         "del contacto", d.get("dot") == "23px" and d.get("inCard"), d)
+    step("la ficha del DM ya no repite Conexión/Desconectado y muestra "
+         "portada", ok and not d.get("conn") and d.get("banner"), d)
+    step("el puntito del info mide 22px (doble, igual en línea y "
+         "desconectado) y es el de la ficha del contacto",
+         d.get("dot") == "22px" and d.get("inCard"), d)
 
     # =================== 6. ⋮ del grupo en la lista ====================
     print("→ paso6 ⋮ del grupo (owner)")
@@ -762,7 +769,7 @@ def main():
       pencil.click();
       const mp = await wait('.modal.mp-edit', 5000);
       if (!mp) return 'FAIL: no abrió Editar perfil';
-      const inp = mp.querySelector('input[type=file]');
+      const inp = mp.querySelector('.avatar-pick input[type=file]');
       if (!inp) return 'FAIL: sin input de foto';
       const pick = () => {
         const dt = new DataTransfer();
@@ -828,10 +835,10 @@ def main():
       /* la ficha reabre tras guardar: MI píldora no debe decir
          "Desconectado" estando conectado (W27c) */
       const v2 = await wait('.modal.meprof:not(.mp-edit)', 6000);
-      const pill = v2 && v2.querySelector('.mp-view .pp-pill');
-      const pillTxt = pill ? pill.textContent.trim() : '';
+      const status = v2 && v2.querySelector('.mp-view .pf-status-wrap');
+      const statusTxt = status ? status.textContent.trim() : '';
       return JSON.stringify({ avatar: avatar, pencilOk: pencilOk,
-                              restored: restored, pill: pillTxt });
+                              restored: restored, status: statusTxt });
     })()"""
     js10 = js10.replace("«PNG»", ",".join(str(b) for b in PNG2))
     ok, res, log = shot(a.base + "/", SHOTS / "w27-11-editor.png",
@@ -840,8 +847,8 @@ def main():
     step("el lápiz abre Editar perfil (modal aparte) y el editor "
          "cancelar/girar/aplicar/guardar sube el recorte",
          ok and bool(d.get("avatar")) and d.get("pencilOk"), d or log[-400:])
-    step("la ficha reabre con MI píldora (no dice Desconectado en línea)",
-         bool(d.get("pill")) and d.get("pill") != "Desconectado", d)
+    step("la ficha reabre con MI estado (no dice Desconectado en línea)",
+         bool(d.get("status")) and "Desconectado" not in d.get("status"), d)
     step("al reeditar la foto, el encuadre aplicado se restaura",
          d.get("restored") is True, d)
     stme, me = ct.http("GET", a.base + "/api/users/me", token=A["access"])

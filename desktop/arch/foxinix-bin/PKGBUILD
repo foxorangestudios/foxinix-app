@@ -1,6 +1,6 @@
 # Maintainer: Foxinix <soporte@foxinix.qzz.io>
 pkgname=foxinix-bin
-pkgver=0.1.7
+pkgver=0.1.8
 pkgrel=1
 pkgdesc="Cliente de mensajería Foxinix (binario oficial)"
 arch=('x86_64')

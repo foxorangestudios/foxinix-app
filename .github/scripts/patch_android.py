@@ -350,6 +350,7 @@ if main_activity:
             "    grantResults: IntArray\n"
             "  ) {\n"
             "    super.onRequestPermissionsResult(requestCode, permissions, grantResults)\n"
+            "    AndroidNotifier.onPermissionResult(requestCode, permissions, grantResults)\n"
             "    if (requestCode == 7320) {\n"
             "      AndroidNotifier.onStoragePermissionResult(\n"
             "        grantResults.isNotEmpty() &&\n"
@@ -361,6 +362,15 @@ if main_activity:
         closing = activity.rfind("}")
         if closing != -1:
             activity = activity[:closing] + perm_method + activity[closing:]
+    elif "AndroidNotifier.onPermissionResult" not in activity:
+        # Proyecto generado por una versión anterior del script: enganchar
+        # el callback nuevo dentro del método existente.
+        activity = activity.replace(
+            "    super.onRequestPermissionsResult(requestCode, permissions, grantResults)\n",
+            "    super.onRequestPermissionsResult(requestCode, permissions, grantResults)\n"
+            "    AndroidNotifier.onPermissionResult(requestCode, permissions, grantResults)\n",
+            1,
+        )
 
     # W57: en segundo plano NO se pausa el WebView (la WS y los avisos
     # deben seguir), pero se oculta para que Android deje de dibujarlo.
@@ -448,12 +458,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -463,7 +476,9 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
+import android.util.Base64
 import android.util.LruCache
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -474,6 +489,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
@@ -509,6 +526,16 @@ class AndroidNotifier(private val activity: Activity) {
   )
   private val downloadIds = ConcurrentHashMap<Long, DownloadInfo>()
   private var pendingDownload: DownloadInfo? = null
+
+  /* W58: guardado por partes en la colección pública de Descargas.
+     La web manda Base64 en trozos; nunca pasamos un blob del WebView. */
+  private data class PendingSave(
+    val name: String,
+    val stream: OutputStream,
+    val uri: Uri?,
+    val file: File?
+  )
+  private var pendingSave: PendingSave? = null
   private val downloadReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
@@ -591,9 +618,7 @@ class AndroidNotifier(private val activity: Activity) {
   @Keep
   fun insets(): String = latestInsets
 
-  @JavascriptInterface
-  @Keep
-  fun permission(): String {
+  private fun notificationState(): String {
     if (Build.VERSION.SDK_INT >= 33 &&
       ContextCompat.checkSelfPermission(
         activity,
@@ -619,6 +644,100 @@ class AndroidNotifier(private val activity: Activity) {
     return "granted"
   }
 
+  private fun runtimeState(permissionName: String, kind: String): String {
+    if (ContextCompat.checkSelfPermission(activity, permissionName) ==
+      PackageManager.PERMISSION_GRANTED
+    ) return "granted"
+    val asked = prefs.getBoolean("perm_asked_" + kind, false)
+    val rationale = activity.shouldShowRequestPermissionRationale(permissionName)
+    return if (asked && !rationale) "denied" else "prompt"
+  }
+
+  private fun storageState(): String {
+    if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return "unavailable"
+    return runtimeState(Manifest.permission.WRITE_EXTERNAL_STORAGE, "storage")
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun permission(): String = notificationState()
+
+  /* W58: estado de cada permiso para el onboarding (mismo vocabulario
+     que la web: granted | prompt | denied | unavailable). */
+  @JavascriptInterface
+  @Keep
+  fun permissionState(kind: String?): String {
+    return when ((kind ?: "").lowercase()) {
+      "mic" -> runtimeState(Manifest.permission.RECORD_AUDIO, "mic")
+      "camera" -> runtimeState(Manifest.permission.CAMERA, "camera")
+      "notif", "notification", "notifications" -> notificationState()
+      "storage" -> storageState()
+      else -> "unavailable"
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun storagePermission(): String = storageState()
+
+  /* W58: red activa para las descargas automáticas por Wi-Fi/datos.
+     En WebView el Network Information API no siempre está disponible,
+     así que el APK la consulta por ConnectivityManager. */
+  @JavascriptInterface
+  @Keep
+  fun networkType(): String {
+    return try {
+      val cm = activity.getSystemService(Context.CONNECTIVITY_SERVICE)
+        as? ConnectivityManager ?: return "off"
+      val net = cm.activeNetwork ?: return "off"
+      val caps = cm.getNetworkCapabilities(net) ?: return "off"
+      when {
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "wifi"
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+        else -> "off"
+      }
+    } catch (e: Exception) {
+      "off"
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  fun requestPermissionFor(kind: String?): String {
+    val k = (kind ?: "").lowercase()
+    val permissionName = when (k) {
+      "mic" -> Manifest.permission.RECORD_AUDIO
+      "camera" -> Manifest.permission.CAMERA
+      "notif", "notification", "notifications" -> {
+        if (Build.VERSION.SDK_INT < 33) return notificationState()
+        Manifest.permission.POST_NOTIFICATIONS
+      }
+      "storage" -> {
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return "unavailable"
+        Manifest.permission.WRITE_EXTERNAL_STORAGE
+      }
+      else -> return "unavailable"
+    }
+    if (ContextCompat.checkSelfPermission(activity, permissionName) ==
+      PackageManager.PERMISSION_GRANTED
+    ) return "granted"
+    prefs.edit().putBoolean("perm_asked_" + k, true).apply()
+    if (k == "notif" || k == "notification" || k == "notifications") {
+      prefs.edit().putBoolean("notif_asked", true).apply()
+    }
+    val code = when (k) {
+      "mic" -> 7401
+      "camera" -> 7402
+      "storage" -> 7404
+      else -> 7403
+    }
+    activity.runOnUiThread {
+      activity.requestPermissions(arrayOf(permissionName), code)
+    }
+    return "prompt"
+  }
+
   @JavascriptInterface
   @Keep
   fun requestPermission() {
@@ -636,6 +755,22 @@ class AndroidNotifier(private val activity: Activity) {
         arrayOf(Manifest.permission.POST_NOTIFICATIONS),
         7319
       )
+    }
+  }
+
+  /* W58: pantalla de detalles de la app (permisos del sistema). */
+  @JavascriptInterface
+  @Keep
+  fun openPermissionSettings(kind: String?) {
+    activity.runOnUiThread {
+      try {
+        val intent = Intent(
+          Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+          Uri.parse("package:" + activity.packageName)
+        )
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        activity.startActivity(intent)
+      } catch (e: Exception) {}
     }
   }
 
@@ -983,6 +1118,206 @@ class AndroidNotifier(private val activity: Activity) {
     }
   }
 
+  /* W58: resultado unificado para el onboarding web. */
+  private fun permissionResult(
+    requestCode: Int,
+    permissions: Array<out String>,
+    grantResults: IntArray
+  ) {
+    val kind = when (requestCode) {
+      7401 -> "mic"
+      7402 -> "camera"
+      7403 -> "notif"
+      7404 -> "storage"
+      else -> return
+    }
+    val granted = grantResults.isNotEmpty() &&
+      grantResults[0] == PackageManager.PERMISSION_GRANTED
+    val permissionName = permissions.firstOrNull()
+    val state = if (granted) {
+      "granted"
+    } else {
+      val rationale = if (permissionName != null) {
+        try {
+          activity.shouldShowRequestPermissionRationale(permissionName)
+        } catch (e: Exception) { false }
+      } else false
+      if (prefs.getBoolean("perm_asked_" + kind, false) && !rationale) "denied" else "prompt"
+    }
+    prefs.edit().putString("perm_state_" + kind, state).apply()
+    val js = "window.__foxinixPermissionResult&&window.__foxinixPermissionResult(" +
+      JSONObject.quote(kind) + "," + JSONObject.quote(state) + ")"
+    (activity as? MainActivity)?.runJs(js)
+  }
+
+  /* W58: descarga nativa por partes a Descargas/Foxinix (MediaStore en
+     Android 10+, File en Android 9 o anterior). Devuelve "ok" o un
+     código que la web traduce a un permiso/error. */
+  @JavascriptInterface
+  @Keep
+  @Synchronized
+  fun beginSave(name: String?, mime: String?, size: Long): String {
+    cancelSave()
+    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+      ContextCompat.checkSelfPermission(
+        activity,
+        Manifest.permission.WRITE_EXTERNAL_STORAGE
+      ) != PackageManager.PERMISSION_GRANTED
+    ) return "permission"
+    val safeName = sanitizeName(name)
+    val safeMime = if (mime.isNullOrBlank()) "application/octet-stream" else mime
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val resolver = activity.contentResolver
+        val unique = uniqueMediaName(safeName)
+        val values = ContentValues().apply {
+          put(MediaStore.Downloads.DISPLAY_NAME, unique)
+          put(MediaStore.Downloads.MIME_TYPE, safeMime)
+          put(
+            MediaStore.Downloads.RELATIVE_PATH,
+            Environment.DIRECTORY_DOWNLOADS + "/Foxinix/"
+          )
+          put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(
+          MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+          values
+        ) ?: return "error"
+        val out = resolver.openOutputStream(uri) ?: run {
+          resolver.delete(uri, null, null)
+          return "error"
+        }
+        pendingSave = PendingSave(unique, out, uri, null)
+      } else {
+        val dir = File(
+          Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS
+          ),
+          "Foxinix"
+        )
+        if (!dir.exists() && !dir.mkdirs()) return "error"
+        val file = File(dir, uniqueName(safeName))
+        pendingSave = PendingSave(file.name, FileOutputStream(file), null, file)
+      }
+      "ok"
+    } catch (e: Exception) {
+      cancelSave()
+      "error"
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  @Synchronized
+  fun appendSave(base64: String?): Boolean {
+    val save = pendingSave ?: return false
+    return try {
+      val data = Base64.decode(base64 ?: "", Base64.NO_WRAP)
+      save.stream.write(data)
+      true
+    } catch (e: Exception) {
+      cancelSave()
+      false
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  @Synchronized
+  fun finishSave(): String {
+    val save = pendingSave ?: return "error"
+    pendingSave = null
+    return try {
+      save.stream.flush()
+      save.stream.close()
+      if (save.uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val values = ContentValues().apply {
+          put(MediaStore.Downloads.IS_PENDING, 0)
+        }
+        activity.contentResolver.update(save.uri, values, null, null)
+      }
+      "ok:" + save.name
+    } catch (e: Exception) {
+      try { save.stream.close() } catch (e2: Exception) {}
+      if (save.uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        try { activity.contentResolver.delete(save.uri, null, null) } catch (e2: Exception) {}
+      }
+      if (save.file != null) {
+        try { save.file.delete() } catch (e2: Exception) {}
+      }
+      "error"
+    }
+  }
+
+  @JavascriptInterface
+  @Keep
+  @Synchronized
+  fun cancelSave() {
+    val save = pendingSave ?: return
+    pendingSave = null
+    try { save.stream.close() } catch (e: Exception) {}
+    if (save.uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      try { activity.contentResolver.delete(save.uri, null, null) } catch (e: Exception) {}
+    }
+    if (save.file != null) {
+      try { save.file.delete() } catch (e: Exception) {}
+    }
+  }
+
+  private fun uniqueMediaName(raw: String): String {
+    val name = sanitizeName(raw)
+    val dot = name.lastIndexOf('.')
+    val base = if (dot > 0) name.substring(0, dot) else name
+    val ext = if (dot > 0) name.substring(dot) else ""
+    var candidate = name
+    var n = 1
+    val rel = Environment.DIRECTORY_DOWNLOADS + "/Foxinix/"
+    while (mediaNameExists(candidate, rel) && n < 1000) {
+      candidate = base + " (" + n + ")" + ext
+      n++
+    }
+    return candidate
+  }
+
+  private fun mediaNameExists(name: String, rel: String): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+    return try {
+      val projection = arrayOf(MediaStore.Downloads._ID)
+      val selection =
+        MediaStore.Downloads.DISPLAY_NAME + "=? AND " +
+        MediaStore.Downloads.RELATIVE_PATH + "=?"
+      val cursor = activity.contentResolver.query(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        projection,
+        selection,
+        arrayOf(name, rel),
+        null
+      )
+      cursor?.use { it.moveToFirst() } ?: false
+    } catch (e: Exception) {
+      false
+    }
+  }
+
+  private fun uniqueName(raw: String): String {
+    val name = sanitizeName(raw)
+    val dir = File(
+      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+      "Foxinix"
+    )
+    try { if (!dir.exists()) dir.mkdirs() } catch (e: Exception) {}
+    val dot = name.lastIndexOf('.')
+    val base = if (dot > 0) name.substring(0, dot) else name
+    val ext = if (dot > 0) name.substring(dot) else ""
+    var candidate = name
+    var n = 1
+    while (File(dir, candidate).exists() && n < 1000) {
+      candidate = base + " (" + n + ")" + ext
+      n++
+    }
+    return candidate
+  }
+
   private fun notifyDownloadResult(ok: Boolean, info: DownloadInfo) {
     val json = JSONObject()
       .put("ok", ok)
@@ -1005,25 +1340,6 @@ class AndroidNotifier(private val activity: Activity) {
       name = if (dot > 0) name.substring(0, 120) + name.substring(dot) else name.substring(0, 120)
     }
     return name
-  }
-
-  private fun uniqueName(raw: String): String {
-    val name = sanitizeName(raw)
-    val dir = File(
-      Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-      "Foxinix"
-    )
-    try { if (!dir.exists()) dir.mkdirs() } catch (e: Exception) {}
-    val dot = name.lastIndexOf('.')
-    val base = if (dot > 0) name.substring(0, dot) else name
-    val ext = if (dot > 0) name.substring(dot) else ""
-    var candidate = name
-    var n = 1
-    while (File(dir, candidate).exists() && n < 1000) {
-      candidate = "$base ($n)$ext"
-      n++
-    }
-    return candidate
   }
 
   private fun downloadTypeLabel(type: String): String {
@@ -1055,6 +1371,14 @@ class AndroidNotifier(private val activity: Activity) {
 
     fun onStoragePermissionResult(granted: Boolean) {
       current?.storageResult(granted)
+    }
+
+    fun onPermissionResult(
+      requestCode: Int,
+      permissions: Array<out String>,
+      grantResults: IntArray
+    ) {
+      current?.permissionResult(requestCode, permissions, grantResults)
     }
 
     /* W56: MainActivity actualiza este valor en el hilo de la interfaz

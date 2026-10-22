@@ -69,6 +69,9 @@ def _public_user(u: dict[str, Any]) -> dict[str, Any]:
     avatar = None
     if u.get("avatar_media_id"):
         avatar = medialink.media_url_by_id(u["avatar_media_id"], "profile")
+    banner = None
+    if u.get("banner_media_id"):
+        banner = medialink.media_url_by_id(u["banner_media_id"], "profile")
     return {
         "id": u["id"],
         "username": u["username"],
@@ -78,6 +81,7 @@ def _public_user(u: dict[str, Any]) -> dict[str, Any]:
         "status_text": u["status_text"],
         "status_preset": u.get("status_preset", ""),
         "avatar_url": avatar,
+        "banner_url": banner,
         "email_verified": bool(u["email_verified"]),
     }
 
@@ -292,6 +296,17 @@ def update_profile(body: ProfileIn, user: dict = Depends(pending_user)) -> dict[
                 raise HTTPException(400, "El avatar debe ser una imagen")
             sets.append("avatar_media_id = ?")
             params.append(body.avatar_media_id)
+    if "banner_media_id" in body.model_fields_set:
+        if body.banner_media_id is None:
+            sets.append("banner_media_id = NULL")  # quitar portada
+        else:
+            media = db.one("SELECT * FROM media WHERE id = ?", (body.banner_media_id,))
+            if not media or media["owner_id"] != user["id"]:
+                raise HTTPException(400, "Archivo de portada inválido")
+            if not (media["mime"] or "").startswith("image/"):
+                raise HTTPException(400, "La portada debe ser una imagen")
+            sets.append("banner_media_id = ?")
+            params.append(body.banner_media_id)
     if not sets:
         return {"user": _public_user(user)}
     params.append(user["id"])

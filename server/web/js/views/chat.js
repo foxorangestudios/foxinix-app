@@ -14,9 +14,16 @@ import { startCall, acceptCall, rejectCall, hangupCall,
    activo: ya no hay switch ni activación manual. */
 import { chatKey as e2eChatKey } from '../e2e.js';
 import {
-  listDownloads, saveDownloadToDisk, deleteDownload, clearDownloads,
-  DL_TYPES, autoDlPrefs, setAutoDl, nativeDownloadAvailable, nativeDownload,
+  listDownloads, saveDownloadToDevice, deleteDownload, clearDownloads,
+  getDownloadBlob,
+  DL_TYPES, autoDlPrefs, setAutoDl, downloadKey,
 } from '../downloads.js';
+import {
+  bootPermissions, ensurePermission, reviewPermissions,
+  refreshPermissionStates, permissionLabel, permissionStateLabel,
+  grantCurrent, skipCurrent, openCurrentSettings,
+  PERMISSIONS, permissionState,
+} from '../permissions.js';
 import {
   openChat, closeChat, loadChats, loadOlder, sendText, sendMedia,
   createDm, createGroup, addMember, setMemberRole, removeMember,
@@ -42,6 +49,8 @@ import {
   rejectFriendRequest, cancelFriendRequest, unfriend,
   /* W28e */
   loadBlocks, blockUser, unblockUser,
+  /* W58 */
+  hydrateDownloads,
 } from '../actions.js';
 /* W15: descarga de archivos con progreso, cancelación y reintento. */
 import {
@@ -160,6 +169,18 @@ function dotClass(u, selfOn) {
 function statusOf(u) {
   if (u && u.status_text) return u.status_text;
   if (u && u.status_preset) return presetLabel(u.status_preset);
+  return '';
+}
+
+/* W58: la burbuja citada del perfil muestra el mensaje personalizado o
+   un preset relevante; el "En línea" por defecto no se repite (la
+   presencia ya la dice el aro del avatar). */
+function profileQuote(u) {
+  if (!u) return '';
+  if (u.status_text) return u.status_text;
+  if (u.status_preset && u.status_preset !== 'online') {
+    return presetLabel(u.status_preset);
+  }
   return '';
 }
 
@@ -1758,6 +1779,23 @@ const MessageRow = {
         row.media.mime, row.kind);
     };
 
+    /* W58: estado visible de la descarga en la línea de metadatos:
+       "Descargar · 2,4 MB" o "Guardado · 2,4 MB". Es reactivo a
+       store.dlSaved (se hidrata al arrancar y lo actualizan las
+       descargas automáticas). */
+    const dlSavedSize = function (row) {
+      const m = row && row.ref && row.ref.media;
+      if (!m || !m.url) return 0;
+      return store.dlSaved[downloadKey(mediaUrl(m.url, true))] || 0;
+    };
+    const dlText = function (row) {
+      const m = row && row.ref && row.ref.media;
+      if (!m) return '';
+      const size = m.size ? fmtSize(m.size) : '';
+      const state = dlSavedSize(row) ? t('Guardado') : t('Descargar');
+      return state + (size ? ' · ' + size : '');
+    };
+
     /* W29b: dentro de cada trozo de texto, los emojis salen como
        segmentos propios con su archivo Twemoji (e); las menciones se
        conservan enteras. */
@@ -1970,7 +2008,7 @@ const MessageRow = {
       isGifFav, toggleFavGif,
       spoiled, spoilShow, spoilHide,   /* W29d */
       replyName, replyText, groupReactions, myReaction,
-      doReply, doReact, mediaUrl, fmtSize, dlFile,
+      doReply, doReact, mediaUrl, fmtSize, dlFile, dlText, dlSavedSize,
       pickerOpen, togglePicker, openMenu,
       /* W13 */
       fullReact, toggleFull, wave, aBar, waveOp,
@@ -2317,6 +2355,13 @@ const MessageRow = {
         '</div>' +
         /* W7: la hora va ABAJO del texto (antes flotaba arriba). */
         '<div class="b-meta">' +
+          /* W58: estado de descarga SIEMPRE visible, con tamaño. */
+          '<button v-if="row.ref.media" class="b-dl-state" type="button" ' +
+            ':class="{ saved: !!dlSavedSize(row) }" :title="t(\'Guardar en el dispositivo\')" ' +
+            '@click.stop="dlFile(row, $event)">' +
+            '<svg class="ic ic-sm"><use :href="dlSavedSize(row) ? \'#i-check\' : \'#i-download\'"></use></svg>' +
+            '<span>{{ dlText(row) }}</span>' +
+          '</button>' +
           /* W29d/h: revelado → ojo + "Ocultar" para volver a tapar */
           '<button v-if="row.ref.spoiler && !spoiled" class="b-spoil-dot" ' +
             'type="button" :title="t(\'Ocultar\')" ' +
@@ -2664,6 +2709,10 @@ const SettingsModal = {
     };
     const testMic = async function () {
       if (micTesting.value) { stopMicTest(); return; }
+      if (!(await ensurePermission('mic'))) {
+        toast(t('Permiso de micrófono necesario para probar el micrófono'), 'err');
+        return;
+      }
       try {
         testStream = await navigator.mediaDevices.getUserMedia({
           audio: store.micDev ? { deviceId: { exact: store.micDev } } : true,
@@ -2857,31 +2906,21 @@ const SettingsModal = {
         : t('El navegador te va a pedir permiso');
     });
     const refreshNotif = function () {
-      if (nativeNotif) notifPerm.value = nativeNotifPerm();
+      permissionState('notif').then(function (st) {
+        notifPerm.value = st === 'unavailable' ? 'unsupported' : st;
+      }).catch(function () {
+        if (nativeNotif) notifPerm.value = nativeNotifPerm();
+      });
     };
     const openNotifSettings = function () {
       if (!nativeNotif) return;
       try { nativeNotif.openSettings(); } catch (e) {}
     };
-    const askNotif = function () {
+    const askNotif = async function () {
       if (!notifOn) return;
-      if (nativeNotif) {
-        try { nativeNotif.requestPermission(); } catch (e) {}
-        refreshNotif();
-        let tries = 0;
-        const timer = setInterval(function () {
-          refreshNotif();
-          tries++;
-          if (tries >= 8) clearInterval(timer);
-        }, 750);
-        return;
-      }
-      try {
-        const p = Notification.requestPermission(function (r) { notifPerm.value = r; });
-        if (p && typeof p.then === 'function') {
-          p.then(function (r) { notifPerm.value = r; });
-        }
-      } catch (e) {}
+      await ensurePermission('notif');
+      refreshNotif();
+      refreshPermissionStates();
     };
     Vue.onMounted(function () {
       window.addEventListener('focus', refreshNotif);
@@ -2892,39 +2931,95 @@ const SettingsModal = {
       document.removeEventListener('visibilitychange', refreshNotif);
     });
 
-    /* ---- W50: descargas persistentes (Cache Storage + IndexedDB) ---- */
+    /* ---- W50/W58: descargas persistentes (Cache Storage + IndexedDB) ---- */
     const dlList = Vue.ref([]);
     const dlTotal = Vue.ref(0);
     const dlBusy = Vue.ref(false);
     const dlMsg = Vue.ref('');
+    const dlSaving = Vue.ref('');
+    const dlOpen = Vue.reactive({});
     const dlLoad = function () {
       dlBusy.value = true;
       dlMsg.value = '';
       listDownloads().then(function (list) {
         dlList.value = list;
         let total = 0;
-        for (let i = 0; i < list.length; i++) total += list[i].size || 0;
+        let first = '';
+        for (let i = 0; i < list.length; i++) {
+          total += list[i].size || 0;
+          if (!first) first = list[i].kind || 'file';
+        }
         dlTotal.value = total;
+        if (first && !Object.keys(dlOpen).length) dlOpen[first] = true;
       }).catch(function () {
         dlMsg.value = t('No se pudieron cargar las descargas');
       }).then(function () { dlBusy.value = false; });
     };
-    const dlSave = function (item) {
-      dlMsg.value = '';
-      /* W57: en Android un blob no se puede entregar a Descargas; se
-         reutiliza la URL firmada guardada con la ficha. */
-      if (dlNative && item.url) {
-        startDownload(item.url, item.name, null, item.mime, 'file');
-        return;
+    /* W58: agrupadas por categoría, con cantidad y tamaño total. */
+    const dlGroups = Vue.computed(function () {
+      const out = [];
+      for (let t = 0; t < DL_TYPES.length; t++) {
+        const tp = DL_TYPES[t];
+        const items = dlList.value.filter(function (d) {
+          return (d.kind || 'file') === tp.id;
+        });
+        if (!items.length) continue;
+        let size = 0;
+        for (let i = 0; i < items.length; i++) size += items[i].size || 0;
+        out.push({
+          id: tp.id, label: tp.label, count: items.length, size: size, items: items,
+          icon: tp.id === 'image' ? 'i-image' : (tp.id === 'audio' ? 'i-vol' :
+            (tp.id === 'video' ? 'i-video' : 'i-file')),
+        });
       }
-      saveDownloadToDisk(item.key, item.name).then(function (ok) {
-        if (!ok) {
+      return out;
+    });
+    const dlToggle = function (id) { dlOpen[id] = !dlOpen[id]; };
+    const dlSave = async function (item) {
+      dlMsg.value = '';
+      dlSaving.value = item.key;
+      try {
+        const r = await saveDownloadToDevice(item.key, item.name, item.mime);
+        if (r && r.ok) {
+          toast(r.native ? t('Guardado en Descargas/Foxinix') :
+            t('Guardado en el dispositivo'), 'ok');
+        } else if (r && r.permission) {
+          dlMsg.value = t('Permiso de almacenamiento necesario para guardar en el dispositivo');
+        } else {
           dlMsg.value = t('El archivo ya no está disponible');
           dlLoad();
         }
-      }).catch(function () {
+      } catch (e) {
         dlMsg.value = t('El archivo ya no está disponible');
-      });
+      } finally {
+        dlSaving.value = '';
+      }
+    };
+    /* W58: abrir una descarga guardada desde los datos de la app. El
+       blob local no pasa por la red; si el navegador bloquea la pestaña
+       nueva se avisa sin abrir nada raro. */
+    const dlOpenFile = async function (item) {
+      const blob = await getDownloadBlob(item.key);
+      if (!blob) {
+        dlMsg.value = t('El archivo ya no está disponible');
+        dlLoad();
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      let win = null;
+      try {
+        win = window.open(url, '_blank');
+      } catch (e) { win = null; }
+      if (!win) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
     };
     const dlDelete = function (item) {
       if (!window.confirm(t('¿Eliminar esta descarga guardada?'))) return;
@@ -2940,15 +3035,34 @@ const SettingsModal = {
         return new Date(item.saved_at).toLocaleDateString(store.lang === 'en' ? 'en' : 'es');
       } catch (e) { return ''; }
     };
-    /* W57: descarga automática por tipo y red (solo APK Android; en la
-       web el navegador no permite guardar sin interacción). */
-    const dlNative = nativeDownloadAvailable();
+    /* W58: la descarga automática ya no es exclusiva del APK: se guarda
+       en los datos de la app también en web/PWA/escritorio. */
     const dlAuto = Vue.ref(autoDlPrefs());
     const dlAutoSet = function (type, network, ev) {
       setAutoDl(type, network, !!(ev && ev.target && ev.target.checked));
       dlAuto.value = autoDlPrefs();
+      store.dlAutoRev++;
     };
-    Vue.onMounted(dlLoad);
+    /* W58: resumen de permisos para volver a pedirlos desde Ajustes. */
+    const permRows = Vue.computed(function () {
+      return PERMISSIONS.map(function (p) {
+        return {
+          id: p.id, icon: p.icon, label: permissionLabel(p.id),
+          state: store.permStates[p.id] || '',
+          stateLabel: permissionStateLabel(p.id),
+        };
+      });
+    });
+    const permReview = async function () {
+      await reviewPermissions();
+      toast(t('Permisos actualizados'), 'ok');
+    };
+    const permRefresh = function () { refreshPermissionStates(); };
+    Vue.onMounted(function () {
+      dlLoad();
+      hydrateDownloads();
+      refreshPermissionStates();
+    });
 
     return {
       store, tabs, close, setTab, accents, walls,
@@ -2961,9 +3075,12 @@ const SettingsModal = {
       sendEmCode, confirmEmCode, cancelEmCode,
       notifOn, notifPerm, notifLabel, notifTitle, askNotif,
       nativeNotifAvail, openNotifSettings,
-      /* W50/W57: descargas persistentes + automáticas */
-      dlList, dlTotal, dlBusy, dlMsg, dlSave, dlDelete, dlClear, dlDate, fmtSize,
-      dlNative, dlAuto, dlAutoSet, dlTypes: DL_TYPES,
+      /* W50/W58: descargas persistentes + automáticas */
+      dlList, dlTotal, dlBusy, dlMsg, dlSaving, dlSave, dlOpenFile, dlDelete,
+      dlClear, dlDate, dlGroups, dlOpen, dlToggle, fmtSize,
+      dlAuto, dlAutoSet, dlTypes: DL_TYPES,
+      /* W58: permisos del dispositivo */
+      permRows, permReview, permRefresh,
       doLogout: askLogout, doDelete: askDeleteAccount,
     };
   },
@@ -3153,14 +3270,29 @@ const SettingsModal = {
                 <span class="st-ok" v-else>{{ t('Activas ✓') }}</span>
               </div>
             </div>
+            <!-- W58: permisos del dispositivo (micrófono, cámara, avisos,
+                 almacenamiento legacy). Se pueden revisar sin reiniciar. -->
+            <div class="st-sec">
+              <div class="st-h">{{ t('Permisos del dispositivo') }}</div>
+              <p class="st-hint">{{ t('Si saltaste un permiso al entrar, puedes concederlo aquí. La app sigue funcionando sin él.') }}</p>
+              <div class="st-row perm-row" v-for="p in permRows" :key="p.id">
+                <svg class="ic ic-sm perm-row-ic"><use :href="'#' + p.icon"></use></svg>
+                <div class="st-col"><b>{{ p.label }}</b><span>{{ p.stateLabel }}</span></div>
+                <span class="perm-state" :class="'is-' + p.state">{{ p.stateLabel }}</span>
+              </div>
+              <div class="st-btns st-btns-left">
+                <button class="btn btn-ghost btn-sm" type="button" @click="permRefresh">{{ t('Actualizar') }}</button>
+                <button class="btn btn-sm" type="button" @click="permReview">{{ t('Revisar permisos') }}</button>
+              </div>
+            </div>
           </template>
 
-          <!-- ============ descargas (W50) ============ -->
+          <!-- ============ descargas (W50/W58) ============ -->
           <template v-else-if="store.settingsTab === 'descargas'">
             <div class="st-title">{{ t('Descargas') }}</div>
-            <div class="st-sec" v-if="dlNative">
+            <div class="st-sec">
               <div class="st-h">{{ t('Descargas automáticas') }}</div>
-              <p class="st-hint">{{ t('Elige qué tipos se guardan solos en Downloads/Foxinix. Las descargas manuales siempre están disponibles.') }}</p>
+              <p class="st-hint">{{ t('Elige qué tipos se guardan solos en los datos de la app. No se crea una copia pública hasta que pulses “Guardar en el dispositivo”.') }}</p>
               <div class="dl-auto-row" v-for="tp in dlTypes" :key="tp.id">
                 <b class="dl-auto-name">{{ t(tp.label) }}</b>
                 <label class="dl-auto-opt">
@@ -3177,19 +3309,34 @@ const SettingsModal = {
             </div>
             <div class="st-sec">
               <div class="st-h">{{ t('Archivos guardados') }}</div>
-              <p class="st-hint">{{ t('Se guardan en este dispositivo para abrirlos sin volver a descargarlos.') }}</p>
+              <p class="st-hint">{{ t('Se guardan en este dispositivo para abrirlos sin volver a descargarlos. Puedes exportar una copia a Descargas cuando quieras.') }}</p>
               <div class="dl-empty" v-if="dlBusy">{{ t('Cargando…') }}</div>
               <div class="dl-empty" v-else-if="!dlList.length">{{ t('No hay descargas guardadas.') }}</div>
-              <div class="dl-list" v-else>
-                <div class="dl-item" v-for="d in dlList" :key="d.key">
-                  <div class="dl-info">
-                    <b>{{ d.name }}</b>
-                    <span>{{ fmtSize(d.size) }}<template v-if="dlDate(d)"> · {{ dlDate(d) }}</template></span>
-                  </div>
-                  <button class="btn btn-ghost btn-sm" type="button" @click="dlSave(d)">{{ t('Guardar') }}</button>
-                  <button class="icon-btn" type="button" :title="t('Eliminar')" @click="dlDelete(d)">
-                    <svg class="ic"><use href="#i-trash"></use></svg>
+              <div class="dl-groups" v-else>
+                <div class="dl-group" v-for="g in dlGroups" :key="g.id">
+                  <button class="dl-group-head" type="button" @click="dlToggle(g.id)">
+                    <svg class="ic ic-sm"><use :href="'#' + g.icon"></use></svg>
+                    <b>{{ t(g.label) }}</b>
+                    <span class="dl-gcount">({{ g.count }})</span>
+                    <span class="dl-gsize">{{ fmtSize(g.size) }}</span>
+                    <svg class="ic ic-sm dl-gchev" :class="{ open: dlOpen[g.id] }"><use href="#i-chevron-down"></use></svg>
                   </button>
+                  <div class="dl-group-body" v-if="dlOpen[g.id]">
+                    <div class="dl-item" v-for="d in g.items" :key="d.key">
+                      <div class="dl-info">
+                        <b>{{ d.name }}</b>
+                        <span>{{ fmtSize(d.size) }}<template v-if="d.auto"> · {{ t('Automática') }}</template><template v-if="dlDate(d)"> · {{ dlDate(d) }}</template></span>
+                      </div>
+                      <button class="btn btn-ghost btn-sm" type="button"
+                        @click="dlOpenFile(d)">{{ t('Abrir') }}</button>
+                      <button class="btn btn-ghost btn-sm" type="button"
+                        :disabled="dlSaving === d.key" @click="dlSave(d)">
+                        {{ dlSaving === d.key ? t('Guardando…') : t('Guardar en el dispositivo') }}</button>
+                      <button class="icon-btn" type="button" :title="t('Eliminar')" @click="dlDelete(d)">
+                        <svg class="ic"><use href="#i-trash"></use></svg>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div class="form-err st-err" v-if="dlMsg" role="alert">
@@ -3301,21 +3448,79 @@ const SettingsModal = {
 const MeProfileModal = {
   setup: function () {
     const close = function () { store.meProfileOpen = false; };
-    /* W27c: MI píldora — para mí manda la conexión del WS (el mapa de
-       presencia no me incluye de forma fiable, como el punto propio). */
-    const myPill = Vue.computed(function () {
-      return store.ws === 'on' ? statusOf(store.user) : t('Desconectado');
-    });
-    /* W27b: la edición vive en OTRO modal para no confundir: aquí solo
-       se ve la ficha; el lápiz abre el formulario aparte. */
     const edit = function () {
       store.meProfileOpen = false;
       store.meEditOpen = true;
     };
+    /* W58: el estado se cambia desde la burbuja citada del perfil, con
+       un menú desplegable estilo Discord. Solo MI perfil permite editar:
+       este modal siempre es el propio. */
+    const menuOpen = Vue.ref(false);
+    const statusDraft = Vue.ref((store.user && store.user.status_text) || '');
+    const statusBusy = Vue.ref(false);
+    const statusErr = Vue.ref('');
+    const myStatus = Vue.computed(function () {
+      return statusOf(store.user) || t('En línea');
+    });
+    const myPreset = Vue.computed(function () {
+      return (store.user && store.user.status_preset) || 'online';
+    });
+    const toggleStatus = function () {
+      if (!menuOpen.value) {
+        statusDraft.value = (store.user && store.user.status_text) || '';
+        statusErr.value = '';
+      }
+      menuOpen.value = !menuOpen.value;
+    };
+    const saveStatus = async function (preset, text) {
+      statusErr.value = '';
+      statusBusy.value = true;
+      try {
+        const r = await api('PUT', '/api/auth/profile', {
+          status_preset: preset,
+          status_text: text,
+        }, { retry401: true });
+        if (r && r.user) {
+          store.user = Object.assign({}, store.user, r.user);
+          session.user = store.user;
+          saveSession();
+        } else {
+          store.user.status_preset = preset;
+          store.user.status_text = text;
+          session.user = store.user;
+          saveSession();
+        }
+        menuOpen.value = false;
+        toast(t('Estado actualizado'), 'ok');
+      } catch (e) {
+        statusErr.value = (e && e.detail) || t('No se pudo actualizar el estado');
+      } finally {
+        statusBusy.value = false;
+      }
+    };
+    const choosePreset = function (p) {
+      saveStatus(p.val, statusDraft.value.trim());
+    };
+    const saveCustom = function () {
+      saveStatus(myPreset.value, statusDraft.value.trim());
+    };
+    const clearCustom = function () {
+      statusDraft.value = '';
+      saveStatus(myPreset.value, '');
+    };
+    const onDocClick = function (e) {
+      if (!menuOpen.value) return;
+      const el = e.target;
+      if (el && el.closest && el.closest('.pf-status-wrap')) return;
+      menuOpen.value = false;
+    };
+    Vue.onMounted(function () { document.addEventListener('click', onDocClick); });
+    Vue.onUnmounted(function () { document.removeEventListener('click', onDocClick); });
     return {
-      store, close, edit, myPill,
-      dotClass, statusOf, connPill, connLine, joinedLine,
-      md: mdToHtml, mediaUrl,
+      store, close, edit, myStatus, myPreset, presets: STATUS_PRESETS,
+      menuOpen, statusDraft, statusBusy, statusErr,
+      toggleStatus, choosePreset, saveCustom, clearCustom,
+      dotClass, statusOf, joinedLine, md: mdToHtml, mediaUrl,
     };
   },
   template: `
@@ -3331,19 +3536,65 @@ const MeProfileModal = {
           </button>
         </header>
         <div class="mp-body">
-          <div class="mp-view" v-if="store.user">
-            <span class="av-wrap" :class="dotClass(store.user, store.ws === 'on')">
-              <span class="avatar mp-av">
-                <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">
-                <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
+          <div class="mp-view pf-view" v-if="store.user">
+            <!-- W58: portada + avatar solapado a la mitad + estado citado -->
+            <div class="pf-banner" :class="{ 'is-empty': !store.user.banner_url }">
+              <img v-if="store.user.banner_url" :src="mediaUrl(store.user.banner_url)" alt="">
+              <span v-else class="pf-banner-art" aria-hidden="true">
+                <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
               </span>
-            </span>
-            <div class="pp-name">{{ store.user.display_name || store.user.username }}</div>
-            <div class="pp-user">@{{ store.user.username }}</div>
-            <div class="pp-pill" v-if="myPill">{{ myPill }}</div>
-            <div class="pp-bio md-body" v-if="store.user.bio" v-html="md(store.user.bio)"></div>
-            <div class="pp-rows">
-              <div class="pp-row"><b>{{ t('Conexión') }}</b><span>{{ store.ws === 'on' ? t('En línea') : t('Desconectado') }}</span></div>
+            </div>
+            <div class="pf-idrow">
+              <span class="av-wrap pf-avwrap" :class="dotClass(store.user, store.ws === 'on')">
+                <span class="avatar pp-av">
+                  <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">
+                  <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
+                </span>
+              </span>
+              <div class="pf-idcol">
+                <div class="pp-name">{{ store.user.display_name || store.user.username }}</div>
+                <div class="pp-user">@{{ store.user.username }}</div>
+              </div>
+              <div class="pf-status-wrap">
+                <button class="pf-quote pf-status-btn" type="button"
+                  :title="t('Cambiar estado')" :aria-expanded="menuOpen ? 'true' : 'false'"
+                  @click.stop="toggleStatus">
+                  <span class="sdot" :class="store.ws === 'on' ? (myPreset === 'busy' ? 'sd-busy' : (myPreset === 'dnd' ? 'sd-dnd' : (myPreset === 'invisible' ? 'sd-off' : 'sd-online'))) : 'sd-off'"></span>
+                  <span class="pf-quote-text">{{ myStatus }}</span>
+                  <svg class="ic ic-sm pf-quote-chev" :class="{ open: menuOpen }"><use href="#i-chevron-down"></use></svg>
+                </button>
+                <div class="pf-status-menu" v-if="menuOpen" @click.stop>
+                  <div class="pf-menu-title">{{ t('Estado') }}</div>
+                  <label class="pf-menu-label" for="pf-status-input">{{ t('Mensaje personalizado') }}</label>
+                  <input id="pf-status-input" class="input pf-status-input" type="text"
+                    v-model="statusDraft" maxlength="80" :placeholder="t('¿Qué estás haciendo?')"
+                    @keydown.enter.prevent="saveCustom">
+                  <div class="pf-menu-meta">
+                    <span>{{ statusDraft.length }}/80</span>
+                    <button class="pf-link" type="button" v-if="statusDraft"
+                      @click="clearCustom" :disabled="statusBusy">{{ t('Quitar mensaje') }}</button>
+                  </div>
+                  <div class="pf-menu-presets">
+                    <button class="pf-preset" type="button" v-for="p in presets" :key="p.val"
+                      :class="{ on: myPreset === p.val }" :disabled="statusBusy"
+                      @click="choosePreset(p)">
+                      <span class="sdot" :class="p.dot"></span>
+                      <span>{{ t(p.label) }}</span>
+                      <svg class="ic ic-sm pf-preset-check" v-if="myPreset === p.val"><use href="#i-check"></use></svg>
+                    </button>
+                  </div>
+                  <div class="pf-menu-error" v-if="statusErr" role="alert">{{ statusErr }}</div>
+                  <button class="btn btn-full pf-menu-save" type="button"
+                    :disabled="statusBusy" @click="saveCustom">
+                    {{ statusBusy ? t('Guardando…') : t('Guardar mensaje') }}</button>
+                  <p class="pf-menu-hint">{{ t('No molestar silencia los avisos; Invisible te deja conectado sin aparecer en línea.') }}</p>
+                </div>
+              </div>
+            </div>
+            <div class="pf-bio-wrap" v-if="store.user.bio">
+              <div class="pp-bio md-body" v-html="md(store.user.bio)"></div>
+            </div>
+            <div class="pp-rows pf-rows">
               <div class="pp-row" v-if="store.user.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(store.user) }}</span></div>
             </div>
           </div>
@@ -3371,6 +3622,15 @@ const MeProfileEditModal = {
     const preview = Vue.ref('');
     const hadAvatar = !!u.avatar_url;
     const avatarGone = Vue.ref(false);
+    /* W58: portada del perfil (imagen propia, recorte tipo cover). */
+    const bannerFile = Vue.ref(null);
+    const bannerPreview = Vue.ref('');
+    const hadBanner = !!u.banner_url;
+    const bannerGone = Vue.ref(false);
+    const hasBanner = Vue.computed(function () {
+      return !!bannerPreview.value ||
+        (!bannerGone.value && !!(store.user && store.user.banner_url));
+    });
     const busy = Vue.ref(false);
     const err = Vue.ref('');
     /* W27: al elegir foto se abre el editor (encuadre + rotación); el
@@ -3420,6 +3680,27 @@ const MeProfileEditModal = {
       avatarGone.value = false;
     };
 
+    const pickBanner = function (e) {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      if (!/^image\//.test(f.type)) { err.value = 'Elige una imagen'; return; }
+      if (f.size > 15 * 1024 * 1024) { err.value = 'La imagen supera los 15 MB'; return; }
+      err.value = '';
+      if (bannerPreview.value) URL.revokeObjectURL(bannerPreview.value);
+      bannerFile.value = f;
+      bannerPreview.value = URL.createObjectURL(f);
+      bannerGone.value = false;
+    };
+
+    const removeBanner = function () {
+      if (!hasBanner.value) return;
+      if (bannerPreview.value) URL.revokeObjectURL(bannerPreview.value);
+      bannerFile.value = null;
+      bannerPreview.value = '';
+      bannerGone.value = hadBanner;
+    };
+
     const removeAvatar = function () {
       if (!preview.value && !hadAvatar) return;
       /* W17: quitar la foto pide confirmación (es un cambio que se
@@ -3442,6 +3723,7 @@ const MeProfileEditModal = {
     Vue.onUnmounted(function () {
       if (preview.value) URL.revokeObjectURL(preview.value);
       if (edSrc.value) URL.revokeObjectURL(edSrc.value);
+      if (bannerPreview.value) URL.revokeObjectURL(bannerPreview.value);
     });
 
     /* Cancelar (o guardar) vuelve a la ficha "Tu perfil". */
@@ -3469,10 +3751,16 @@ const MeProfileEditModal = {
         } else if (avatarGone.value) {
           body.avatar_media_id = null;
         }
+        if (bannerFile.value) {
+          const upBanner = await uploadMedia(bannerFile.value);
+          body.banner_media_id = upBanner.id;
+        } else if (bannerGone.value) {
+          body.banner_media_id = null;
+        }
         const r = await api('PUT', '/api/auth/profile', body, { retry401: true });
         if (r.user) {
-          session.user = r.user;
-          store.user = r.user;
+          store.user = Object.assign({}, store.user, r.user);
+          session.user = store.user;
           saveSession();
         }
         close();
@@ -3485,6 +3773,7 @@ const MeProfileEditModal = {
 
     return {
       store, name, bio, statusText, preset, preview, hasPhoto, avatarGone,
+      bannerPreview, hasBanner, bannerGone, pickBanner, removeBanner,
       busy, err, pick, removeAvatar, close, save,
       /* W27: editor de foto (encuadre + rotación); W27b: recuerda el
          encuadre de la sesión */
@@ -3505,6 +3794,27 @@ const MeProfileEditModal = {
           </button>
         </header>
         <div class="mp-body">
+          <!-- W58: portada del perfil. Se sube tal cual y se muestra
+               como cover; no hay recorte para no añadir otro editor. -->
+          <div class="pf-edit-banner" v-if="!edSrc">
+            <div class="pf-edit-banner-img" :class="{ 'is-empty': !hasBanner }">
+              <img v-if="bannerPreview" :src="bannerPreview" alt="">
+              <img v-else-if="hasBanner && store.user && store.user.banner_url"
+                :src="mediaUrl(store.user.banner_url)" alt="">
+              <span v-else class="pf-banner-art" aria-hidden="true">
+                <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
+              </span>
+            </div>
+            <div class="pf-edit-banner-actions">
+              <label class="btn btn-ghost btn-sm">
+                <svg class="ic ic-sm"><use href="#i-image"></use></svg>
+                {{ t('Cambiar portada') }}
+                <input class="pf-banner-input" type="file" accept="image/*" style="display:none" @change="pickBanner">
+              </label>
+              <button class="btn btn-ghost btn-sm" type="button" v-if="hasBanner"
+                @click="removeBanner">{{ t('Quitar portada') }}</button>
+            </div>
+          </div>
           <!-- W27: con el editor abierto ocupa el centro; al aplicar
                vuelve la ficha con el recorte ya aplicado -->
           <div class="avatar-pick" v-if="!edSrc">
@@ -3558,6 +3868,41 @@ const MeProfileEditModal = {
           <button class="btn" type="button" @click="save" :disabled="busy">
             {{ busy ? t('Guardando…') : t('Guardar') }}</button>
         </div>
+      </div>
+    </div>`,
+};
+
+/* -------------------------------------------------- PermissionGate (W58) */
+
+const PermissionGate = {
+  setup: function () {
+    return { store, grantCurrent, skipCurrent, openCurrentSettings };
+  },
+  template: `
+    <div class="perm-gate" v-if="store.permGate" role="dialog" aria-modal="true"
+      :aria-label="store.permGate.title">
+      <div class="perm-card">
+        <div class="perm-step" v-if="store.permGate.total > 1">
+          {{ t('Permiso {n} de {total}', { n: store.permGate.index, total: store.permGate.total }) }}
+        </div>
+        <div class="perm-icon">
+          <svg class="ic"><use :href="'#' + store.permGate.icon"></use></svg>
+        </div>
+        <h2>{{ store.permGate.title }}</h2>
+        <p>{{ store.permGate.text }}</p>
+        <div class="perm-error" v-if="store.permGate.error" role="alert">
+          <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
+          <span>{{ store.permGate.error }}</span>
+        </div>
+        <div class="perm-actions">
+          <button class="btn btn-ghost" type="button" :disabled="store.permGate.busy"
+            @click="skipCurrent">{{ t('Saltar por ahora') }}</button>
+          <button class="btn" type="button" :disabled="store.permGate.busy"
+            @click="grantCurrent">{{ store.permGate.busy ? t('Solicitando…') : t('Conceder') }}</button>
+        </div>
+        <button class="perm-settings" type="button"
+          v-if="store.permGate.native && store.permGate.state === 'denied'"
+          @click="openCurrentSettings">{{ t('Abrir ajustes del sistema') }}</button>
       </div>
     </div>`,
 };
@@ -3887,7 +4232,7 @@ const ProfilePanel = {
 
     return {
       store, close, startChat, inActiveDm, dotClass,
-      statusOf, connPill, personMenu, connLine, joinedLine, md: mdToHtml,
+      statusOf, profileQuote, personMenu, joinedLine, md: mdToHtml,
       mediaUrl,
     };
   },
@@ -3907,21 +4252,35 @@ const ProfilePanel = {
         <div class="pp-loading" v-if="store.profile.loading">{{ t('Cargando perfil…') }}</div>
         <div class="pp-loading" v-else-if="store.profile.error">{{ t(store.profile.error) }}</div>
         <template v-else-if="store.profile.user">
-          <div class="pp-body">
-            <span class="av-wrap" :class="dotClass(store.profile.user)">
-              <span class="avatar pp-av">
-                <img v-if="store.profile.user.avatar_url"
-                  :src="mediaUrl(store.profile.user.avatar_url)" alt="" loading="lazy">
-                <span v-else>{{ (store.profile.user.display_name || store.profile.user.username).charAt(0).toUpperCase() }}</span>
-              </span>
+          <div class="pf-banner" :class="{ 'is-empty': !store.profile.user.banner_url }">
+            <img v-if="store.profile.user.banner_url"
+              :src="mediaUrl(store.profile.user.banner_url)" alt="" loading="lazy">
+            <span v-else class="pf-banner-art" aria-hidden="true">
+              <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
             </span>
-            <div class="pp-name">{{ store.profile.user.display_name }}</div>
-            <div class="pp-user">@{{ store.profile.user.username }}</div>
-            <div class="pp-pill" v-if="connPill(store.profile.user)">{{ connPill(store.profile.user) }}</div>
-            <div class="pp-bio md-body" v-if="store.profile.user.bio" v-html="md(store.profile.user.bio)"></div>
-            <div class="pp-rows">
-              <div class="pp-row"><b>{{ t('Conexión') }}</b><span>{{ connLine(store.profile.user) }}</span></div>
-              <div class="pp-row"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(store.profile.user) }}</span></div>
+          </div>
+          <div class="pp-body pf-body">
+            <div class="pf-idrow">
+              <span class="av-wrap pf-avwrap" :class="dotClass(store.profile.user)">
+                <span class="avatar pp-av">
+                  <img v-if="store.profile.user.avatar_url"
+                    :src="mediaUrl(store.profile.user.avatar_url)" alt="" loading="lazy">
+                  <span v-else>{{ (store.profile.user.display_name || store.profile.user.username).charAt(0).toUpperCase() }}</span>
+                </span>
+              </span>
+              <div class="pf-idcol">
+                <div class="pp-name">{{ store.profile.user.display_name }}</div>
+                <div class="pp-user">@{{ store.profile.user.username }}</div>
+              </div>
+              <div class="pf-quote pf-quote-static" v-if="profileQuote(store.profile.user)">
+                <span class="pf-quote-text">{{ profileQuote(store.profile.user) }}</span>
+              </div>
+            </div>
+            <div class="pf-bio-wrap" v-if="store.profile.user.bio">
+              <div class="pp-bio md-body" v-html="md(store.profile.user.bio)"></div>
+            </div>
+            <div class="pp-rows pf-rows">
+              <div class="pp-row" v-if="store.profile.user.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(store.profile.user) }}</span></div>
             </div>
           </div>
           <div class="pp-foot" v-if="!inActiveDm">
@@ -4284,7 +4643,7 @@ const ChatInfoPanel = {
       isAdmin, canManageMember, memberMenu,
       infoMenu, memberSections, grpAvatar, canPhoto, pickPhoto,
       grpEditing, onGrpPhoto, onGrpPhotoCancel,
-      dotClass, statusOf, connPill, connLine, joinedLine, mediaUrl, md: mdToHtml,
+      dotClass, statusOf, profileQuote, joinedLine, mediaUrl, md: mdToHtml,
       titleOf: chatTitle,
       /* W28c/W29l */
       pins, pinsLoading, openPins, closePins, goPin,
@@ -4311,19 +4670,32 @@ const ChatInfoPanel = {
       </header>
 
       <template v-if="chat.type === 'dm'">
-        <div class="pp-body" v-if="peer">
-          <span class="av-wrap" :class="dotClass(peer)">
-            <span class="avatar pp-av">
-              <img v-if="peer.avatar_url" :src="mediaUrl(peer.avatar_url)" alt="" loading="lazy">
-              <span v-else>{{ (peer.display_name || peer.username).charAt(0).toUpperCase() }}</span>
-            </span>
+        <div class="pf-banner pf-banner-sm" v-if="peer" :class="{ 'is-empty': !peer.banner_url }">
+          <img v-if="peer.banner_url" :src="mediaUrl(peer.banner_url)" alt="" loading="lazy">
+          <span v-else class="pf-banner-art" aria-hidden="true">
+            <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
           </span>
-          <div class="pp-name">{{ peer.display_name || peer.username }}</div>
-          <div class="pp-user">@{{ peer.username }}</div>
-          <div class="pp-pill" v-if="connPill(peer)">{{ connPill(peer) }}</div>
-          <div class="pp-bio md-body" v-if="peer.bio" v-html="md(peer.bio)"></div>
-          <div class="pp-rows">
-            <div class="pp-row"><b>{{ t('Conexión') }}</b><span>{{ connLine(peer) }}</span></div>
+        </div>
+        <div class="pp-body pf-body" v-if="peer">
+          <div class="pf-idrow">
+            <span class="av-wrap pf-avwrap" :class="dotClass(peer)">
+              <span class="avatar pp-av">
+                <img v-if="peer.avatar_url" :src="mediaUrl(peer.avatar_url)" alt="" loading="lazy">
+                <span v-else>{{ (peer.display_name || peer.username).charAt(0).toUpperCase() }}</span>
+              </span>
+            </span>
+            <div class="pf-idcol">
+              <div class="pp-name">{{ peer.display_name || peer.username }}</div>
+              <div class="pp-user">@{{ peer.username }}</div>
+            </div>
+            <div class="pf-quote pf-quote-static" v-if="profileQuote(peer)">
+              <span class="pf-quote-text">{{ profileQuote(peer) }}</span>
+            </div>
+          </div>
+          <div class="pf-bio-wrap" v-if="peer.bio">
+            <div class="pp-bio md-body" v-html="md(peer.bio)"></div>
+          </div>
+          <div class="pp-rows pf-rows">
             <div class="pp-row" v-if="peer.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(peer) }}</span></div>
           </div>
         </div>
@@ -4887,7 +5259,7 @@ const PeoplePanel = {
 /* ------------------------------------------------------- ChatShell */
 
 export const ChatShell = {
-  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, ConfirmBox, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
+  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, ConfirmBox, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
   setup: function () {
     const scroller = Vue.ref(null);
     const input = Vue.ref(null);
@@ -5421,6 +5793,10 @@ export const ChatShell = {
           : 'Tu navegador no soporta notas de voz', 'err');
         return;
       }
+      if (!(await ensurePermission('mic'))) {
+        toast(t('Permiso de micrófono necesario para la nota de voz'), 'err');
+        return;
+      }
       try {
         /* W20: si hay un micrófono elegido en Ajustes → Chat, se usa ese
            (deviceId exact); si ya no existe o falla, el del sistema. */
@@ -5853,22 +6229,16 @@ export const ChatShell = {
     };
 
     Vue.onMounted(function () {
-      startWS();
-      bootAll().then(consumeNativeTarget);   // W27h + W57: aviso nativo al final
-      initInfoPanel();                            // W7: info por defecto si hay lugar
-      /* W55: en el APK pedimos una vez el permiso de avisos de Android.
-         Si el usuario lo niega, Ajustes → Chat permite reintentarlo. */
-      try {
-        const an = window.FoxinixAndroid;
-        if (an && typeof an.requestPermission === 'function' &&
-            an.permission() === 'prompt' &&
-            localStorage.getItem('fm.nativeNotifAsked') !== '1') {
-          localStorage.setItem('fm.nativeNotifAsked', '1');
-          setTimeout(function () {
-            try { an.requestPermission(); } catch (e) {}
-          }, 1500);
-        }
-      } catch (e) {}
+      hydrateDownloads();
+      /* W58: onboarding de permisos antes de arrancar la conexión y la
+         interfaz. Si el usuario salta, la app sigue y las funciones
+         vuelven a pedir el permiso cuando se usan. */
+      const start = function () {
+        startWS();
+        bootAll().then(consumeNativeTarget);   // W27h + W57: aviso nativo al final
+        initInfoPanel();                       // W7: info por defecto si hay lugar
+      };
+      bootPermissions().catch(function () {}).then(start);
       document.addEventListener('click', onDocClick);
       window.addEventListener('keydown', onEsc);
       /* W54d: teclado de Android (resize del WebView o viewport visual) */
@@ -7575,5 +7945,7 @@ export const ChatShell = {
       '<div class="app-boot" v-if="store.booting">' +
         '<boot-screen></boot-screen>' +
       '</div>' +
+      /* W58: onboarding de permisos a pantalla completa. */
+      '<permission-gate></permission-gate>' +
     '</div>',
 };

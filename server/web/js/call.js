@@ -15,6 +15,7 @@
    cámara falsos vía media.navigator.streams.fake). */
 import { store, toast } from './store.js';
 import { t } from './i18n.js';
+import { ensurePermission } from './permissions.js';
 
 let sendFn = null;          // lo inyecta realtime.js (su send() privado)
 let pc = null;
@@ -149,7 +150,18 @@ function gotIce(cand) {
 
 /* -------------------------------------------------------- acciones */
 
-export function startCall(chat, video) {
+export async function startCall(chat, video) {
+  if (store.call) { toast(t('Ya hay una llamada en curso')); return; }
+  /* W58: si el usuario saltó el permiso al arrancar, se vuelve a pedir
+     justo al usar la función; sin permiso no se inicia la llamada. */
+  if (!(await ensurePermission('mic'))) {
+    toast(t('Permiso de micrófono necesario para llamar'), 'err');
+    return;
+  }
+  if (video && !(await ensurePermission('camera'))) {
+    toast(t('Permiso de cámara necesario para videollamada'), 'err');
+    return;
+  }
   if (store.call) { toast(t('Ya hay una llamada en curso')); return; }
   /* en un DM, chat.title ES el brief del peer (chat_brief del server) */
   const peer = chat.title || null;
@@ -187,9 +199,19 @@ export function startCall(chat, video) {
     });
 }
 
-export function acceptCall() {
+export async function acceptCall() {
   const ev = pendingOffer;
   if (!store.call || store.call.state !== 'incoming' || !ev) return;
+  if (!(await ensurePermission('mic'))) {
+    toast(t('Permiso de micrófono necesario para llamar'), 'err');
+    return;
+  }
+  if (ev.video && !(await ensurePermission('camera'))) {
+    toast(t('Permiso de cámara necesario para videollamada'), 'err');
+    return;
+  }
+  if (!store.call || store.call.state !== 'incoming' || !pendingOffer) return;
+  if (pendingOffer !== ev) return;
   stopRing();
   navigator.mediaDevices.getUserMedia({ audio: true, video: !!ev.video })
     .then(function (stream) {
