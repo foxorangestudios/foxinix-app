@@ -76,11 +76,31 @@ def main():
     try:
         A = base.register(a.base, f"{ua}@test.local", ua)
         B = base.register(a.base, f"{ub}@test.local", ub)
+        # W56: B tiene foto para comprobar que el aviso nativo recibe una
+        # URL de avatar absoluta (la app compone foto + icono).
+        bavatar = SHOTS / f"mov-bavatar-{stamp}.png"
+        Image.new("RGB", (96, 96), (255, 138, 61)).save(bavatar)
+        bup = base.upload(a.base, B["access"], bavatar)
+        st, res = base.http("PUT", a.base + "/api/auth/profile",
+                            {"avatar_media_id": bup["id"]}, token=B["access"])
+        if st != 200:
+            raise SystemExit(f"✗ avatar de B: {st} {res}")
         st, res = base.http("POST", a.base + "/api/chats/dm",
                             {"username": ub}, token=A["access"])
         if st != 201:
             raise SystemExit(f"✗ dm: {st} {res}")
         cid = res["chat"]["id"]
+        # W56: las menciones sólo se registran en grupos; este grupo sirve
+        # para comprobar la excepción de No molestar.
+        st, res = base.http("POST", a.base + "/api/chats/group",
+                            {"title": "Avisos DND", "members": [ub]},
+                            token=A["access"])
+        if st != 201:
+            raise SystemExit(f"✗ grupo: {st} {res}")
+        gid = res["chat"]["id"]
+        # Un mensaje viejo evita que el grupo vacío quede primero en la
+        # lista (los chats sin actividad se ordenan arriba).
+        base.send(a.base, B["access"], gid, {"kind": "text", "body": "Grupo de prueba"})
         for who, body in [
             (B, "Hola, ¿cómo va todo? 😊"),
             (A, "Todo bien, probando la app en el celular."),
@@ -197,6 +217,36 @@ def main():
             raise SystemExit("✗ no se pudo probar el ajuste del teclado")
         if js_res.get("shell") != 500 or js_res.get("compBottom", 999) > 500:
             raise SystemExit(f"✗ el composer no queda sobre el teclado: {js_res}")
+
+        # 2c) Inset nativo de la barra de gestos: boot.js debe volcarlo en
+        # --sab y la barra inferior debe dejar ese hueco.
+        js_inset = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+                    "let t=Date.now();"
+                    "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
+                    "window.FoxinixAndroid={insets:function(){return JSON.stringify("
+                    "{top:0,bottom:24,left:0,right:0});}};"
+                    "window.dispatchEvent(new Event('resize')); await s(250);"
+                    "const nav=document.querySelector('.mobile-tabs');"
+                    "const side=document.querySelector('.sidebar');"
+                    "const cs=getComputedStyle(document.documentElement);"
+                    "return JSON.stringify({sab:cs.getPropertyValue('--sab').trim(),"
+                    "tabs:!!nav?Math.round(nav.getBoundingClientRect().height):0,"
+                    "tabsPad:nav?getComputedStyle(nav).paddingBottom:'',"
+                    "sidePad:side?getComputedStyle(side).paddingBottom:'',"
+                    "bridge:typeof window.foxinixSetNativeInsets==='function'})})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-gesture-inset", SHOTS / "mov-2c-gestos.png",
+            js=js_inset, wait=500)
+        print("paso2c inset de gestos:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1600:])
+            raise SystemExit("✗ no se pudo probar el inset de gestos")
+        if js_res.get("sab") != "24px":
+            raise SystemExit(f"✗ boot.js no aplicó el inset nativo: {js_res}")
+        if js_res.get("tabs") != 82 or js_res.get("sidePad") != "82px":
+            raise SystemExit(f"✗ la barra inferior no dejó el hueco de gestos: {js_res}")
+        if not js_res.get("bridge"):
+            raise SystemExit(f"✗ falta el puente foxinixSetNativeInsets: {js_res}")
 
         # 3) Menú ⋮ del chat (bottom sheet) con llamadas y acciones.
         js_more = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
@@ -347,6 +397,55 @@ def main():
         if js_res.get("label") != "Activas: avisan con la app en segundo plano":
             raise SystemExit(f"✗ estado nativo inesperado: {js_res}")
 
+        # 5d) Estados: en el teléfono los presets son teléfonos de color;
+        # los badges del avatar mantienen círculo, luna, barra y aro.
+        js_status = (
+            "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+            "let t=Date.now();"
+            "while(Date.now()-t<12000&&!document.querySelector('.mobile-me'))await s(120);"
+            "document.querySelector('.mobile-me').click(); await s(450);"
+            "const pencil=document.querySelector('.mp-edit-open');"
+            "if(!pencil)return 'FAIL: no abrió el perfil';"
+            "pencil.click(); await s(450);"
+            "const dots=document.querySelectorAll('.mp-presets .sdot');"
+            "const by={};dots.forEach(function(d){"
+            "const c=getComputedStyle(d);by[d.className.replace('sdot ','')]="
+            "{w:c.width,h:c.height,r:c.borderRadius,bg:c.backgroundColor,"
+            "img:c.backgroundImage,border:c.borderTopColor};});"
+            "function av(cls){const w=document.createElement('span');"
+            "w.className='av-wrap on '+cls;document.body.appendChild(w);"
+            "const c=getComputedStyle(w,'::after');"
+            "return {bg:c.backgroundColor,img:c.backgroundImage,border:c.borderTopColor};}"
+            "return JSON.stringify({count:dots.length,online:by['sd-online'],"
+            "busy:by['sd-busy'],dnd:by['sd-dnd'],off:by['sd-off'],"
+            "avOnline:av('st-online'),avBusy:av('st-busy'),"
+            "avDnd:av('st-dnd'),avOff:av('st-off')})})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-status", SHOTS / "mov-5d-estados.png",
+            js=js_status, wait=500)
+        print("paso5d estados:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1800:])
+            raise SystemExit("✗ no se pudieron probar los estados")
+        st = js_res
+        if st.get("count") != 4:
+            raise SystemExit(f"✗ faltan presets de estado: {st}")
+        if st["online"].get("w") != "14px" or st["online"].get("h") != "20px":
+            raise SystemExit(f"✗ los estados móviles no son teléfonos: {st}")
+        if st["busy"].get("bg") != "rgb(240, 178, 50)":
+            raise SystemExit(f"✗ Ausente no es naranja: {st}")
+        if st["dnd"].get("bg") != "rgb(242, 63, 67)":
+            raise SystemExit(f"✗ No molestar no es rojo: {st}")
+        if st["off"].get("bg") != "rgba(0, 0, 0, 0)" or st["off"].get("border") != "rgb(128, 132, 142)":
+            raise SystemExit(f"✗ Invisible no es un aro gris: {st}")
+        if "radial-gradient" not in (st["avBusy"].get("img") or ""):
+            raise SystemExit(f"✗ el badge de Ausente no tiene luna: {st}")
+        if "linear-gradient" not in (st["avDnd"].get("img") or ""):
+            raise SystemExit(f"✗ el badge de No molestar no tiene barra: {st}")
+        if (st["avOff"].get("bg") != "rgba(0, 0, 0, 0)"
+                or st["avOff"].get("border") != "rgb(128, 132, 142)"):
+            raise SystemExit(f"✗ el badge desconectado no es hueco: {st}")
+
         # 7) Editor de foto móvil: grande, sin barra/botón y sin el
         # formulario de abajo hasta pulsar Aplicar.
         js_avatar = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
@@ -481,7 +580,9 @@ def main():
             "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
             "window.FoxinixAndroid={permission:function(){return 'granted';},"
             "requestPermission:function(){},openSettings:function(){},"
-            "notify:function(t,b,c,snd){window.__lastNotify={t:t,b:b,c:c,s:snd};}};"
+            "notify:function(t,b,c,snd){window.__lastNotify={t:t,b:b,c:c,s:snd};},"
+            "notifyWithAvatar:function(t,b,c,snd,a){window.__lastNotify="
+            "{t:t,b:b,c:c,s:snd,avatar:a};}};"
             "let t=Date.now();"
             "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))await s(120);"
             "const item=document.querySelector('.chat-list .chat-item');"
@@ -513,6 +614,55 @@ def main():
             raise SystemExit(f"✗ el APK no recibió el aviso nativo: {st}")
         if str(note.get("c")) != str(cid):
             raise SystemExit(f"✗ el aviso nativo no identifica el chat: {st}")
+        av = note.get("avatar") or ""
+        if not av.startswith("http") or "/media/profile/" not in av:
+            raise SystemExit(f"✗ el aviso nativo no recibió el avatar de B: {st}")
+
+        # 10b) No molestar: silencia el aviso normal, pero una mención
+        # directa (@usuario) sí debe llegar al APK.
+        js_dnd = (
+            "(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
+            "window.__notes=[];"
+            "window.FoxinixAndroid={permission:function(){return 'granted';},"
+            "requestPermission:function(){},openSettings:function(){},"
+            "notify:function(t,b,c,snd){window.__notes.push({t:t,b:b,c:c,s:snd});},"
+            "notifyWithAvatar:function(t,b,c,snd,a){window.__notes.push("
+            "{t:t,b:b,c:c,s:snd,avatar:a});}};"
+            "let t=Date.now();"
+            "while(Date.now()-t<12000&&!document.querySelector('.chat-list .chat-item'))await s(120);"
+            "const item=document.querySelector('.chat-list .chat-item');"
+            "if(!item)return JSON.stringify({fail:'sin lista'});"
+            "item.click(); await s(1100);"
+            "__fm.store.user.status_preset='dnd';"
+            "try{Object.defineProperty(document,'hidden',{configurable:true,"
+            "get:function(){return true;}});}catch(e){return JSON.stringify({fail:e.message});}"
+            "const token=" + json.dumps(B["access"]) + ";"
+            "async function send(body){const r=await fetch('/api/chats/" + str(gid) + "/messages',"
+            "{method:'POST',headers:{'Content-Type':'application/json',"
+            "'Authorization':'Bearer '+token},body:JSON.stringify({kind:'text',body:body})});"
+            "return r.status;}"
+            "const st1=await send('Aviso silenciado por No molestar');"
+            "await s(1800);"
+            "const afterMute=window.__notes.length;"
+            "const st2=await send('@" + ua + " mención directa');"
+            "await s(2200);"
+            "return JSON.stringify({st1:st1,st2:st2,afterMute:afterMute,"
+            "notes:window.__notes})})()")
+        ok, js_res, _, log = run_shot(
+            f"{a.base}/?v=mobile-dnd", SHOTS / "mov-10b-dnd.png",
+            js=js_dnd, wait=500)
+        print("paso10b No molestar:", js_res)
+        if not ok or not isinstance(js_res, dict):
+            print(log[-1800:])
+            raise SystemExit("✗ no se pudo probar No molestar")
+        st = js_res
+        if st.get("st1") != 201 or st.get("st2") != 201:
+            raise SystemExit(f"✗ no llegaron los mensajes de No molestar: {st}")
+        if st.get("afterMute") != 0:
+            raise SystemExit(f"✗ No molestar dejó pasar un aviso normal: {st}")
+        notes = st.get("notes") or []
+        if len(notes) != 1 or "@" + ua not in (notes[0].get("b") or ""):
+            raise SystemExit(f"✗ la mención directa no atravesó No molestar: {st}")
 
         # 6) Escritorio: nada exclusivo de móvil.
         ok, js_res, ev, log = run_shot(

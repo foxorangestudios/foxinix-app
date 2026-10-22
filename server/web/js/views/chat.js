@@ -112,7 +112,9 @@ function fmtLastSeen(ts) {
    (validador + datos ya guardados).
    W10: se quitó "Sin estado" (como en Discord todo el mundo tiene estado):
    el default de las cuentas nuevas es 'online' y el valor vacío heredado
-   se trata como En línea. */
+   se trata como En línea.
+   W56: en pantallas de teléfono estos mismos presets se dibujan como
+   teléfonos de color (CSS), manteniendo los colores y la semántica. */
 
 const STATUS_PRESETS = [
   { val: 'online', label: 'En línea', dot: 'sd-online' },
@@ -3359,6 +3361,7 @@ const MeProfileEditModal = {
                 :class="{ on: preset === p.val }" @click="preset = p.val"><span
                 class="sdot" :class="p.dot"></span>{{ t(p.label) }}</button>
             </div>
+            <p class="st-hint mp-preset-hint">{{ t('No molestar silencia los avisos; solo las menciones directas (@usuario) te avisan. Invisible te deja conectado sin aparecer en línea.') }}</p>
             <div class="field">
               <label>Bio</label>
               <textarea class="input" v-model.trim="bio" maxlength="150" rows="2"

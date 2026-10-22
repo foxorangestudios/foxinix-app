@@ -3,7 +3,7 @@
 import { store, toast } from './store.js';
 import { session, refreshTokens, authLost, ApiError, sessionHooks } from './api.js';
 import { hooks, loadChats, loadMembers, loadPeople, loadBlocks,
-  onIncomingMessage, catchUpChat } from './actions.js';
+  onIncomingMessage, catchUpChat, mediaUrl } from './actions.js';
 import { t } from './i18n.js';
 /* W37a: los avisos y las citas muestran el texto DESCIFRADO (igual que
    el chat); si no hay clave, el aviso usa un texto neutro. */
@@ -222,9 +222,70 @@ function previewBody(m) {
      ve el usuario en el chat). W54d: si todavía no hay clave, NUNCA
      mostramos el marcador interno del servidor; un texto neutro evita
      que la notificación parezca un error. */
-  if (m._plain != null) return m._plain;
+  if (m._plain != null) {
+    return String(m._plain).indexOf('[Mensaje cifrado]') >= 0
+      ? t('Nuevo mensaje') : m._plain;
+  }
   if (m.e2e) return t('Nuevo mensaje');
-  return m.body || '';
+  const body = m.body || '';
+  return body.indexOf('[Mensaje cifrado]') >= 0 ? t('Nuevo mensaje') : body;
+}
+
+/* W56: en No molestar se silencian sonido y avisos, salvo que el mensaje
+   mencione directamente a la cuenta (las menciones de grupo vienen en
+   m.mentions como ids). Un DM normal NO es una mención: si quieres que te
+   avise, usa @usuario. */
+function hasDirectMention(m) {
+  if (!store.user) return false;
+  const me = String(store.user.id);
+  const ms = m && m.mentions;
+  if (ms && ms.length) {
+    for (let i = 0; i < ms.length; i++) {
+      if (String(ms[i]) === me) return true;
+    }
+  }
+  /* W56: en los mensajes E2E el server no ve el texto y no puede rellenar
+     mentions. Tras descifrar, detectamos @usuario/@everyone/@online en el
+     texto local (nunca se envía nada al servidor). */
+  const text = m && (m._plain != null ? m._plain : (m.e2e ? '' : m.body));
+  if (typeof text !== 'string' || text.indexOf('@') < 0) return false;
+  if (/@(everyone|todos)\b/i.test(text)) return true;
+  if (/@(online|activos)\b/i.test(text)) return true;
+  const uname = String(store.user.username || '').toLowerCase();
+  if (!uname) return false;
+  const names = text.match(/@([A-Za-z0-9_.]{3,20})/g) || [];
+  for (let i = 0; i < names.length; i++) {
+    if (names[i].slice(1).toLowerCase() === uname) return true;
+  }
+  return false;
+}
+
+function dndSilences(m) {
+  if (!store.user || (store.user.status_preset || '') !== 'dnd') return false;
+  return !hasDirectMention(m);
+}
+
+/* La foto de perfil viaja como URL absoluta al APK. Si el navegador ya
+   tiene el avatar como blob local, el WebView nativo no puede leerlo:
+   en ese caso se usa el icono de la app. */
+function absoluteAvatar(url) {
+  if (!url || url.indexOf('blob:') === 0 || url.indexOf('data:') === 0) return '';
+  try { return new URL(url, location.href).href; } catch (e) { return ''; }
+}
+
+/* Para el APK no sirve mediaUrl() si el avatar ya está cacheado como
+   blob: el WebView nativo no puede descargarlo. Partimos de la ruta del
+   servidor y le añadimos token/miniatura sin mirar el caché del navegador. */
+function nativeAvatarUrl(raw) {
+  if (!raw || raw.indexOf('blob:') === 0 || raw.indexOf('data:') === 0) return '';
+  let u = raw;
+  if (!/[?&](sig|token)=/.test(u) && u.indexOf('/media/') !== 0) {
+    u += (u.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(session.access || '');
+  }
+  if (u.indexOf('/media/profile/') === 0 && u.indexOf('thumb=') < 0) {
+    u += (u.indexOf('?') >= 0 ? '&' : '?') + 'thumb=1';
+  }
+  return absoluteAvatar(u);
 }
 
 /* Aviso del navegador — se extrae para poder esperar al descifrado
@@ -246,19 +307,26 @@ function browserNotify(m) {
   if (c && c.type === 'dm') title = who || chatName || 'Foxinix';
   else title = who ? (chatName ? who + ' · ' + chatName : who)
     : (chatName || 'Foxinix');
-  const icon = (m.sender && m.sender.avatar_url) ||
-    (c && c.avatar_url) || '/static/icon-192.png';
+  const avatarRaw = (m.sender && m.sender.avatar_url) ||
+    (c && c.avatar_url) || '';
+  /* W15: mediaUrl elige la miniatura del servidor y añade el token de las
+     rutas antiguas; en navegador también sirve el blob ya cacheado. */
+  const icon = avatarRaw ? mediaUrl(avatarRaw) : '/static/icon-192.png';
 
-  /* W55: dentro del APK, Android WebView no tiene Notification. Usamos
-     la notificación nativa (funciona con la app en segundo plano). */
+  /* W55/W56: dentro del APK, Android WebView no tiene Notification.
+     Usamos la notificación nativa; las versiones nuevas reciben además la
+     URL absoluta del avatar para componer foto + icono de la app. */
   if (native) {
     try {
-      native.notify(
-        title,
-        previewBody(m),
-        String(m.chat_id == null ? '' : m.chat_id),
-        store.prefs && store.prefs.sound ? '1' : '0'
-      );
+      const cid = String(m.chat_id == null ? '' : m.chat_id);
+      const snd = store.prefs && store.prefs.sound ? '1' : '0';
+      const body = previewBody(m);
+      if (typeof native.notifyWithAvatar === 'function') {
+        native.notifyWithAvatar(title, body, cid, snd,
+          avatarRaw ? nativeAvatarUrl(avatarRaw) : '');
+      } else {
+        native.notify(title, body, cid, snd);
+      }
     } catch (e) {}
     return;
   }
@@ -290,6 +358,19 @@ function notifyIncoming(m) {
     if (store.chats[i].id === m.chat_id) { muted = !!store.chats[i].muted; break; }
   }
   if (muted) return;
+  /* W56: No molestar apaga sonido y aviso, pero una mención directa
+     (@usuario) sigue avisando. En E2E la mención solo se conoce tras
+     descifrar: si la clave aún no estaba lista, esperamos ese intento
+     antes de decidir (si no hay clave, se silencia como corresponde). */
+  if (m.e2e && m._plain == null && !hasDirectMention(m) &&
+      store.user.status_preset === 'dnd' && !m._dndTried) {
+    m._dndTried = true;
+    Promise.resolve(decryptInto(m)).then(function () {
+      if (m._plain != null) notifyIncoming(m);
+    });
+    return;
+  }
+  if (dndSilences(m)) return;
   /* W55: el sonido del aviso nativo lo pone Android; no duplicamos el bip. */
   if (store.prefs.sound && (!open || document.hidden) && !nativeNotifyReady()) blip();
   if (document.hidden) {

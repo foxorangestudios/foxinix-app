@@ -40,6 +40,14 @@
   --st-busy: #f0b232;
   --st-dnd: #f23f43;
   --st-off: #80848e;
+  --st-slash: #ffffff;   /* W56: barra del estado No molestar */
+  /* W56: Android no expone env(safe-area-inset-*) en el WebView; boot.js
+     reemplaza esta variable con el inset nativo de la barra de gestos. */
+  --sab: 0px;
+}
+
+@supports (padding: env(safe-area-inset-bottom)) {
+  :root { --sab: env(safe-area-inset-bottom, 0px); }
 }
 
 [data-theme="light"] {
@@ -71,6 +79,8 @@
   --bubble-me-fg: #ffffff;
   --sel: #d7d9dc;
   --row-hover: rgba(6, 6, 7, .07);
+  /* W56: en claro la barra de No molestar va oscura para contrastar. */
+  --st-slash: #1e1f22;
 }
 
 * { box-sizing: border-box; }
@@ -429,8 +439,54 @@ textarea.input { resize: vertical; min-height: 74px; }
 *::-webkit-scrollbar-thumb { background: var(--t2); border-radius: 6px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
+/* W56: con "reducir movimiento" del sistema, las animaciones de una sola
+   pasada se acortan a 1 ms, pero los indicadores que comunican actividad
+   (spinner, cubitos, "escribiendo…", grabación, descarga) conservan su
+   cadencia. Antes el `.01ms` global también se aplicaba a los bucles
+   infinitos y en Windows/Linux sin KDE se veían como un parpadeo a toda
+   velocidad. */
 @media (prefers-reduced-motion: reduce) {
-  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  .spin {
+    animation-duration: .7s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .cube {
+    animation-duration: 1.8s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .ws-dot {
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .dots i {
+    animation-duration: 1.2s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .ci-typing i {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .rec-dot {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .rec-wave i {
+    animation-duration: .9s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .dl-on .mf-ov .up-c.indet {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+  .callbox.incoming .call-accept {
+    animation-duration: 1.4s !important;
+    animation-iteration-count: infinite !important;
+  }
 }
 
 /* ============================================================
@@ -696,12 +752,27 @@ input[type="range"].wp-range::-moz-range-thumb {
   width: 11px; height: 11px;
   border-radius: 50%;
   background: var(--online);
+  background-origin: border-box;
   border: 2px solid transparent;
 }
-/* W7: color del puntito según el estado */
-.av-wrap.on.st-busy::after { background: var(--st-busy); }
-.av-wrap.on.st-dnd::after { background: var(--st-dnd); }
-.av-wrap.on.st-off::after { background: var(--st-off); }
+/* W7/W56: color y forma del puntito según el estado.
+   - En línea: círculo verde.
+   - Ausente: círculo naranja con una luna (recorte transparente).
+   - No molestar: círculo rojo con barra blanca/oscura según el tema.
+   - Invisible/desconectado: aro gris sin relleno. */
+.av-wrap.on.st-busy::after {
+  background: radial-gradient(circle at 72% 28%,
+    transparent 0 30%, var(--st-busy) 31%);
+}
+.av-wrap.on.st-dnd::after {
+  background:
+    linear-gradient(var(--st-slash), var(--st-slash)) center / 62% 16% no-repeat,
+    var(--st-dnd);
+}
+.av-wrap.on.st-off::after {
+  background: transparent;
+  border-color: var(--st-off);
+}
 /* W27: en el panel de info del chat PRIVADO el puntito va al doble de
    tamaño (ficha del contacto); las filas de miembros de un grupo lo
    mantienen del mismo tamaño que la lista de chats (W27b). */
@@ -1333,7 +1404,7 @@ audio.b-audio { display: none; }
   }
   .composer {
     padding: 8px calc(10px + env(safe-area-inset-right, 0px))
-             calc(8px + env(safe-area-inset-bottom, 0px))
+             calc(8px + var(--sab, 0px))
              calc(10px + env(safe-area-inset-left, 0px));
   }
   .composer-input { min-height: 42px; padding: 10px 14px; }
@@ -1342,7 +1413,7 @@ audio.b-audio { display: none; }
           padding-right: calc(12px + env(safe-area-inset-right, 0px)); }
   .modal-veil {
     padding-top: calc(10px + env(safe-area-inset-top, 0px));
-    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(10px + var(--sab, 0px));
   }
   .ws-pill { display: none; }
   /* W20: el panel de fondo en celular es una hoja inferior */
@@ -1352,7 +1423,7 @@ audio.b-audio { display: none; }
     width: auto; min-width: 0; max-width: none;
     max-height: 78%;
     border-right: 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: var(--sab, 0px);
     border-top: 1px solid var(--border);
     border-radius: 12px 12px 0 0;
     box-shadow: 0 -3px 16px rgba(0, 0, 0, .5);
@@ -2703,6 +2774,7 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
   margin: -4px 0 12px;
 }
 .mp-presets > * { margin: 0 6px 6px 0; }
+.mp-preset-hint { margin: -2px 0 12px; }
 .ap-chip {
   display: inline-flex;
   align-items: center;
@@ -2727,14 +2799,65 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
   display: inline-block;
   width: 9px; height: 9px;
   border-radius: 50%;
+  border: 2px solid transparent;
   background: var(--t2);
+  background-origin: border-box;
   margin-right: 7px;
   flex: none;
 }
 .sdot.sd-online { background: var(--online); }
-.sdot.sd-busy { background: var(--st-busy); }
-.sdot.sd-dnd { background: var(--st-dnd); }
-.sdot.sd-off { background: var(--st-off); }
+.sdot.sd-busy {
+  background: radial-gradient(circle at 72% 28%,
+    transparent 0 30%, var(--st-busy) 31%);
+}
+.sdot.sd-dnd {
+  background:
+    linear-gradient(var(--st-slash), var(--st-slash)) center / 62% 16% no-repeat,
+    var(--st-dnd);
+}
+.sdot.sd-off {
+  background: transparent;
+  border-color: var(--st-off);
+}
+
+/* W56: en el teléfono los estados del editor se dibujan como teléfonos
+   (como la referencia de Discord móvil), manteniendo los mismos colores:
+   verde, naranja, rojo y gris sin relleno. En escritorio siguen siendo
+   círculos. */
+@media (max-width: 760px) {
+  .mp-presets .sdot {
+    position: relative;
+    width: 14px; height: 20px;
+    border: 0;
+    border-radius: 4px;
+    margin-right: 8px;
+    background: var(--online);
+  }
+  .mp-presets .sdot::before {
+    content: '';
+    position: absolute;
+    left: 3px; right: 3px; top: 3px; bottom: 5px;
+    border-radius: 2px;
+    background: var(--panel2);
+  }
+  .mp-presets .sdot::after {
+    content: '';
+    position: absolute;
+    left: 50%; bottom: 2px;
+    width: 3px; height: 3px;
+    margin-left: -1.5px;
+    border-radius: 50%;
+    background: var(--panel2);
+  }
+  .mp-presets .sdot.sd-busy { background: var(--st-busy); }
+  .mp-presets .sdot.sd-dnd { background: var(--st-dnd); }
+  .mp-presets .sdot.sd-off {
+    background: transparent;
+    border: 2px solid var(--st-off);
+  }
+  .mp-presets .sdot.sd-off::before { background: transparent; }
+  .mp-presets .sdot.sd-off::after { background: var(--st-off); }
+}
 
 /* ---- tamaño de letra (fm.font → html[data-font] → --fs) ----
    Escala todo lo que se lee (mensajes, lista, cabecera, composer) sin
@@ -2924,7 +3047,7 @@ body { font-size: calc(15px * var(--fs)); }
   border-left: 0;
   border-right: 0;
   border-bottom: 0;
-  padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 6px calc(6px + var(--sab, 0px));
   /* W45: en un teléfono horizontal (poca altura) la hoja se salía de la
      pantalla y no se podía llegar a las últimas opciones. */
   max-height: calc(100vh - env(safe-area-inset-top, 0px) - 8px);
@@ -4359,7 +4482,7 @@ body { font-size: calc(15px * var(--fs)); }
   .user-panel { display: none; }
   .sidebar {
     padding-bottom: 58px;
-    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(58px + var(--sab, 0px));
   }
   .chat-list { padding: 4px 8px 12px; }
   .chat-item { padding: 10px 8px; border-radius: 12px; }
@@ -4434,9 +4557,9 @@ body { font-size: calc(15px * var(--fs)); }
     bottom: 0;
     z-index: 30;
     height: 58px;
-    height: calc(58px + env(safe-area-inset-bottom, 0px));
+    height: calc(58px + var(--sab, 0px));
     padding: 4px 8px;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: var(--sab, 0px);
     background: var(--panel);
     border-top: 1px solid var(--border);
     box-shadow: 0 -2px 12px rgba(0, 0, 0, .18);
@@ -4494,7 +4617,7 @@ body { font-size: calc(15px * var(--fs)); }
      debajo de la barra. */
   .app-shell.show-people .people-pane {
     padding-bottom: 58px;
-    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(58px + var(--sab, 0px));
   }
 
   /* En el celular el composer necesita aire y blancos táctiles más
@@ -4517,7 +4640,7 @@ body { font-size: calc(15px * var(--fs)); }
     height: 100%;
     max-height: none;
     padding-bottom: 58px;
-    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(58px + var(--sab, 0px));
     border: 0;
     border-radius: 0;
   }
@@ -4545,7 +4668,7 @@ body { font-size: calc(15px * var(--fs)); }
     flex-direction: column;
     justify-content: center;
     padding: 34px 22px 26px;
-    padding-bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(26px + var(--sab, 0px));
     border: 0;
     border-radius: 0;
     box-shadow: none;
@@ -4572,7 +4695,7 @@ body { font-size: calc(15px * var(--fs)); }
      inferior. La imagen se ajusta entre ambas, sin meterse debajo. */
   .lightbox .lb-img {
     max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
-    max-height: calc(100vh - 128px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100vh - 128px - env(safe-area-inset-top, 0px) - var(--sab, 0px));
   }
   .lb-close {
     top: calc(10px + env(safe-area-inset-top, 0px));
@@ -4583,7 +4706,7 @@ body { font-size: calc(15px * var(--fs)); }
     right: calc(60px + env(safe-area-inset-right, 0px));
   }
   .lb-hint {
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(12px + var(--sab, 0px));
     padding-left: calc(10px + env(safe-area-inset-left, 0px));
     padding-right: calc(10px + env(safe-area-inset-right, 0px));
   }

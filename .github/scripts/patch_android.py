@@ -141,6 +141,18 @@ if main_activity:
                 "      if (view.paddingBottom != ime) {\n"
                 "        view.setPadding(view.paddingLeft, view.paddingTop, view.paddingRight, ime)\n"
                 "      }\n"
+                "      /* W56: el inset de la barra de gestos no lo ve el CSS.\n"
+                "         Se lo pasamos a boot.js; con el teclado abierto vale 0. */\n"
+                "      val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())\n"
+                "      val d = view.resources.displayMetrics.density\n"
+                "      val safeBottom = if (ime > 0) 0 else (bars.bottom / d).toInt()\n"
+                "      val safeTop = (bars.top / d).toInt()\n"
+                "      val safeLeft = (bars.left / d).toInt()\n"
+                "      val safeRight = (bars.right / d).toInt()\n"
+                "      AndroidNotifier.rememberInsets(safeTop, safeBottom, safeLeft, safeRight)\n"
+                "      val js = \"window.foxinixSetNativeInsets&&window.foxinixSetNativeInsets(\" +\n"
+                "        safeTop + \",\" + safeBottom + \",\" + safeLeft + \",\" + safeRight + \")\"\n"
+                "      appWebView?.post { appWebView?.evaluateJavascript(js, null) }\n"
                 "      insets\n"
                 "    }\n"
                 "    ViewCompat.requestApplyInsets(content)\n"
@@ -168,38 +180,73 @@ if main_activity:
             1,
         )
 
-    if "addJavascriptInterface" not in activity:
-        if "override fun onWebViewCreate" in activity:
+    has_create = "override fun onWebViewCreate" in activity
+    if "private var appWebView" not in activity and has_create:
+        marker = "    override fun onWebViewCreate(webView: WebView) {"
+        if marker in activity:
             activity = activity.replace(
-                "    override fun onWebViewCreate(webView: WebView) {\n"
-                "        super.onWebViewCreate(webView)\n",
-                "    override fun onWebViewCreate(webView: WebView) {\n"
-                "        super.onWebViewCreate(webView)\n"
-                '        webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n',
+                marker,
+                "    private var appWebView: WebView? = null\n\n" + marker,
                 1,
             )
-        else:
-            bridge_method = (
-                "\n  private var appWebView: WebView? = null\n"
-                "\n  override fun onWebViewCreate(webView: WebView) {\n"
-                "    super.onWebViewCreate(webView)\n"
-                "    appWebView = webView\n"
-                '    webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
-                "  }\n"
-                "\n  /* W55: Wry pausa el WebView al pasar a segundo plano; eso\n"
-                "     detiene los timers del WebSocket y dejarían de llegar los\n"
-                "     avisos. Lo reanudamos para mantener la conexión viva. */\n"
-                "  override fun onPause() {\n"
-                "    super.onPause()\n"
-                "    appWebView?.onResume()\n"
-                "  }\n"
+
+    if has_create:
+        if "addJavascriptInterface" not in activity:
+            marker = (
+                "    override fun onWebViewCreate(webView: WebView) {\n"
+                "        super.onWebViewCreate(webView)\n"
             )
-            closing = activity.rfind("}")
-            if closing == -1:
-                print("Aviso: no se encontró el cierre de MainActivity.kt")
+            if marker in activity:
+                activity = activity.replace(
+                    marker,
+                    marker
+                    + "        appWebView = webView\n"
+                    + '        webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
+                    + "        webView.post { ViewCompat.requestApplyInsets(webView) }\n",
+                    1,
+                )
             else:
-                activity = activity[:closing] + bridge_method + activity[closing:]
+                print("Aviso: no se pudo inyectar el puente en onWebViewCreate")
+        elif "appWebView = webView" not in activity:
+            marker = "        super.onWebViewCreate(webView)\n"
+            activity = activity.replace(
+                marker,
+                marker + "        appWebView = webView\n",
+                1,
+            )
+        if ("ViewCompat.requestApplyInsets(webView)" not in activity
+                and "appWebView = webView" in activity):
+            marker = '        webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
+            if marker in activity:
+                activity = activity.replace(
+                    marker,
+                    marker + "        webView.post { ViewCompat.requestApplyInsets(webView) }\n",
+                    1,
+                )
         print("Puente de notificaciones agregado a MainActivity.kt")
+    else:
+        bridge_method = (
+            "\n  private var appWebView: WebView? = null\n"
+            "\n  override fun onWebViewCreate(webView: WebView) {\n"
+            "    super.onWebViewCreate(webView)\n"
+            "    appWebView = webView\n"
+            '    webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
+            "    webView.post { ViewCompat.requestApplyInsets(webView) }\n"
+            "  }\n"
+            "\n  /* W55: Wry pausa el WebView al pasar a segundo plano; eso\n"
+            "     detiene los timers del WebSocket y dejarían de llegar los\n"
+            "     avisos. Lo reanudamos para mantener la conexión viva. */\n"
+            "  override fun onPause() {\n"
+            "    super.onPause()\n"
+            "    appWebView?.onResume()\n"
+            "  }\n"
+        )
+        closing = activity.rfind("}")
+        if closing == -1:
+            print("Aviso: no se encontró el cierre de MainActivity.kt")
+        else:
+            activity = activity[:closing] + bridge_method + activity[closing:]
+            print("Puente de notificaciones agregado a MainActivity.kt")
     main_activity.write_text(activity, encoding="utf-8")
 
     notifier = main_activity.parent / "AndroidNotifier.kt"
@@ -214,14 +261,25 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Shader
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.LruCache
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import androidx.annotation.Keep
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
 
 /* W55: avisos nativos del APK. La web llama a FoxinixAndroid.notify()
    cuando está oculta; la notificación abre la app al tocarla. */
@@ -230,6 +288,18 @@ class AndroidNotifier(private val activity: Activity) {
   private val prefs = activity.getSharedPreferences("foxinix", Context.MODE_PRIVATE)
   private val soundChannelId = "foxinix_messages_v1"
   private val silentChannelId = "foxinix_messages_silent_v1"
+
+  /* W56: las descargas del avatar y el compositor corren fuera del hilo
+     de la interfaz; una sola cola evita abrir decenas de conexiones si
+     llegan mensajes seguidos. */
+  private val avatarExecutor = Executors.newSingleThreadExecutor()
+  private val avatarCache = object : LruCache<String, Bitmap>(6 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+  }
+  private val appIcon: Bitmap? by lazy {
+    val id = activity.applicationInfo.icon
+    drawableBitmap(if (id != 0) id else R.drawable.ic_stat_foxinix)
+  }
 
   init {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -254,6 +324,14 @@ class AndroidNotifier(private val activity: Activity) {
       manager.createNotificationChannel(silent)
     }
   }
+
+  /* W56: Android no rellena env(safe-area-inset-bottom) dentro del
+     WebView. Devolvemos el inset de la barra de navegación/gestos en dp;
+     boot.js lo aplica a --sab. Con el teclado abierto devolvemos 0 para
+     no sumar un hueco extra sobre el compositor. */
+  @JavascriptInterface
+  @Keep
+  fun insets(): String = latestInsets
 
   @JavascriptInterface
   @Keep
@@ -325,18 +403,62 @@ class AndroidNotifier(private val activity: Activity) {
     }
   }
 
+  /* W55: firma antigua, conservada para las webs cacheadas que todavía
+     llamen a notify() sin avatar. */
   @JavascriptInterface
   @Keep
   fun notify(title: String?, body: String?, chatId: String?, sound: String?) {
+    enqueue(title, body, chatId, sound, null)
+  }
+
+  /* W56: la web envía la foto del remitente (URL absoluta y firmada). */
+  @JavascriptInterface
+  @Keep
+  fun notifyWithAvatar(
+    title: String?,
+    body: String?,
+    chatId: String?,
+    sound: String?,
+    avatarUrl: String?
+  ) {
+    enqueue(title, body, chatId, sound, avatarUrl)
+  }
+
+  private fun enqueue(
+    title: String?,
+    body: String?,
+    chatId: String?,
+    sound: String?,
+    avatarUrl: String?
+  ) {
     if (permission() != "granted") return
     val safeTitle = if (title.isNullOrBlank()) "Foxinix" else title
     val safeBody = body ?: ""
+    val safeChatId = if (chatId.isNullOrBlank()) null else chatId
     val withSound = sound == "1"
+    /* La descarga del avatar no debe bloquear el hilo que atiende al
+       WebView: primero se encola y la notificación sale al terminar. */
+    avatarExecutor.execute {
+      try {
+        showNotification(safeTitle, safeBody, safeChatId, withSound, avatarUrl)
+      } catch (e: Exception) {
+        // Un avatar roto no puede hacer desaparecer el aviso.
+      }
+    }
+  }
+
+  private fun showNotification(
+    title: String,
+    body: String,
+    chatId: String?,
+    withSound: Boolean,
+    avatarUrl: String?
+  ) {
     val channelId = if (withSound) soundChannelId else silentChannelId
 
     val intent = Intent(activity, MainActivity::class.java).apply {
       flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-      if (!chatId.isNullOrBlank()) putExtra("foxinix_chat_id", chatId)
+      if (chatId != null) putExtra("foxinix_chat_id", chatId)
     }
     val pending = PendingIntent.getActivity(
       activity,
@@ -347,9 +469,9 @@ class AndroidNotifier(private val activity: Activity) {
 
     val builder = NotificationCompat.Builder(activity, channelId)
       .setSmallIcon(R.drawable.ic_stat_foxinix)
-      .setContentTitle(safeTitle)
-      .setContentText(safeBody)
-      .setStyle(NotificationCompat.BigTextStyle().bigText(safeBody))
+      .setContentTitle(title)
+      .setContentText(body)
+      .setStyle(NotificationCompat.BigTextStyle().bigText(body))
       .setContentIntent(pending)
       .setAutoCancel(true)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -357,6 +479,9 @@ class AndroidNotifier(private val activity: Activity) {
       .setOnlyAlertOnce(false)
       .setWhen(System.currentTimeMillis())
       .setColor(0xFFFF751F.toInt())
+
+    val large = buildLargeIcon(avatarUrl)
+    if (large != null) builder.setLargeIcon(large)
 
     if (withSound) {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -366,7 +491,7 @@ class AndroidNotifier(private val activity: Activity) {
       builder.setSilent(true)
     }
 
-    val id = if (chatId.isNullOrBlank()) {
+    val id = if (chatId == null) {
       System.currentTimeMillis().toInt()
     } else {
       chatId.hashCode()
@@ -375,6 +500,100 @@ class AndroidNotifier(private val activity: Activity) {
       NotificationManagerCompat.from(activity).notify(id, builder.build())
     } catch (e: SecurityException) {
       // Sin permiso del sistema no hay nada más que hacer.
+    }
+  }
+
+  /* W56: icono de la app como imagen grande por defecto. La foto del
+     remitente se recorta en círculo y lleva el icono de Foxinix abajo a
+     la derecha, como en la referencia de escritorio. */
+  private fun drawableBitmap(id: Int): Bitmap? {
+    return try {
+      val d = ContextCompat.getDrawable(activity, id) ?: return null
+      val w = if (d.intrinsicWidth > 0) d.intrinsicWidth else 192
+      val h = if (d.intrinsicHeight > 0) d.intrinsicHeight else 192
+      val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+      val canvas = Canvas(out)
+      d.setBounds(0, 0, w, h)
+      d.draw(canvas)
+      out
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  private fun buildLargeIcon(avatarUrl: String?): Bitmap? {
+    val app = appIcon
+    if (avatarUrl.isNullOrBlank()) return app
+    val avatar = loadAvatar(avatarUrl) ?: return app
+
+    val size = 192
+    val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(out)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val square = centerSquare(avatar, size)
+    paint.shader = BitmapShader(square, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+
+    if (app != null) {
+      val badgeSize = (size * .36f).toInt()
+      val badge = Bitmap.createScaledBitmap(app, badgeSize, badgeSize, true)
+      val cx = size - badgeSize * .86f
+      val cy = size - badgeSize * .86f
+      val ring = Paint(Paint.ANTI_ALIAS_FLAG)
+      ring.color = 0xFFFFFFFF.toInt()
+      /* Un aro blanco separa el icono de la foto aunque el fondo de la
+         foto sea claro. */
+      canvas.drawCircle(cx, cy, badgeSize * .60f, ring)
+      canvas.drawBitmap(badge, cx - badgeSize / 2f, cy - badgeSize / 2f, null)
+    }
+    return out
+  }
+
+  private fun centerSquare(src: Bitmap, size: Int): Bitmap {
+    val side = if (src.width < src.height) src.width else src.height
+    val x = (src.width - side) / 2
+    val y = (src.height - side) / 2
+    val crop = Bitmap.createBitmap(src, x, y, side, side)
+    return Bitmap.createScaledBitmap(crop, size, size, true)
+  }
+
+  private fun loadAvatar(url: String): Bitmap? {
+    avatarCache.get(url)?.let { return it }
+    var conn: HttpURLConnection? = null
+    return try {
+      val parsed = URL(url)
+      if (parsed.protocol != "https" && parsed.protocol != "http") return null
+      val connection = (parsed.openConnection() as HttpURLConnection).apply {
+        connectTimeout = 3000
+        readTimeout = 4000
+        instanceFollowRedirects = true
+        setRequestProperty("Accept", "image/*")
+        setRequestProperty("User-Agent", "Foxinix-Android")
+        CookieManager.getInstance().getCookie(url)?.let { setRequestProperty("Cookie", it) }
+      }
+      conn = connection
+      if (connection.responseCode !in 200..299) return null
+      val bytes = connection.inputStream.use { it.readBytes() }
+      if (bytes.size > 3 * 1024 * 1024) return null
+      val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+      avatarCache.put(url, bitmap)
+      bitmap
+    } catch (e: Exception) {
+      null
+    } finally {
+      conn?.disconnect()
+    }
+  }
+
+  companion object {
+    /* W56: MainActivity actualiza este valor en el hilo de la interfaz
+       desde su listener de WindowInsets; la llamada JS lo lee sin tocar
+       Views fuera del hilo principal. */
+    @Volatile
+    private var latestInsets = """{"top":0,"bottom":0,"left":0,"right":0}"""
+
+    fun rememberInsets(top: Int, bottom: Int, left: Int, right: Int) {
+      latestInsets = """{"top":$top,"bottom":$bottom,"left":$left,"right":$right}"""
     }
   }
 }
@@ -389,11 +608,19 @@ class AndroidNotifier(private val activity: Activity) {
         '''<vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-  <path
-      android:fillColor="#FFFFFFFF"
-      android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2z" />
+    android:viewportWidth="334"
+    android:viewportHeight="362">
+  <!-- W56: la X de Foxinix en blanco (el icono de la barra de estado debe
+       ser una silueta monocroma; Android la tiñe según el tema). -->
+  <group android:translateX="7" android:translateY="30">
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="27"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:pathData="M249,228 L34,10 L18,180 L160,300 L302,180 L286,10 L71,228" />
+  </group>
 </vector>
 ''',
         encoding="utf-8",

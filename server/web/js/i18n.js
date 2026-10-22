@@ -392,6 +392,8 @@ const EN = {
     '**bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://…)',
   'El estado supera los 80 caracteres': 'The status is over 80 characters',
   'No se pudo guardar el perfil': 'Could not save the profile',
+  'No molestar silencia los avisos; solo las menciones directas (@usuario) te avisan. Invisible te deja conectado sin aparecer en línea.':
+    'Do Not Disturb mutes notifications; only direct mentions (@user) alert you. Invisible keeps you connected without appearing online.',
 
   /* ---------- W13: emoji, onda, búsqueda, fijar/silenciar, reenviar ---------- */
   'Buscar emoji': 'Search emoji',

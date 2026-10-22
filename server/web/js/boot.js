@@ -108,3 +108,42 @@
   else if (mq.addListener) mq.addListener(schedule);
   update();
 })();
+
+/* W56: el WebView de Android no rellena env(safe-area-inset-bottom), así
+   que la barra de gestos se comía la barra inferior y el compositor. El
+   APK expone FoxinixAndroid.insets() (y avisa por foxinixSetNativeInsets);
+   volcamos ese valor en --sab, que el CSS usa para dejar el hueco. En la
+   web normal no hay puente y queda el env() del sistema. */
+(function () {
+  var root = document.documentElement;
+  var last = -1;
+  function apply(top, bottom, left, right) {
+    var b = Number(bottom);
+    if (!isFinite(b) || b < 0) return;
+    b = Math.round(b);
+    if (b === last) return;
+    last = b;
+    root.style.setProperty('--sab', b + 'px');
+  }
+  window.foxinixSetNativeInsets = function (top, bottom, left, right) {
+    apply(top, bottom, left, right);
+  };
+  function read() {
+    var a = window.FoxinixAndroid;
+    if (!a || typeof a.insets !== 'function') return;
+    try {
+      var v = a.insets();
+      if (typeof v === 'string' && v) v = JSON.parse(v);
+      if (v && typeof v === 'object') apply(v.top, v.bottom, v.left, v.right);
+    } catch (e) {}
+  }
+  try { read(); } catch (e) {}
+  window.addEventListener('load', read);
+  window.addEventListener('pageshow', read);
+  window.addEventListener('resize', read);
+  window.addEventListener('orientationchange', read);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) read();
+  });
+  setTimeout(read, 0);
+})();

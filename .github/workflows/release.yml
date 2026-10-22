@@ -248,7 +248,8 @@ jobs:
             ## Instalación
             - **Debian/Ubuntu:** `Foxinix-*-debian-amd64.deb`
             - **Fedora:** `Foxinix-*-fedora-x86_64.rpm`
-            - **Arch Linux y otras distribuciones:** `Foxinix-*-linux-x86_64.AppImage`
+            - **Arch Linux:** paquete `foxinix-bin` (se adjunta a la release)
+            - **Otras distribuciones:** `Foxinix-*-linux-x86_64.AppImage`
             - **Windows 10/11:** `Foxinix-*-windows-x64-setup.exe`
             - **Android 7 o superior (64 bits):** `Foxinix-*-android-arm64.apk`
             - **Android 7 o superior (32 bits):** `Foxinix-*-android-armv7.apk`
@@ -256,6 +257,20 @@ jobs:
             La app usa la misma interfaz web y el mismo cifrado E2E que
             https://chat.foxinix.qzz.io/. Los APK de Android están firmados
             y cubren dispositivos arm64 y armv7 (32 bits).
+
+            ## Novedades W56
+            - Android deja libre la barra de gestos: la barra inferior y el
+              compositor ya no quedan debajo.
+            - Los avisos de Android muestran la foto del remitente con el
+              icono de Foxinix como insignia; si no hay foto, usan el icono
+              de la app.
+            - No molestar silencia avisos y sonido, excepto las menciones
+              directas (@usuario), también en mensajes cifrados.
+            - Estados rediseñados: En línea, Ausente (luna), No molestar
+              (barra) e Invisible (aro gris); en el teléfono, el selector
+              usa teléfonos de color.
+            - Las animaciones de carga mantienen su velocidad normal aunque
+              el sistema tenga activado “reducir movimiento”.
 
             ## Notas
             - El AppImage incluye GStreamer para reproducir audio y video; los
