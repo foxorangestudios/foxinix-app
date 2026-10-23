@@ -391,9 +391,12 @@ JS_PLAYERS = """(async () => {
   rate.click();
   await sleep(200);
   out.rate1 = rate.textContent.trim();
-  /* --- audio adjunto: botón de descarga (W37d) */
+  /* --- audio adjunto: W59 deja un solo control de descarga bajo el
+     mensaje, no otro botón dentro del reproductor. */
   const af = await wait('.b-afile', 8000);
-  out.afDl = !!(af && af.querySelector('.au-rate[title="Descargar"]'));
+  const afMsg = af ? af.closest('.msg') : null;
+  out.afDl = !!(afMsg && afMsg.querySelector('.b-dl-state'));
+  out.afDlOld = !!(af && af.querySelector('.au-rate[title="Descargar"]'));
   /* --- video con MIME roto → bloque de error (W37d) */
   let verr = document.querySelector('.msg[data-mid="«FAKE»"] .v-err');
   if (!verr) {
@@ -419,7 +422,8 @@ VOLBLOCK = """  const vwrap = document.querySelector('.msg[data-mid="«REAL»"] 
     vwrap.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     await sleep(250);
     out.vBar = !!vwrap.querySelector('.v-bar');
-    out.vDl = !!vwrap.querySelector('.v-bar .v-btn[title="Descargar"]');
+    out.vDl = !!vwrap.closest('.msg').querySelector('.b-dl-state');
+    out.vDlOld = !!vwrap.querySelector('.v-bar .v-btn[title="Descargar"]');
     const volBtn = vwrap.querySelector('.v-bar .v-btn[title="Volumen"]');
     out.volBtn = !!volBtn;
     if (volBtn) {
@@ -921,12 +925,13 @@ def main():
          ok and r.get("rate0", "").replace("×", "").strip() == "1"
          and "1.5" in (r.get("rate1") or ""),
          f"res={res!r}")
-    step("el audio adjunto tiene botón de descarga (afDl)",
-         ok and r.get("afDl") is True, f"res={res!r}")
+    step("el audio adjunto tiene un solo control de descarga (afDl)",
+         ok and r.get("afDl") is True and r.get("afDlOld") is False,
+         f"res={res!r}")
     if vol:
-        step("el video válido tiene barra y botón de descarga",
-             ok and r.get("vBar") is True and r.get("vDl") is True,
-             f"res={res!r}")
+        step("el video válido tiene barra y un solo control de descarga",
+             ok and r.get("vBar") is True and r.get("vDl") is True and
+             r.get("vDlOld") is False, f"res={res!r}")
         step("el popup de volumen abre con su slider",
              ok and r.get("volBtn") is True and r.get("volOpen") is True
              and r.get("slider") is True, f"res={res!r}")

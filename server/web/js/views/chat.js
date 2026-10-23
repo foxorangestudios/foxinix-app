@@ -15,7 +15,7 @@ import { startCall, acceptCall, rejectCall, hangupCall,
 import { chatKey as e2eChatKey } from '../e2e.js';
 import {
   listDownloads, saveDownloadToDevice, deleteDownload, clearDownloads,
-  getDownloadBlob,
+  openAppDownload,
   DL_TYPES, autoDlPrefs, setAutoDl, downloadKey,
 } from '../downloads.js';
 import {
@@ -1533,14 +1533,6 @@ const MessageRow = {
     const vClearDlState = function () {
       markDlDone(vWrapEl.value);
     };
-    /* W37d: guardar el video — si ya está en RAM (v-dl lo bajó) la
-       descarga es instantánea; si no, pasa por startDownload. */
-    const vDownload = function () {
-      const m = props.row.ref.media;
-      if (!m) return;
-      startDownload(mediaUrl(m.url, true), m.name || 'video', vWrapEl.value,
-        m.mime, 'file');
-    };
     /* clic en el centro del video = play/pausa (como en los players
        comerciales); el botón central usa .stop para no duplicar */
     const vClickCenter = function () {
@@ -1599,13 +1591,6 @@ const MessageRow = {
       const next = afRateV.value === 1 ? 1.5 : (afRateV.value === 1.5 ? 2 : 1);
       afRateV.value = next;
       if (el) el.playbackRate = next;
-    };
-    /* W37d: guardar el audio adjunto (en RAM la descarga es al toque) */
-    const afDl = function () {
-      const m = props.row.ref.media;
-      if (!m) return;
-      startDownload(mediaUrl(m.url, true), m.name || 'audio', null,
-        m.mime, 'file');
     };
     const afMeta = function (e) {
       const d = e.target.duration;
@@ -1767,20 +1752,30 @@ const MessageRow = {
       return 132 - 132 * (up.p || 0);
     };
 
-    /* W15: clic en un archivo adjunto → baja con anillo de progreso y ✕ de
-       cancelar; si ya está en memoria (o en el SW) lo guarda al toque. */
+    /* W59: el único control de descarga de un adjunto. Si ya está en los
+       datos de la app lo abre; si no, lo descarga ahí (nunca a la
+       carpeta pública: eso es "Guardar en el dispositivo" en Ajustes). */
     const dlFile = function (row, ev) {
       if (ev && ev.preventDefault) ev.preventDefault();
-      if (!row || !row.media || !row.media.url) return;
+      const m = row && (row.media || (row.ref && row.ref.media));
+      if (!m || !m.url) return;
+      const kind = row.kind || (row.ref && row.ref.kind);
+      const url = mediaUrl(m.url, true);
+      const key = downloadKey(url);
+      if (key && store.dlSaved[key]) {
+        openAppDownload(key).then(function (ok) {
+          if (!ok) toast(t('El archivo ya no está disponible'), 'err');
+        });
+        return;
+      }
       let frame = ev && ev.currentTarget ? ev.currentTarget : null;
       if (frame && !(frame.classList && frame.classList.contains('mframe')) &&
           frame.closest) frame = frame.closest('.mframe');
-      startDownload(mediaUrl(row.media.url, true), row.media.name || 'archivo', frame,
-        row.media.mime, row.kind);
+      startDownload(url, m.name || 'archivo', frame, m.mime, kind);
     };
 
-    /* W58: estado visible de la descarga en la línea de metadatos:
-       "Descargar · 2,4 MB" o "Guardado · 2,4 MB". Es reactivo a
+    /* W58/W59: estado visible de la descarga en la línea de metadatos:
+       "Descargar · 2,4 MB" o "Descargado · 2,4 MB". Es reactivo a
        store.dlSaved (se hidrata al arrancar y lo actualizan las
        descargas automáticas). */
     const dlSavedSize = function (row) {
@@ -1792,7 +1787,7 @@ const MessageRow = {
       const m = row && row.ref && row.ref.media;
       if (!m) return '';
       const size = m.size ? fmtSize(m.size) : '';
-      const state = dlSavedSize(row) ? t('Guardado') : t('Descargar');
+      const state = dlSavedSize(row) ? t('Descargado') : t('Descargar');
       return state + (size ? ' · ' + size : '');
     };
 
@@ -1998,9 +1993,9 @@ const MessageRow = {
       vPeek, toggleV, vSeekTo, vMute, vFull, vMeta, vTimeUpd, vFs,
       vPlayEv, vPauseEv, vEndEv, vClickCenter,
       /* W37d: volumen con popup, error de mime y descarga del video */
-      vVol, vVolOpen, vSetVol, vToggleVol, vErr, vErrEv, vDownload, vBox,
+      vVol, vVolOpen, vSetVol, vToggleVol, vErr, vErrEv, vBox,
       afEl, afPlaying, afRateV, afCurTxt, afDurTxt, afPct,
-      afToggle, afSeek, afRate, afDl, afMeta, afTimeUpd, afPlayEv, afErrEv,
+      afToggle, afSeek, afRate, afMeta, afTimeUpd, afPlayEv, afErrEv,
       afPauseEv, afEndEv,
       /* W37d: velocidad de la nota de voz */
       aRate, aRateV,
@@ -2031,7 +2026,7 @@ const MessageRow = {
     '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in }" @animationend="animEnd">' +
       /* W29c: columna de avatar en todos los entrantes de grupo; la
          cara (foto/letra) solo donde se ve el nombre del emisor */
-      '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar }" ' +
+      '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
         '<img v-if="row.avatar && row.avatar.url" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
@@ -2179,11 +2174,10 @@ const MessageRow = {
         '<span class="b-media mframe" v-else-if="row.ref.kind === \'image\' && row.ref.media" ' +
           ':class="{ imgbox: imgBox }" :style="imgBox" :data-noring="imgBox ? null : \'1\'" ' +
           'role="button" :title="t(\'Ver con zoom\')" ' +
-          '@click="$emit(\'zoom\', mediaUrl(row.ref.media.url))">' +
+          '@click="$emit(\'zoom\', { url: mediaUrl(row.ref.media.url), ' +
+            'orig: mediaUrl(row.ref.media.url, true), name: row.ref.media.name, ' +
+            'mime: row.ref.media.mime, kind: row.ref.kind })">' +
           '<img class="b-img" v-dl="mediaUrl(row.ref.media.url)" :alt="row.ref.media.name || \'\'" @load="$emit(\'imgload\')">' +
-          '<button class="b-dl-img" type="button" :title="t(\'Descargar\')" ' +
-            '@click.stop="dlFile(row.ref, $event)">' +
-            '<svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</span>' +
         /* W11: video adjunto → player inline (W15: baja con anillo y ✕).
            W29a: si el archivo NO tiene pista de video (vidOk=false tras
@@ -2231,9 +2225,6 @@ const MessageRow = {
               ':title="vVolOpen ? t(\'Cerrar volumen\') : t(\'Volumen\')" @click.stop="vToggleVol">' +
               '<svg class="ic ic-sm"><use :href="vMuted ? \'#i-mute\' : \'#i-vol\'"></use></svg>' +
             '</button>' +
-            /* W37d: guardar el video (si ya está en RAM, al toque) */
-            '<button class="v-btn" type="button" :title="t(\'Descargar\')" ' +
-              '@click.stop="vDownload"><svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
           '</div>' +
           /* W36c: hora y palomitas DENTRO del video (abajo a la derecha) */
           '<div class="b-meta v-meta">' +
@@ -2266,18 +2257,13 @@ const MessageRow = {
           '<span class="au-time">{{ afCurTxt }} / {{ afDurTxt }}</span>' +
           '<button class="au-rate" type="button" :title="t(\'Velocidad\')" ' +
             '@click="afRate">{{ afRateV }}×</button>' +
-          /* W37d: guardar el audio adjunto */
-          '<button class="au-rate" type="button" :title="t(\'Descargar\')" ' +
-            '@click.stop="afDl"><svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</div>' +
         /* W15: el archivo ya no es un <a> nativo: la descarga pasa por
            mediadl.js (anillo de progreso, ✕ de cancelar y reintento). */
-        '<span v-else-if="row.ref.kind === \'file\' && row.ref.media" class="b-file mframe" ' +
-          'role="button" :title="t(\'Descargar\')" @click="dlFile(row.ref, $event)">' +
+        '<span v-else-if="row.ref.kind === \'file\' && row.ref.media" class="b-file mframe">' +
           '<svg class="ic ic-sm"><use href="#i-file"></use></svg>' +
           '<span class="bf-col"><span class="bf-name">{{ row.ref.media.name || t(\'archivo\') }}</span>' +
           '<span class="bf-size">{{ fmtSize(row.ref.media.size) }}</span></span>' +
-          '<svg class="ic ic-sm"><use href="#i-download"></use></svg>' +
         '</span>' +
         /* W8: reproductor propio (el <audio> queda oculto para los tests).
            W15: el audio se baja con anillo (v-dl) y queda listo para sonar. */
@@ -2301,8 +2287,6 @@ const MessageRow = {
           /* W37d: velocidad de la nota de voz (1×/1,5×/2×) */
           '<button class="au-rate" type="button" :title="t(\'Velocidad\')" ' +
             '@click="aRate">{{ aRateV }}×</button>' +
-          '<button class="au-rate" type="button" :title="t(\'Descargar\')" ' +
-            '@click.stop="dlFile(row.ref, $event)"><svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</div>' +
         '<div v-else-if="row.ref.kind === \'voice\'" class="b-voice">' +
           '<svg class="ic ic-sm"><use href="#i-mic"></use></svg> {{ t(\'Nota de voz\') }}' +
@@ -2357,7 +2341,8 @@ const MessageRow = {
         '<div class="b-meta">' +
           /* W58: estado de descarga SIEMPRE visible, con tamaño. */
           '<button v-if="row.ref.media" class="b-dl-state" type="button" ' +
-            ':class="{ saved: !!dlSavedSize(row) }" :title="t(\'Guardar en el dispositivo\')" ' +
+            ':class="{ saved: !!dlSavedSize(row) }" ' +
+            ':title="dlSavedSize(row) ? t(\'Abrir archivo descargado\') : t(\'Descargar a la app\')" ' +
             '@click.stop="dlFile(row, $event)">' +
             '<svg class="ic ic-sm"><use :href="dlSavedSize(row) ? \'#i-check\' : \'#i-download\'"></use></svg>' +
             '<span>{{ dlText(row) }}</span>' +
@@ -2587,7 +2572,7 @@ const NewChatModal = {
         '</div>' +
         '<div class="results">' +
           '<button class="res-item" type="button" v-for="u in results" :key="u.id" @click="pick(u)">' +
-            '<span class="avatar av36">' +
+            '<span class="avatar av36" :class="{ \'has-photo\': !!u.avatar_url }">' +
               '<img v-if="u.avatar_url" :src="mediaUrl(u.avatar_url)" alt="" loading="lazy">' +
               '<span v-else>{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>' +
             '</span>' +
@@ -2999,27 +2984,11 @@ const SettingsModal = {
        blob local no pasa por la red; si el navegador bloquea la pestaña
        nueva se avisa sin abrir nada raro. */
     const dlOpenFile = async function (item) {
-      const blob = await getDownloadBlob(item.key);
-      if (!blob) {
+      const ok = await openAppDownload(item.key);
+      if (!ok) {
         dlMsg.value = t('El archivo ya no está disponible');
         dlLoad();
-        return;
       }
-      const url = URL.createObjectURL(blob);
-      let win = null;
-      try {
-        win = window.open(url, '_blank');
-      } catch (e) { win = null; }
-      if (!win) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.target = '_blank';
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }
-      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
     };
     const dlDelete = function (item) {
       if (!window.confirm(t('¿Eliminar esta descarga guardada?'))) return;
@@ -3292,7 +3261,7 @@ const SettingsModal = {
             <div class="st-title">{{ t('Descargas') }}</div>
             <div class="st-sec">
               <div class="st-h">{{ t('Descargas automáticas') }}</div>
-              <p class="st-hint">{{ t('Elige qué tipos se guardan solos en los datos de la app. No se crea una copia pública hasta que pulses “Guardar en el dispositivo”.') }}</p>
+              <p class="st-hint">{{ t('Wi-Fi: activado por defecto; los archivos se descargan solos a los datos de la app. Datos móviles: desactivado por defecto para no gastar tu plan. Nada se copia a Descargas hasta que pulses “Guardar en el dispositivo”.') }}</p>
               <div class="dl-auto-row" v-for="tp in dlTypes" :key="tp.id">
                 <b class="dl-auto-name">{{ t(tp.label) }}</b>
                 <label class="dl-auto-opt">
@@ -3546,7 +3515,7 @@ const MeProfileModal = {
             </div>
             <div class="pf-idrow">
               <span class="av-wrap pf-avwrap" :class="dotClass(store.user, store.ws === 'on')">
-                <span class="avatar pp-av">
+                <span class="avatar pp-av" :class="{ 'has-photo': !!store.user.avatar_url }">
                   <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">
                   <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
                 </span>
@@ -3633,6 +3602,83 @@ const MeProfileEditModal = {
     });
     const busy = Vue.ref(false);
     const err = Vue.ref('');
+    /* W59: cambio de @usuario con contraseña y espera de 12 horas.
+       El servidor es la autoridad; el reloj local solo muestra el aviso
+       y desactiva el botón. */
+    const UNAME_WAIT = 12 * 60 * 60;
+    const unameOpen = Vue.ref(false);
+    const unameNew = Vue.ref(u.username || '');
+    const unamePw = Vue.ref('');
+    const unameErr = Vue.ref('');
+    const unameBusy = Vue.ref(false);
+    const unameEl = Vue.ref(null);
+    const unameClock = Vue.ref(Date.now());
+    const unameChangedAt = Vue.computed(function () {
+      return Number(store.user && store.user.username_changed_at) || 0;
+    });
+    const unameLocked = Vue.computed(function () {
+      return unameClock.value < unameChangedAt.value * 1000 + UNAME_WAIT * 1000;
+    });
+    const unameLockText = Vue.computed(function () {
+      const secs = Math.max(0,
+        unameChangedAt.value + UNAME_WAIT - Math.floor(unameClock.value / 1000));
+      let h = Math.floor(secs / 3600);
+      let m = Math.ceil((secs % 3600) / 60);
+      if (m >= 60) { h += 1; m = 0; }
+      return t('Podrás cambiarlo en {h} h {m} min.', { h: h, m: m });
+    });
+    let unameTimer = null;
+    Vue.onMounted(function () {
+      unameTimer = setInterval(function () { unameClock.value = Date.now(); }, 30000);
+    });
+    const toggleUname = function () {
+      if (unameLocked.value) return;
+      unameOpen.value = !unameOpen.value;
+      unameErr.value = '';
+      unamePw.value = '';
+      if (unameOpen.value) {
+        unameNew.value = (store.user && store.user.username) || '';
+        Vue.nextTick(function () {
+          if (unameEl.value && unameEl.value.scrollIntoView) {
+            unameEl.value.scrollIntoView({ block: 'nearest' });
+          }
+        });
+      }
+    };
+    const changeUsername = async function () {
+      unameErr.value = '';
+      const val = String(unameNew.value || '').trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_.]{2,19}$/.test(val)) {
+        unameErr.value = t('Usuario: 3-20 caracteres, letras/números/punto/guion bajo, empieza alfanumérico');
+        return;
+      }
+      if (store.user && val === store.user.username) {
+        unameErr.value = t('Ese ya es tu usuario actual');
+        return;
+      }
+      if (!unamePw.value) {
+        unameErr.value = t('Escribe tu contraseña actual');
+        return;
+      }
+      unameBusy.value = true;
+      try {
+        const r = await api('PUT', '/api/auth/username',
+          { username: val, password: unamePw.value }, { retry401: true });
+        if (r.user) {
+          store.user = Object.assign({}, store.user, r.user);
+          session.user = store.user;
+          saveSession();
+        }
+        unamePw.value = '';
+        unameOpen.value = false;
+        unameNew.value = val;
+        toast(t('Usuario actualizado') + ': @' + val, 'ok');
+      } catch (e) {
+        unameErr.value = (e && e.detail) || t('No se pudo cambiar el usuario');
+      } finally {
+        unameBusy.value = false;
+      }
+    };
     /* W27: al elegir foto se abre el editor (encuadre + rotación); el
        archivo y el preview viejos NO cambian hasta APLICAR. */
     const edSrc = Vue.ref('');
@@ -3724,6 +3770,7 @@ const MeProfileEditModal = {
       if (preview.value) URL.revokeObjectURL(preview.value);
       if (edSrc.value) URL.revokeObjectURL(edSrc.value);
       if (bannerPreview.value) URL.revokeObjectURL(bannerPreview.value);
+      if (unameTimer) { clearInterval(unameTimer); unameTimer = null; }
     });
 
     /* Cancelar (o guardar) vuelve a la ficha "Tu perfil". */
@@ -3775,6 +3822,9 @@ const MeProfileEditModal = {
       store, name, bio, statusText, preset, preview, hasPhoto, avatarGone,
       bannerPreview, hasBanner, bannerGone, pickBanner, removeBanner,
       busy, err, pick, removeAvatar, close, save,
+      /* W59: usuario + enfriamiento de 12 h */
+      unameOpen, unameNew, unamePw, unameErr, unameBusy, unameEl,
+      unameLocked, unameLockText, toggleUname, changeUsername,
       /* W27: editor de foto (encuadre + rotación); W27b: recuerda el
          encuadre de la sesión */
       edSrc, edInitial, startEdit, onEdConfirm, onEdCancel,
@@ -3805,6 +3855,26 @@ const MeProfileEditModal = {
                 <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
               </span>
             </div>
+            <!-- W59: la foto va MONTADA sobre la portada, no debajo.
+                 Mientras se recorta se oculta y manda el editor. -->
+            <div class="avatar-pick" v-if="!edSrc">
+              <div class="av-img" :class="{ 'has-photo': !!preview || !!(hasPhoto && store.user && store.user.avatar_url) }">
+                <img v-if="preview" :src="preview" alt="">
+                <img v-else-if="hasPhoto && store.user && store.user.avatar_url"
+                  :src="mediaUrl(store.user.avatar_url)" alt="">
+                <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
+              </div>
+              <label class="av-btn" :title="t('Elegir foto')">
+                <svg class="ic ic-sm"><use href="#i-image"></use></svg>
+                <input type="file" accept="image/*" style="display:none" @change="pick">
+              </label>
+              <button v-if="hasPhoto" type="button" class="av-edit" :title="t('Ajustar foto')" @click="startEdit">
+                <svg class="ic ic-sm"><use href="#i-pencil"></use></svg>
+              </button>
+              <button v-if="hasPhoto" type="button" class="av-clear" @click="removeAvatar" :aria-label="t('Quitar foto')">
+                <svg class="ic ic-sm"><use href="#i-x"></use></svg>
+              </button>
+            </div>
             <div class="pf-edit-banner-actions">
               <label class="btn btn-ghost btn-sm">
                 <svg class="ic ic-sm"><use href="#i-image"></use></svg>
@@ -3817,25 +3887,7 @@ const MeProfileEditModal = {
           </div>
           <!-- W27: con el editor abierto ocupa el centro; al aplicar
                vuelve la ficha con el recorte ya aplicado -->
-          <div class="avatar-pick" v-if="!edSrc">
-            <div class="av-img">
-              <img v-if="preview" :src="preview" alt="">
-              <img v-else-if="hasPhoto && store.user && store.user.avatar_url"
-                :src="mediaUrl(store.user.avatar_url)" alt="">
-              <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
-            </div>
-            <label class="av-btn" :title="t('Elegir foto')">
-              <svg class="ic ic-sm"><use href="#i-image"></use></svg>
-              <input type="file" accept="image/*" style="display:none" @change="pick">
-            </label>
-            <button v-if="hasPhoto" type="button" class="av-edit" :title="t('Ajustar foto')" @click="startEdit">
-              <svg class="ic ic-sm"><use href="#i-pencil"></use></svg>
-            </button>
-            <button v-if="hasPhoto" type="button" class="av-clear" @click="removeAvatar" :aria-label="t('Quitar foto')">
-              <svg class="ic ic-sm"><use href="#i-x"></use></svg>
-            </button>
-          </div>
-          <avatar-editor v-else :src="edSrc" :initial="edInitial"
+          <avatar-editor v-if="edSrc" :src="edSrc" :initial="edInitial"
             @confirm="onEdConfirm" @cancel="onEdCancel"></avatar-editor>
           <template v-if="!edSrc">
             <div class="form-err st-err" v-if="err" role="alert">
@@ -3844,6 +3896,47 @@ const MeProfileEditModal = {
             <div class="field">
               <label>{{ t('Nombre') }}</label>
               <input class="input" v-model.trim="name" maxlength="50" :placeholder="t('Tu nombre')">
+            </div>
+            <!-- W59: el @usuario se cambia aparte, con advertencia y
+                 contraseña. El botón Guardar de abajo NO lo toca. -->
+            <div class="field uname-field">
+              <label>{{ t('Usuario') }}</label>
+              <div class="uname-current">
+                <span class="uname-at">@</span>
+                <b>{{ store.user && store.user.username }}</b>
+                <button class="btn btn-ghost btn-sm" type="button" @click="toggleUname"
+                  :disabled="unameLocked">{{ unameOpen ? t('Cancelar') : t('Cambiar usuario') }}</button>
+              </div>
+              <p class="st-hint">{{ t('Sirve para iniciar sesión y para que te mencionen con @.') }}</p>
+              <p class="st-hint uname-wait" v-if="unameLocked">
+                <svg class="ic ic-sm"><use href="#i-clock"></use></svg>
+                <span>{{ unameLockText }}</span>
+              </p>
+              <div class="uname-edit" v-if="unameOpen" ref="unameEl">
+                <div class="uname-warn">
+                  <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
+                  <span>{{ t('Solo puedes cambiarlo una vez cada 12 horas. Las menciones con @ a tu usuario anterior dejarán de funcionar.') }}</span>
+                </div>
+                <div class="field">
+                  <label>{{ t('Nuevo usuario') }}</label>
+                  <input class="input" v-model.trim="unameNew" maxlength="20"
+                    autocomplete="username" spellcheck="false">
+                </div>
+                <p class="st-hint">{{ t('3-20 caracteres: minúsculas, números, punto y guion bajo; empieza con letra o número.') }}</p>
+                <div class="field">
+                  <label>{{ t('Contraseña actual') }}</label>
+                  <input class="input" type="password" v-model="unamePw"
+                    autocomplete="current-password" :placeholder="t('Para confirmar el cambio')">
+                </div>
+                <div class="form-err st-err" v-if="unameErr" role="alert">
+                  <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
+                  <span>{{ unameErr }}</span>
+                </div>
+                <button class="btn btn-full" type="button" @click="changeUsername"
+                  :disabled="unameBusy || !unameNew || !unamePw">
+                  {{ unameBusy ? t('Cambiando…') : t('Confirmar cambio de usuario') }}
+                </button>
+              </div>
             </div>
             <div class="field">
               <label>{{ t('Estado') }}</label>
@@ -4002,7 +4095,7 @@ const ReadsBox = {
         <div class="pp-loading" v-else-if="!store.readsBox.rows || !store.readsBox.rows.length">{{ t('Nadie lo ha leído todavía') }}</div>
         <ul class="reads-list" v-else>
           <li class="mi-row" v-for="u in store.readsBox.rows" :key="u.id">
-            <span class="avatar av36">
+            <span class="avatar av36" :class="{ 'has-photo': !!u.avatar_url }">
               <img v-if="u.avatar_url" :src="mediaUrl(u.avatar_url)" alt="" loading="lazy">
               <span v-else>{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>
             </span>
@@ -4252,17 +4345,17 @@ const ProfilePanel = {
         <div class="pp-loading" v-if="store.profile.loading">{{ t('Cargando perfil…') }}</div>
         <div class="pp-loading" v-else-if="store.profile.error">{{ t(store.profile.error) }}</div>
         <template v-else-if="store.profile.user">
-          <div class="pf-banner" :class="{ 'is-empty': !store.profile.user.banner_url }">
-            <img v-if="store.profile.user.banner_url"
-              :src="mediaUrl(store.profile.user.banner_url)" alt="" loading="lazy">
-            <span v-else class="pf-banner-art" aria-hidden="true">
-              <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
-            </span>
-          </div>
           <div class="pp-body pf-body">
+            <div class="pf-banner" :class="{ 'is-empty': !store.profile.user.banner_url }">
+              <img v-if="store.profile.user.banner_url"
+                :src="mediaUrl(store.profile.user.banner_url)" alt="" loading="lazy">
+              <span v-else class="pf-banner-art" aria-hidden="true">
+                <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
+              </span>
+            </div>
             <div class="pf-idrow">
               <span class="av-wrap pf-avwrap" :class="dotClass(store.profile.user)">
-                <span class="avatar pp-av">
+                <span class="avatar pp-av" :class="{ 'has-photo': !!store.profile.user.avatar_url }">
                   <img v-if="store.profile.user.avatar_url"
                     :src="mediaUrl(store.profile.user.avatar_url)" alt="" loading="lazy">
                   <span v-else>{{ (store.profile.user.display_name || store.profile.user.username).charAt(0).toUpperCase() }}</span>
@@ -4670,16 +4763,16 @@ const ChatInfoPanel = {
       </header>
 
       <template v-if="chat.type === 'dm'">
-        <div class="pf-banner pf-banner-sm" v-if="peer" :class="{ 'is-empty': !peer.banner_url }">
-          <img v-if="peer.banner_url" :src="mediaUrl(peer.banner_url)" alt="" loading="lazy">
-          <span v-else class="pf-banner-art" aria-hidden="true">
-            <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
-          </span>
-        </div>
         <div class="pp-body pf-body" v-if="peer">
+          <div class="pf-banner pf-banner-sm" :class="{ 'is-empty': !peer.banner_url }">
+            <img v-if="peer.banner_url" :src="mediaUrl(peer.banner_url)" alt="" loading="lazy">
+            <span v-else class="pf-banner-art" aria-hidden="true">
+              <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
+            </span>
+          </div>
           <div class="pf-idrow">
             <span class="av-wrap pf-avwrap" :class="dotClass(peer)">
-              <span class="avatar pp-av">
+              <span class="avatar pp-av" :class="{ 'has-photo': !!peer.avatar_url }">
                 <img v-if="peer.avatar_url" :src="mediaUrl(peer.avatar_url)" alt="" loading="lazy">
                 <span v-else>{{ (peer.display_name || peer.username).charAt(0).toUpperCase() }}</span>
               </span>
@@ -4732,7 +4825,7 @@ const ChatInfoPanel = {
             @confirm="onGrpPhoto" @cancel="onGrpPhotoCancel"></avatar-editor>
           <div class="grp-av" v-else-if="chat.type === 'group'">
             <span class="av-wrap">
-              <span class="avatar av72 grp-av-img">
+              <span class="avatar av72 grp-av-img" :class="{ 'has-photo': !!grpAvatar }">
                 <img v-if="grpAvatar" :src="grpAvatar" alt="" loading="lazy">
                 <span v-else>{{ titleOf(chat).charAt(0).toUpperCase() }}</span>
               </span>
@@ -4752,7 +4845,7 @@ const ChatInfoPanel = {
             <div class="mi-sec" v-if="sec.show"><span>{{ t(sec.label) }}</span></div>
             <div class="mi-row" role="button" tabindex="0" v-for="m in sec.ms" :key="m.id" @click="openMember(m)" @keydown.enter.prevent="openMember(m)" @keydown.space.prevent="openMember(m)">
               <span class="av-wrap" :class="dotClass(m)">
-                <span class="avatar av36">
+                <span class="avatar av36" :class="{ 'has-photo': !!m.avatar_url }">
                   <img v-if="m.avatar_url" :src="mediaUrl(m.avatar_url)" alt="" loading="lazy">
                   <span v-else>{{ (m.display_name || m.username).charAt(0).toUpperCase() }}</span>
                 </span>
@@ -5152,7 +5245,7 @@ const PeoplePanel = {
         <div class="ppl-list" v-if="q.trim().length >= 2">
           <div class="ppl-row" v-for="u in results" :key="u.id">
             <span class="av-wrap" :class="dotClass(u)">
-              <span class="avatar av36">
+              <span class="avatar av36" :class="{ 'has-photo': !!u.avatar_url }">
                 <img v-if="u.avatar_url" :src="mediaUrl(u.avatar_url)" alt="" loading="lazy">
                 <span v-else>{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>
               </span>
@@ -5177,7 +5270,7 @@ const PeoplePanel = {
           <button class="ppl-row" type="button" v-for="u in activeOnline" :key="u.id"
             @click="openFriend(u)">
             <span class="av-wrap" :class="dotClass(u)">
-              <span class="avatar av36">
+              <span class="avatar av36" :class="{ 'has-photo': !!u.avatar_url }">
                 <img v-if="u.avatar_url" :src="mediaUrl(u.avatar_url)" alt="" loading="lazy">
                 <span v-else>{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>
               </span>
@@ -5212,7 +5305,7 @@ const PeoplePanel = {
             <div class="mi-sec mi-sec-always"><span>{{ t('Enviados') }}</span></div>
             <div class="ppl-row" v-for="r in sentF" :key="'s' + r.id">
               <span class="av-wrap" :class="dotClass(r.user)">
-                <span class="avatar av36">
+                <span class="avatar av36" :class="{ 'has-photo': !!r.user.avatar_url }">
                   <img v-if="r.user.avatar_url" :src="mediaUrl(r.user.avatar_url)" alt="" loading="lazy">
                   <span v-else>{{ (r.user.display_name || r.user.username).charAt(0).toUpperCase() }}</span>
                 </span>
@@ -5231,7 +5324,7 @@ const PeoplePanel = {
             <div class="mi-sec mi-sec-always"><span>{{ t('Recibidas') }}</span></div>
             <div class="ppl-row" v-for="r in recF" :key="'r' + r.id">
               <span class="av-wrap" :class="dotClass(r.user)">
-                <span class="avatar av36">
+                <span class="avatar av36" :class="{ 'has-photo': !!r.user.avatar_url }">
                   <img v-if="r.user.avatar_url" :src="mediaUrl(r.user.avatar_url)" alt="" loading="lazy">
                   <span v-else>{{ (r.user.display_name || r.user.username).charAt(0).toUpperCase() }}</span>
                 </span>
@@ -7041,9 +7134,27 @@ export const ChatShell = {
       lbTx.value = 0;
       lbTy.value = 0;
     };
-    const openLb = function (url) {
-      store.lb = { url: url };
+    const openLb = function (v) {
+      /* W59: el visor puede recibir solo la URL (modal de medios) o un
+         objeto con la URL original para descargar a los datos de la app
+         aunque la vista esté usando un blob en memoria. */
+      if (v && typeof v === 'object') store.lb = v;
+      else store.lb = { url: v, orig: v };
       lbReset();
+    };
+    const lbDl = function (ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      const v = lb.value;
+      if (!v) return;
+      const orig = v.orig || v.url;
+      const key = downloadKey(orig);
+      if (key && store.dlSaved[key]) {
+        openAppDownload(key).then(function (ok) {
+          if (!ok) toast(t('El archivo ya no está disponible'), 'err');
+        });
+        return;
+      }
+      startDownload(orig, v.name || 'imagen', null, v.mime || '', v.kind || 'image');
     };
     const closeLb = function () {
       if (lbMoveOff) { lbMoveOff(); lbMoveOff = null; }
@@ -7341,7 +7452,7 @@ export const ChatShell = {
       /* W17: autocompletado :código: */
       acEl, acList, acIdx, pickAc, updAc,
       /* W8 */
-      lb, lbStyle, openLb, closeLb, lbZoom, lbWheel, lbDown,
+      lb, lbStyle, openLb, closeLb, lbZoom, lbWheel, lbDown, lbDl,
       lbTouchStart, lbTouchMove, lbTouchEnd,   /* W54c: pinza y arrastre */
       lbScale,   // W22: la ayuda (v-if) se va cuando hay zoom
       onSaveEdit,
@@ -7373,7 +7484,7 @@ export const ChatShell = {
              oculta para dejarle el lugar a la barra inferior). */
           '<button class="icon-btn mobile-me" type="button" :title="t(\'Tu perfil\')" ' +
             '@click="store.meProfileOpen = true">' +
-            '<span class="avatar av30">' +
+            '<span class="avatar av30" :class="{ \'has-photo\': !!(store.user && store.user.avatar_url) }">' +
               '<img v-if="store.user && store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">' +
               '<span v-else>{{ store.user ? (store.user.display_name || store.user.username).charAt(0).toUpperCase() : \'?\' }}</span>' +
             '</span>' +
@@ -7409,7 +7520,7 @@ export const ChatShell = {
             ':class="{ active: c.id === store.activeChatId }" @click="open(c.id)" ' +
             '@contextmenu.prevent="chatMenu($event, c)">' +
             '<span class="av-wrap" :class="dotClass(c.type === \'dm\' ? c.title : null)">' +
-              '<span class="avatar">' +
+              '<span class="avatar" :class="{ \'has-photo\': !!avatarOf(c) }">' +
                 '<img v-if="avatarOf(c)" :src="avatarOf(c)" alt="" loading="lazy">' +
                 '<span v-else>{{ initialsOf(c) }}</span>' +
               '</span>' +
@@ -7448,7 +7559,7 @@ export const ChatShell = {
         '<div class="user-panel">' +
           '<button class="up-main" type="button" :title="t(\'Tu perfil\')" @click="store.meProfileOpen = true">' +
             '<span class="av-wrap" :class="myDot">' +
-              '<span class="avatar av36">' +
+              '<span class="avatar av36" :class="{ \'has-photo\': !!(store.user && store.user.avatar_url) }">' +
                 '<img v-if="store.user && store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">' +
                 '<span v-else>{{ store.user ? (store.user.display_name || store.user.username).charAt(0).toUpperCase() : \'?\' }}</span>' +
               '</span>' +
@@ -7481,7 +7592,7 @@ export const ChatShell = {
               ':title="t(\'Mensajes sin leer en otros chats\')">{{ backUnread > 99 ? \'99+\' : backUnread }}</span>' +
           '</button>' +
           '<span class="av-wrap" :class="headDotClass" :title="headTitle" @click="onHeadClick">' +
-            '<span class="avatar av36">' +
+            '<span class="avatar av36" :class="{ \'has-photo\': !!avatarOf(activeChat) }">' +
               '<img v-if="avatarOf(activeChat)" :src="avatarOf(activeChat)" alt="">' +
               '<span v-else>{{ initialsOf(activeChat) }}</span>' +
             '</span>' +
@@ -7564,12 +7675,15 @@ export const ChatShell = {
         /* W44: botón "ir hacia abajo" — aparece solo cuando el chat no
            está pegado al final (stick=false); el clic salta al final
            (scrollBottom) y onScroll lo esconde al llegar. */
-        '<button class="jump-bottom" type="button" v-if="!stick" ' +
-          ':title="t(\'Ir hacia abajo\')" @click="scrollBottom">' +
-          '<svg class="ic"><use href="#i-chevron-down"></use></svg>' +
-        '</button>' +
-
         '<footer class="composer">' +
+          /* W59: el botón vive DENTRO del compositor y se ancla a su
+             borde superior. Así nunca se monta sobre la barra inferior
+             ni sobre el campo de texto, aunque haya respuesta, cifrado
+             pendiente o archivo adjunto (el compositor crece). */
+          '<button class="jump-bottom" type="button" v-if="!stick" ' +
+            ':title="t(\'Ir hacia abajo\')" @click="scrollBottom">' +
+            '<svg class="ic"><use href="#i-chevron-down"></use></svg>' +
+          '</button>' +
           '<div class="reply-bar" v-if="replyTo">' +
             '<svg class="ic ic-sm rb-ic"><use href="#i-reply"></use></svg>' +
             '<span class="rb-col">' +
@@ -7818,7 +7932,7 @@ export const ChatShell = {
           '<div class="results fwd-list">' +
             '<button class="res-item" type="button" v-for="c in fwdChats" :key="c.id" ' +
               ':disabled="fwdBusy" @click="doForward(c.id)">' +
-              '<span class="avatar av36">' +
+              '<span class="avatar av36" :class="{ \'has-photo\': !!avatarOf(c) }">' +
                 '<img v-if="avatarOf(c)" :src="avatarOf(c)" alt="" loading="lazy">' +
                 '<span v-else>{{ initialsOf(c) }}</span>' +
               '</span>' +
@@ -7901,9 +8015,9 @@ export const ChatShell = {
         '<button class="icon-btn lb-close" type="button" :title="t(\'Cerrar (Esc)\')" @click="closeLb">' +
           '<svg class="ic"><use href="#i-x"></use></svg>' +
         '</button>' +
-        '<a class="icon-btn lb-dl" :href="lb.url" download :title="t(\'Descargar\')">' +
+        '<button class="icon-btn lb-dl" type="button" :title="t(\'Descargar a la app\')" @click="lbDl">' +
           '<svg class="ic"><use href="#i-download"></use></svg>' +
-        '</a>' +
+        '</button>' +
         '<img class="lb-img" :src="lb.url" :style="lbStyle" ' +
           '@click="lbZoom" @wheel.prevent="lbWheel" @mousedown.prevent="lbDown" ' +
           '@touchstart="lbTouchStart" @touchmove.prevent="lbTouchMove" ' +
@@ -7924,7 +8038,7 @@ export const ChatShell = {
         ':style="store.ctx.sheet ? {} : ' +
           '{ left: store.ctx.x + \'px\', top: store.ctx.y + \'px\' }">' +
         '<div class="ctx-head" v-if="store.ctx.sheet && store.ctx.head">' +
-          '<span class="avatar av36">' +
+          '<span class="avatar av36" :class="{ \'has-photo\': !!store.ctx.head.avatar }">' +
             '<img v-if="store.ctx.head.avatar" :src="store.ctx.head.avatar" alt="">' +
             '<span v-else>{{ store.ctx.head.ini }}</span>' +
           '</span>' +

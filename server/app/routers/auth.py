@@ -32,10 +32,15 @@ from ..schemas import (
     RegisterIn,
     ResendIn,
     ResetIn,
+    UsernameIn,
     VerifyIn,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# W59: el usuario es también el identificador de acceso. Se puede cambiar,
+# pero solo una vez cada 12 horas y confirmando la contraseña actual.
+USERNAME_COOLDOWN = 12 * 60 * 60
 
 # Rate limit simple en memoria: clave -> (ventana_inicio, contador)
 _rate: dict[str, tuple[int, int]] = {}
@@ -82,6 +87,7 @@ def _public_user(u: dict[str, Any]) -> dict[str, Any]:
         "status_preset": u.get("status_preset", ""),
         "avatar_url": avatar,
         "banner_url": banner,
+        "username_changed_at": int(u.get("username_changed_at") or 0),
         "email_verified": bool(u["email_verified"]),
     }
 
@@ -92,6 +98,7 @@ def _peer_user(u: dict[str, Any]) -> dict[str, Any]:
     out = _public_user(u)
     out.pop("email", None)
     out.pop("email_verified", None)
+    out.pop("username_changed_at", None)
     return out
 
 
@@ -323,6 +330,53 @@ def update_profile(body: ProfileIn, user: dict = Depends(pending_user)) -> dict[
             _presence_to_peers(user["id"], False)
         elif old_preset == "invisible" and hub.is_online(user["id"]):
             _presence_to_peers(user["id"], True)
+    return {"user": _public_user(fresh)}
+
+
+@router.put("/username")
+def change_username(
+    body: UsernameIn, user: dict = Depends(current_user)
+) -> dict[str, Any]:
+    """W59: cambia el nombre de usuario con contraseña y enfriamiento.
+
+    El usuario es el identificador de acceso y la base de las menciones
+    (@usuario). Por eso:
+      - se exige la contraseña actual, igual que para el correo;
+      - solo se permite un cambio cada 12 horas;
+      - no se toca el id ni las claves E2E (los chats siguen intactos).
+    """
+    _rate_limit(f"uname:{user['id']}", max_hits=10)
+    new_name = body.username
+    if new_name == user["username"]:
+        raise HTTPException(400, "Ese ya es tu usuario actual")
+    if not security.verify_password(body.password, user["password_hash"]):
+        raise HTTPException(401, "La contraseña actual no coincide")
+
+    now = int(time.time())
+    last = int(user.get("username_changed_at") or 0)
+    wait = last + USERNAME_COOLDOWN - now
+    if wait > 0:
+        hours = wait // 3600
+        minutes = (wait % 3600 + 59) // 60
+        raise HTTPException(
+            429, f"Podrás cambiar tu usuario en {hours} h {minutes} min"
+        )
+
+    other = _get_user_by("username", new_name)
+    if other and other["id"] != user["id"]:
+        raise HTTPException(409, "Ese usuario ya está en uso")
+    try:
+        db.execute(
+            "UPDATE users SET username = ?, username_changed_at = ? WHERE id = ?",
+            (new_name, now, user["id"]),
+        )
+    except Exception:
+        # Carrera con otro registro/cambio: el UNIQUE COLLATE NOCASE manda.
+        raise HTTPException(409, "Ese usuario ya está en uso")
+
+    fresh = _get_user_by("id", str(user["id"]))
+    # Los contactos ven el @nuevo al instante (lista, miembros y perfiles).
+    hub.emit_to_peers(user["id"], {"type": "profile", "user": _peer_user(fresh)})
     return {"user": _public_user(fresh)}
 
 

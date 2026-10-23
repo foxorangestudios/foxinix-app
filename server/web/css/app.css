@@ -363,6 +363,9 @@ textarea.input { resize: vertical; min-height: 74px; }
   overflow: hidden;
   border: 1px solid var(--border);
 }
+/* W59: foto transparente sin fondo; el borde fino se mantiene para que
+   el círculo se lea sobre la portada. */
+.avatar-pick .av-img.has-photo { background: transparent; }
 .avatar-pick .av-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avatar-pick .av-img .fox { width: 74px; height: 74px; }
 .avatar-pick .av-btn {
@@ -846,6 +849,11 @@ html.native-bg *::after {
   flex: none;
   user-select: none;
 }
+/* W59: si hay foto, el fondo del contenedor desaparece. Así un PNG con
+   transparencia muestra el fondo real (portada, chat o panel), no un
+   círculo de color. Las iniciales conservan el fondo porque no llevan
+   esta clase. */
+.avatar.has-photo { background: transparent; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avatar.av36 { width: 36px; height: 36px; font-size: 14.5px; }
 
@@ -982,6 +990,7 @@ html.native-bg *::after {
   overflow: hidden;
 }
 .msg-av.is-av { background: var(--panel2); color: var(--t2); }
+.msg-av.is-av.has-photo { background: transparent; }
 .msg-av img { width: 100%; height: 100%; object-fit: cover; }
 .msg-av i { font-style: normal; line-height: 1; font-size: 11px; font-weight: 700; }
 /* W29c: fila de "escribiendo…" con nombre (+ avatares apilados) */
@@ -1104,25 +1113,6 @@ html.native-bg *::after {
 }
 
 .b-media { display: block; }
-/* W57: acceso directo a guardar la imagen (también en mensajes propios);
-   el clic no abre el zoom. */
-.b-dl-img {
-  position: absolute;
-  top: 8px; right: 8px;
-  z-index: 3;
-  width: 30px; height: 30px;
-  border: 0;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, .58);
-  color: #fff;
-  cursor: pointer;
-  opacity: .82;
-  transition: opacity .12s, transform .12s;
-}
-.b-dl-img:hover { opacity: 1; transform: scale(1.08); }
 .b-img {
   display: block;
   /* W22: min() evita que la imagen se salga de la burbuja en celular
@@ -1168,9 +1158,7 @@ html.native-bg *::after {
   margin: 2px 0;
   color: inherit;
   text-decoration: none;
-  transition: background .15s;
 }
-.b-file:hover { background: rgba(0, 0, 0, .22); }
 .bf-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .bf-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bf-size { font-size: 11.5px; color: var(--t2); }
@@ -2264,7 +2252,8 @@ button.react-chip.mine i { color: var(--t0); }
 .jump-bottom {
   position: absolute;
   right: 18px;
-  bottom: 66px;
+  bottom: 100%;
+  margin-bottom: 10px;
   width: 36px;
   height: 36px;
   display: inline-flex;
@@ -4051,7 +4040,7 @@ body { font-size: calc(15px * var(--fs)); }
   z-index: 2;
   padding: 0 2px;
 }
-.pf-avwrap { margin-top: -48px; margin-left: 2px; flex: none; }
+.pf-avwrap { margin-top: -48px; margin-left: 2px; flex: none; position: relative; z-index: 3; }
 .pf-idcol {
   flex: 1 1 120px;
   min-width: 0;
@@ -4181,9 +4170,19 @@ body { font-size: calc(15px * var(--fs)); }
 .pf-bio-wrap .pp-bio { margin-top: 0; max-width: none; }
 .pf-rows { margin-top: 10px; }
 .pf-body { padding-top: 0; }
-
+/* W59: la portada va DENTRO del área con scroll. Antes estaba fuera y
+   el overflow del panel recortaba la mitad superior del avatar, que
+   parecía quedar debajo de la portada. */
+.pp-body > .pf-banner {
+  margin: 0 -16px;
+  width: calc(100% + 32px);
+}
 /* La ficha del panel derecho es más estrecha: el estado va debajo. */
 .profile-panel .pf-body { padding: 0 14px 8px; text-align: left; }
+.profile-panel .pp-body > .pf-banner {
+  margin: 0 -14px;
+  width: calc(100% + 28px);
+}
 .profile-panel .pf-idrow { padding-top: 0; }
 .profile-panel .pf-avwrap { margin-top: -36px; }
 .profile-panel .avatar.pp-av { width: 72px; height: 72px; font-size: 26px; }
@@ -4197,7 +4196,7 @@ body { font-size: calc(15px * var(--fs)); }
 .profile-panel .pf-status-wrap { max-width: none; }
 
 /* Editor de portada */
-.pf-edit-banner { margin: 2px 0 12px; }
+.pf-edit-banner { position: relative; margin: 2px 0 12px; }
 .pf-edit-banner-img {
   position: relative;
   height: 96px;
@@ -4205,14 +4204,70 @@ body { font-size: calc(15px * var(--fs)); }
   overflow: hidden;
   background: var(--panel2);
   border: 1px solid var(--border);
+  /* W59: deja media foto por encima de la portada. */
+  margin: 0 0 -54px;
 }
 .pf-edit-banner-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pf-edit-banner-img.is-empty {
   background: linear-gradient(135deg, var(--accent-d), var(--panel2) 60%, var(--panel));
 }
-.pf-edit-banner-actions { display: flex; flex-wrap: wrap; margin-top: 7px; }
+.pf-edit-banner .avatar-pick {
+  margin: 0 auto;
+  position: relative;
+  z-index: 3;
+}
+.pf-edit-banner-actions { display: flex; flex-wrap: wrap; margin-top: 10px; }
 .pf-edit-banner-actions .btn { margin: 0 6px 4px 0; }
 .pf-edit-banner-actions .ic { margin-right: 5px; }
+
+/* W59: cambio de @usuario (aviso de 12 h + contraseña) */
+.uname-field { text-align: left; }
+.uname-current {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel2);
+}
+.uname-at { color: var(--t2); font-weight: 600; }
+.uname-current b {
+  flex: 1;
+  min-width: 0;
+  margin-left: 1px;
+  color: var(--t0);
+  font-size: 14px;
+  word-break: break-all;
+}
+.uname-current .btn { margin-left: 8px; flex: none; }
+.uname-wait {
+  display: flex;
+  align-items: flex-start;
+  margin: 6px 0 2px;
+  color: var(--st-busy);
+}
+.uname-wait .ic { flex: none; margin: 2px 5px 0 0; }
+.uname-edit {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+.uname-edit .field { text-align: left; }
+.uname-warn {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--err);
+  border-radius: 0 7px 7px 0;
+  background: var(--err-bg);
+  color: var(--t1);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.uname-warn .ic { flex: none; margin: 1px 7px 0 0; color: var(--err); }
+.uname-edit .btn-full { margin-top: 4px; }
 
 /* ---- W27b: móvil — Personas a pantalla completa con botón de volver
    (la entrada es la opción del sidebar, visible en todas las
@@ -4731,8 +4786,10 @@ body { font-size: calc(15px * var(--fs)); }
 .b-video.vhide .v-center,
 .b-video.vhide .v-bar,
 .b-video.vhide .v-meta { opacity: 0; pointer-events: none; }
-/* con video, la hora/palomitas de fuera NO se duplican (viven dentro) */
-.bubble.vid > .b-meta { display: none; }
+/* con video, la hora/palomitas de fuera NO se duplican (viven dentro);
+   el control de descarga (b-dl-state) SÍ queda visible debajo. */
+.bubble.vid > .b-meta > .b-time,
+.bubble.vid > .b-meta > .tick { display: none; }
 /* W43: en pantalla completa el marco ocupa TODA la pantalla y el video
    se ajusta a ella (object-fit: contain, sin redondeo). El marco es
    position:fixed (UA o esta regla) y las medidas son explícitas para
@@ -5115,6 +5172,15 @@ body { font-size: calc(15px * var(--fs)); }
   }
   .app-shell.show-chat .mobile-tabs { display: none; }
 
+  /* W59: avisos y panel de llamada por encima de la barra inferior y
+     del área de gestos de Android; nunca dentro de ella. */
+  .toasts { bottom: calc(76px + var(--sab, 0px)); }
+  .callbox {
+    right: 12px;
+    bottom: calc(76px + var(--sab, 0px));
+    max-width: calc(100vw - 24px);
+  }
+
   /* Personas con barra inferior: que el final de la lista no quede
      debajo de la barra. */
   .app-shell.show-people .people-pane {
@@ -5267,7 +5333,7 @@ body { font-size: calc(15px * var(--fs)); }
   .pf-banner { height: 112px; }
   .pf-banner-art { width: 104px; height: 104px; }
   .pf-edit-banner-img { height: 86px; }
-  .perm-gate { padding: 12px; }
+  .perm-gate { padding: 12px 12px calc(12px + var(--sab, 0px)); }
   .perm-card { padding: 22px 18px 18px; max-height: calc(100vh - 24px); }
   .perm-icon { width: 78px; height: 78px; margin-bottom: 13px; }
   .perm-icon .ic { width: 38px; height: 38px; }

@@ -16,7 +16,7 @@ import { t } from './i18n.js';
 import { toast } from './store.js';
 import {
   getDownloadBlob, saveDownload, requestPersistence,
-  saveBlobToDevice, fetchBlob,
+  fetchBlob,
   dlCategory, dlTypeInfo,
 } from './downloads.js';
 
@@ -457,26 +457,9 @@ export const dlDirective = {
   },
 };
 
-/* W58: guarda una copia pública en el dispositivo. La copia de la app
-   ya está hecha; si Android necesita el permiso de almacenamiento,
-   downloads.js lo pide por el flujo de permisos y reintenta. */
-function exportToDevice(blob, filename, mime, doneMsg) {
-  return saveBlobToDevice(blob, filename, mime).then(function (r) {
-    if (r && r.ok) {
-      toast(r.native ? t('Guardado en Descargas/Foxinix') : doneMsg, 'ok');
-    } else if (r && r.permission) {
-      toast(t('Permiso de almacenamiento necesario para guardar en el dispositivo'), 'err');
-    } else if (!(r && r.error === 'missing')) {
-      toast(t('No se pudo guardar en el dispositivo'), 'err');
-    }
-    return r;
-  }).catch(function () {
-    toast(t('No se pudo guardar en el dispositivo'), 'err');
-  });
-}
-
-/* Descarga manual: guarda en los datos de la app y, además, crea la
-   copia pública en el dispositivo (esa es la acción del botón). */
+/* W59: descarga manual a los datos de la app. NO crea una copia pública
+   en Descargas/Foxinix: eso solo lo hace el botón explícito "Guardar en
+   el dispositivo" de Ajustes → Descargas. */
 export function startDownload(url, filename, frame, mime, kind) {
   if (!url) return;
   const type = dlCategory(kind, mime, filename);
@@ -484,45 +467,47 @@ export function startDownload(url, filename, frame, mime, kind) {
   const label = t(info.label);
   const doneMsg = t(info.done);
   const startMsg = t('Descargando {type}...', { type: label });
-  if (url.indexOf('blob:') === 0) {
-    fetchBlob(url).then(function (blob) {
-      exportToDevice(blob, filename, mime, doneMsg);
-    }).catch(function () {
+
+  const saveOne = function (blob) {
+    if (!blob) {
       toast(t('No se pudo descargar el archivo'), 'err');
-    });
-    return;
-  }
-
-  const fromBlob = function (blob) {
-    requestPersistence();
-    saveDownload(url, filename, blob, type, false).catch(function () {});
-    return exportToDevice(blob, filename, mime, doneMsg);
-  };
-
-  const download = function () {
-    requestPersistence();
-    toast(startMsg, 'info');
-    if (frame && frame.appendChild) {
-      runDl(url, frame, function (obj, blob) {
-        fromBlob(blob);
-      }, true);
-      return;
+      return Promise.resolve(null);
     }
-    /* Sin reproductor visible: XHR silencioso. Nunca window.open: la
-       descarga no debe abrir una pestaña nueva. */
-    fetchBlob(url).then(fromBlob).catch(function () {
-      toast(t('No se pudo descargar el archivo'), 'err');
+    requestPersistence();
+    return saveDownload(url, filename, blob, type, false).then(function (meta) {
+      if (meta) toast(doneMsg, 'ok');
+      else toast(t('No se pudo guardar en la app'), 'err');
+      return meta;
+    }).catch(function () {
+      toast(t('No se pudo guardar en la app'), 'err');
+      return null;
     });
   };
 
-  getDownloadBlob(url).then(function (blob) {
-    if (blob) {
-      requestPersistence();
-      exportToDevice(blob, filename, mime, doneMsg);
+  /* Si ya está en los datos de la app no se vuelve a bajar ni se
+     exporta nada. El botón del mensaje, cuando está guardado, abre el
+     archivo (openAppDownload) en vez de llamar aquí. */
+  getDownloadBlob(url).then(function (saved) {
+    if (saved) {
+      toast(t('Ya está descargado en la app'), 'info');
       return;
     }
     const raw = getBlob(url);
-    if (raw) { fromBlob(raw); return; }
-    download();
-  }).catch(function () { download(); });
+    if (raw) { saveOne(raw); return; }
+    if (frame && frame.appendChild) {
+      toast(startMsg, 'info');
+      runDl(url, frame, function (obj, blob) {
+        saveOne(blob);
+      }, true);
+      return;
+    }
+    /* Sin reproductor visible: XHR silencioso. Nunca window.open: una
+       descarga no debe abrir una pestaña nueva. */
+    toast(startMsg, 'info');
+    fetchBlob(url).then(saveOne).catch(function () {
+      toast(t('No se pudo descargar el archivo'), 'err');
+    });
+  }).catch(function () {
+    toast(t('No se pudo descargar el archivo'), 'err');
+  });
 }

@@ -412,12 +412,33 @@ export function toast(msg, kind = 'info') {
 /* ---------- tema ---------- */
 /* data-theme siempre está (html + script pre-paint); acá solo damos vuelta
    y persistimos — lo aplica el CSS sin parpadeo. */
+/* W59: iconos de las barras de Android. En tema claro se piden oscuros;
+   en oscuro, claros. También sincroniza <meta name="theme-color"> para
+   la PWA y el navegador. Si el APK es viejo y no tiene el método, no
+   pasa nada. */
+function syncNativeTheme() {
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const header = String(cs.getPropertyValue('--header') || '').trim();
+    const color = header || (store.theme === 'light' ? '#f2f3f5' : '#2b2d31');
+    const metas = document.querySelectorAll('meta[name="theme-color"]');
+    for (let i = 0; i < metas.length; i++) metas[i].setAttribute('content', color);
+  } catch (e) {}
+  try {
+    const a = window.FoxinixAndroid;
+    if (a && typeof a.setSystemBars === 'function') {
+      a.setSystemBars(store.theme === 'light');
+    }
+  } catch (e) {}
+}
+
 export function setTheme(mode) {
   if (mode !== 'dark' && mode !== 'light') return;
   document.documentElement.setAttribute('data-theme', mode);
   store.theme = mode;
   try { localStorage.setItem('fm.theme', mode); } catch (e) {}
   updateMetaContrast();
+  syncNativeTheme();
 }
 
 export function toggleTheme() {
@@ -472,6 +493,9 @@ export function updateMetaContrast() {
 }
 /* El pre-paint de index.html ya aplicó tema y acento: afinar al cargar. */
 updateMetaContrast();
+syncNativeTheme();
+if (window.addEventListener) window.addEventListener('load', syncNativeTheme);
+setTimeout(syncNativeTheme, 0);
 
 /* '' = automático (el color del tema vía var(--bg)). */
 export function setWall(hex) {

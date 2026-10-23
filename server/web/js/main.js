@@ -1,6 +1,7 @@
 /* Punto de entrada: crea la app Vue, conecta el router (W22: rutas
    reales con History API) y los toasts. */
-import { store, syncPath, go as goRef, goReplace as goReplaceRef } from './store.js';
+import { store, syncPath, go as goRef, goReplace as goReplaceRef,
+  setTheme, toggleTheme } from './store.js';
 import { bootstrap, loadSession } from './api.js';
 import { t } from './i18n.js';
 import {
@@ -9,12 +10,13 @@ import {
 } from './views/auth.js';
 import { ChatShell } from './views/chat.js';
 import { BootScreen } from './views/bootscreen.js';
-import { dlDirective } from './mediadl.js';
+import { dlDirective, startDownload } from './mediadl.js';
 import { startWS, stopWS } from './realtime.js';
 import { markChatRead } from './actions.js';
 import {
-  dlCategory, saveDownload, listDownloads, deleteDownload,
-  hasDownload, clearDownloads, DL_TYPES,
+  dlCategory, saveDownload, saveDownloadToDevice, listDownloads,
+  deleteDownload, hasDownload, clearDownloads, autoDlPrefs, setAutoDl,
+  DL_TYPES,
 } from './downloads.js';
 import { prefetchEmojis } from './emoji.js';
 import { ensurePublishedKey } from './e2e.js';
@@ -138,7 +140,11 @@ if ('serviceWorker' in navigator) {
 /* Ayuda de prueba/desarrollo: permite conducir la UI desde fuera
    (herramientas de screenshot, tests). No usar en lógica de producto. */
 window.__fm = { store, go: goRef, goReplace: goReplaceRef, bootstrap,
+                theme: setTheme, toggleTheme,
                 rt: { start: startWS, stop: stopWS },
-                dl: { dlCategory, saveDownload, listDownloads, deleteDownload,
-                      hasDownload, clearDownloads, types: DL_TYPES } };
+                dl: { dlCategory, saveDownload, saveDownloadToDevice,
+                      listDownloads, deleteDownload, hasDownload,
+                      clearDownloads, autoDlPrefs, setAutoDl,
+                      types: DL_TYPES },
+                mediadl: { startDownload } };
 

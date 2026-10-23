@@ -46,6 +46,18 @@ Regla: el **primer registro es abierto**; el usuario queda `email_verified=false
   imagen → `400`. La respuesta y los briefs incluyen `banner_url` firmada (`/media/profile/...`).
 - Para saber si el campo fue enviado, el servidor usa `model_fields_set` (no confundir `null` con ausente).
 
+### `PUT /api/auth/username` — full (W59)
+```json
+{"username": "ana_nueva", "password": "tu contraseña actual"}
+```
+→ `{"user": {...}}`
+- Cambia el **@usuario** (también sirve para iniciar sesión y para las menciones `@`).
+- Exige la **contraseña actual** y solo se permite **una vez cada 12 horas**.
+- Formato: 3–20 caracteres, minúsculas, números, `.` y `_`; empieza por letra o número.
+- `409` si ya está en uso; `429` con el tiempo restante si el enfriamiento está activo.
+- Los chats, el `id`, la cuota y las claves E2E **no cambian**. Los contactos reciben un
+  evento WS `profile` con el `username` nuevo; las menciones `@viejo` ya escritas no se reescriben.
+
 ### `POST /api/auth/verify` — pending
 `{"code": "123456"}` → `{"verified": true, "user": {...}, "tokens": {...}}`
 - Código de 6 dígitos, **válido 10 min**, **5 intentos** fallidos lo invalidan.
@@ -108,7 +120,7 @@ pasa a ser el correo definitivo (y el código queda borrado).
 - `GET /api/users/search?q=an` → `{"results": [user]}` (mín. 2 chars, solo verificados, excluye yo)
 - `GET /api/users/{username}` → `{"user": {...}}` (404 si no existe o no está verificado)
 
-**user**: `{id, username, display_name, avatar_url, banner_url, bio, status_text, status_preset, online, last_seen, created_at}`
+**user**: `{id, username, display_name, avatar_url, banner_url, bio, status_text, status_preset, online, last_seen, created_at}`. En la respuesta de la cuenta propia se añade `username_changed_at` (segundos Unix; `0` = nunca) para calcular el enfriamiento de 12 h.
 - `status_preset`: `"" | online | busy | dnd | invisible` (W6); con `invisible` el servidor
   lo reporta `online: false` a los demás aunque tenga la sesión abierta.
 

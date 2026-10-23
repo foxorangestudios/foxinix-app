@@ -485,6 +485,7 @@ import androidx.annotation.Keep
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -615,6 +616,24 @@ class AndroidNotifier(private val activity: Activity) {
   @JavascriptInterface
   @Keep
   fun insets(): String = latestInsets
+
+  /* W59: iconos de la barra de estado y de navegación según el tema.
+     En claro se piden oscuros (true); en oscuro, claros (false). */
+  @JavascriptInterface
+  @Keep
+  fun setSystemBars(light: Boolean) {
+    activity.runOnUiThread {
+      try {
+        val controller = WindowInsetsControllerCompat(
+          activity.window, activity.window.decorView
+        )
+        controller.isAppearanceLightStatusBars = light
+        controller.isAppearanceLightNavigationBars = light
+      } catch (e: Exception) {
+        // Fabricantes sin soporte: la app sigue funcionando.
+      }
+    }
+  }
 
   private fun notificationState(): String {
     if (Build.VERSION.SDK_INT >= 33 &&

@@ -294,7 +294,7 @@ export const ProfileView = {
   <div class="auth-wrap">
     <div class="auth-card">
       <div class="avatar-pick" v-if="!edSrc">
-        <div class="av-img">
+        <div class="av-img" :class="{ 'has-photo': !!preview }">
           <img v-if="preview" :src="preview" alt="">
           <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
         </div>

@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
     username       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    username_changed_at INTEGER NOT NULL DEFAULT 0,  -- W59: último cambio (12 h)
     password_hash  TEXT NOT NULL,
     display_name   TEXT NOT NULL DEFAULT '',
     bio            TEXT NOT NULL DEFAULT '',
@@ -241,6 +242,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN pending_email TEXT NOT NULL DEFAULT ''")
     if "banner_media_id" not in existing:
         conn.execute("ALTER TABLE users ADD COLUMN banner_media_id INTEGER")
+    # W59: el cambio de usuario tiene un enfriamiento de 12 horas.
+    if "username_changed_at" not in existing:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN username_changed_at INTEGER NOT NULL DEFAULT 0"
+        )
     # W45: migración del contador monótono de secuencia. El backfill usa
     # MAX(seq) actual; a partir de aquí los borrados ya no lo hacen bajar.
     ccols = {r["name"] for r in conn.execute("PRAGMA table_info(chats)")}

@@ -13,7 +13,7 @@ Cubre:
      de solo lectura.
   4. Descargas: categorías, agrupación en Ajustes (conteo/tamaño),
      Abrir/Guardar/Eliminar, preferencias automáticas y el control
-     "Descargar · tamaño" siempre visible bajo cada adjunto.
+     "Descargar/Descargado · tamaño" siempre visible bajo cada adjunto.
   5. Permisos: sección en Ajustes, puerta a pantalla completa con
      Conceder/Saltar, saltar no rompe la app y usar la función vuelve a
      pedir el permiso.
@@ -195,6 +195,8 @@ def main():
                 js="(async () => { try { const rs = await "
                    "navigator.serviceWorker.getRegistrations(); "
                    "for (const r of rs) await r.unregister(); } catch (e) {} "
+                   "try { const ks = await caches.keys(); "
+                   "for (const k of ks) await caches.delete(k); } catch (e) {} "
                    "localStorage.removeItem('fm.session'); return 'limpia'; })()",
                 wait=200)
     shot(a.base + "/", SHOTS / "w58-0-sesion.png",
@@ -345,8 +347,9 @@ def main():
     d = jparse(res)
     step("el perfil abierto de B ya mostraba el estado de A",
          ok and d.get("pre") == "ocupado con W58", d or log[-400:])
-    step("el control de descarga siempre visible dice «Descargar · tamaño»",
-         d.get("dlVisible") and (d.get("dlTxt") or "").startswith("Descargar ·"),
+    step("el control de descarga siempre visible dice «Descargar/Descargado · tamaño»",
+         d.get("dlVisible") and ((d.get("dlTxt") or "").startswith("Descargar ·") or
+                                 (d.get("dlTxt") or "").startswith("Descargado ·")),
          d)
     step("el cambio de estado llega a la lista, miembros y Personas",
          d.get("chatPreset") == "busy" and d.get("memPreset") == "busy" and
@@ -374,6 +377,12 @@ def main():
         doc: dl.dlCategory('file', 'application/pdf', 'x.pdf'),
         fil: dl.dlCategory('file', 'application/zip', 'x.zip'),
       };
+      /* W59: aislar esta prueba de las descargas automáticas del chat. */
+      await dl.clearDownloads();
+      const off = {};
+      dl.types.forEach(t => { off[t.id] = { wifi: false, mobile: false }; });
+      localStorage.setItem('fm.dl.auto', JSON.stringify(off));
+      localStorage.setItem('fm.dlauto.v', '2');
       await dl.saveDownload('/media/profile/w58-foto.png?sig=x1',
         'foto W58.png', new Blob(['12345'], { type: 'image/png' }),
         'image', true);

@@ -46,8 +46,10 @@ def user_brief(
 
 @router.get("/me")
 def me(user: dict = Depends(current_user)) -> dict[str, Any]:
-    # /me es de la propia cuenta: además incluye el correo (no va en perfiles públicos).
-    return {"user": {**user_brief(user), "email": user["email"]}}
+    # /me es de la propia cuenta: además incluye el correo y la marca del
+    # último cambio de @usuario (W59; no va en perfiles públicos).
+    return {"user": {**user_brief(user), "email": user["email"],
+                     "username_changed_at": user.get("username_changed_at", 0)}}
 
 
 @router.get("/search")

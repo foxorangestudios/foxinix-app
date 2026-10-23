@@ -21,8 +21,8 @@ compilar en macOS.
 Para ejecutar el AppImage en Arch Linux:
 
 ```bash
-chmod +x Foxinix-0.1.8-linux-x86_64.AppImage
-./Foxinix-0.1.8-linux-x86_64.AppImage
+chmod +x Foxinix-0.1.9-linux-x86_64.AppImage
+./Foxinix-0.1.9-linux-x86_64.AppImage
 ```
 
 Los paquetes `.deb` y `.rpm` recomiendan los plugins de GStreamer para
@@ -55,8 +55,10 @@ La URL se puede cambiar sin recompilar:
 FOXINIX_URL=http://127.0.0.1:8899/ npm run dev
 ```
 
-Las descargas del WebView de escritorio van a la carpeta **Descargas** del
-usuario y no pisan archivos existentes (agregan `(1)`, `(2)`, …).
+Las descargas quedan en los datos privados del WebView (Cache Storage +
+IndexedDB) y se abren sin volver a bajarlas. Solo **Guardar en el
+dispositivo** crea una copia en la carpeta **Descargas** del usuario; si el
+nombre ya existe, agrega `(1)`, `(2)`, …
 
 ```bash
 cd desktop

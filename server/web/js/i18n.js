@@ -405,6 +405,38 @@ const EN = {
   'Ocultar info del chat': 'Hide chat info',
   'Ir hacia abajo': 'Jump to bottom',
 
+  /* ---------- W59: descargas en la app y @usuario ---------- */
+  'Descargado': 'Downloaded',
+  'Descargar a la app': 'Download to the app',
+  'Abrir archivo descargado': 'Open downloaded file',
+  'Ya está descargado en la app': 'Already downloaded in the app',
+  'No se pudo guardar en la app': 'Could not save in the app',
+  'Video descargado': 'Video downloaded',
+  'Imagen descargada': 'Image downloaded',
+  'Audio descargado': 'Audio downloaded',
+  'Archivo descargado': 'File downloaded',
+  'Documento descargado': 'Document downloaded',
+  'Wi-Fi: activado por defecto; los archivos se descargan solos a los datos de la app. Datos móviles: desactivado por defecto para no gastar tu plan. Nada se copia a Descargas hasta que pulses “Guardar en el dispositivo”.':
+    'Wi-Fi: on by default; files are downloaded automatically to the app data. Mobile data: off by default to avoid using your plan. Nothing is copied to Downloads until you press “Save to device”.',
+  'Cambiar usuario': 'Change username',
+  'Sirve para iniciar sesión y para que te mencionen con @.':
+    'It is used to sign in and to mention you with @.',
+  'Solo puedes cambiarlo una vez cada 12 horas. Las menciones con @ a tu usuario anterior dejarán de funcionar.':
+    'You can only change it once every 12 hours. @ mentions to your previous username will stop working.',
+  'Nuevo usuario': 'New username',
+  '3-20 caracteres: minúsculas, números, punto y guion bajo; empieza con letra o número.':
+    '3-20 characters: lowercase letters, numbers, dot and underscore; start with a letter or number.',
+  'Para confirmar el cambio': 'To confirm the change',
+  'Confirmar cambio de usuario': 'Confirm username change',
+  'Cambiando…': 'Changing…',
+  'Podrás cambiarlo en {h} h {m} min.': 'You can change it in {h} h {m} min.',
+  'Usuario actualizado': 'Username updated',
+  'No se pudo cambiar el usuario': 'Could not change the username',
+  'Ese ya es tu usuario actual': 'That is already your current username',
+  'Usuario: 3-20 caracteres, letras/números/punto/guion bajo, empieza alfanumérico':
+    'Username: 3-20 characters, letters/numbers/dot/underscore, starts alphanumeric',
+  'Escribe tu contraseña actual': 'Enter your current password',
+
   /* ---------- ajustes ---------- */
   'Ajustes': 'Settings',
   'Navegación principal': 'Main navigation',

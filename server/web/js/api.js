@@ -450,6 +450,10 @@ export async function bootstrap() {
     const r = await api('GET', '/api/users/me', undefined, { retry401: true });
     // W6: si la sesión se cerró durante el arranque, no revivir el usuario
     if (!store.hasSession) return;
+    /* W59: /users/me también trae username_changed_at. No reescribimos
+       localStorage aquí: otra pestaña pudo cambiar de sesión mientras
+       la petición estaba en vuelo. La marca se refresca en cada arranque
+       y el cambio explícito de usuario sí guarda la sesión. */
     store.user = r.user;
     loadE2eState();
     if (store.route !== 'app') goReplace('app');

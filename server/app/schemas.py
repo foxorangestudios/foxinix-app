@@ -41,6 +41,20 @@ class RegisterIn(BaseModel):
         return v
 
 
+class UsernameIn(BaseModel):
+    """W59: cambio de usuario con contraseña actual y espera de 12 h."""
+    username: str
+    password: str = Field(min_length=1, max_length=200)
+
+    @field_validator("username")
+    @classmethod
+    def _username(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not USERNAME_RE.match(v):
+            raise ValueError("usuario: 3-20 caracteres, letras/números/punto/guion bajo, empieza alfanumérico")
+        return v
+
+
 class LoginIn(BaseModel):
     identifier: str = Field(min_length=1, max_length=254)  # usuario o correo
     password: str = Field(min_length=1, max_length=200)

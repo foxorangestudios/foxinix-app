@@ -18,11 +18,11 @@ export const DL_CACHE = 'foxinix-downloads-v1';
 /* Tipos de descarga y preferencias automáticas por red. Se guardan en
    el dispositivo (localStorage), igual que el resto de preferencias. */
 export const DL_TYPES = [
-  { id: 'video', label: 'Videos', done: 'Video guardado' },
-  { id: 'image', label: 'Imágenes', done: 'Imagen guardada' },
-  { id: 'audio', label: 'Audios', done: 'Audio guardado' },
-  { id: 'file', label: 'Archivos', done: 'Archivo guardado' },
-  { id: 'document', label: 'Documentos', done: 'Documento guardado' },
+  { id: 'video', label: 'Videos', done: 'Video descargado' },
+  { id: 'image', label: 'Imágenes', done: 'Imagen descargada' },
+  { id: 'audio', label: 'Audios', done: 'Audio descargado' },
+  { id: 'file', label: 'Archivos', done: 'Archivo descargado' },
+  { id: 'document', label: 'Documentos', done: 'Documento descargado' },
 ];
 const DL_AUTO_KEY = 'fm.dl.auto';
 
@@ -61,22 +61,39 @@ export function dlCategory(kind, mime, name) {
 function emptyAuto() {
   const out = {};
   for (let i = 0; i < DL_TYPES.length; i++) {
-    out[DL_TYPES[i].id] = { wifi: false, mobile: false };
+    /* W59: por defecto se descarga solo el contenido que llega por
+       Wi-Fi. En datos móviles queda apagado para no gastar el plan;
+       se puede activar por tipo en Ajustes → Descargas. */
+    out[DL_TYPES[i].id] = { wifi: true, mobile: false };
   }
   return out;
 }
 
 export function autoDlPrefs() {
   const out = emptyAuto();
-  try {
-    const raw = JSON.parse(localStorage.getItem(DL_AUTO_KEY) || '{}');
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(DL_AUTO_KEY) || '{}'); } catch (e) { raw = null; }
+  let hadStored = false;
+  if (raw && typeof raw === 'object') {
     for (let i = 0; i < DL_TYPES.length; i++) {
       const id = DL_TYPES[i].id;
-      const v = raw && raw[id];
+      const v = raw[id];
       if (v && typeof v === 'object') {
+        hadStored = true;
         out[id].wifi = !!v.wifi;
         out[id].mobile = !!v.mobile;
       }
+    }
+  }
+  /* W59: W58 guardaba todos los tipos apagados por defecto. Al actualizar,
+     una sola vez volvemos a dejar Wi-Fi encendido para quien ya tenía
+     preferencias guardadas; móvil conserva lo que eligió (por defecto,
+     apagado). Quien quiera apagarlo, lo hace en Ajustes → Descargas. */
+  try {
+    if (hadStored && localStorage.getItem('fm.dlauto.v') !== '2') {
+      for (let i = 0; i < DL_TYPES.length; i++) out[DL_TYPES[i].id].wifi = true;
+      localStorage.setItem(DL_AUTO_KEY, JSON.stringify(out));
+      localStorage.setItem('fm.dlauto.v', '2');
     }
   } catch (e) {}
   return out;
@@ -86,7 +103,11 @@ export function setAutoDl(type, network, on) {
   const prefs = autoDlPrefs();
   if (!prefs[type] || (network !== 'wifi' && network !== 'mobile')) return prefs;
   prefs[type][network] = !!on;
-  try { localStorage.setItem(DL_AUTO_KEY, JSON.stringify(prefs)); } catch (e) {}
+  try {
+    localStorage.setItem(DL_AUTO_KEY, JSON.stringify(prefs));
+    /* W59: una elección explícita ya no se pisa con la migración. */
+    localStorage.setItem('fm.dlauto.v', '2');
+  } catch (e) {}
   return prefs;
 }
 
@@ -374,6 +395,29 @@ export async function clearDownloads() {
     } catch (e) {}
   }
   try { await idbClear(); } catch (e) {}
+  return true;
+}
+
+/* Abre una descarga ya guardada en los datos de la app (nunca baja ni
+   crea una copia pública). Devuelve true si pudo abrirla. */
+export async function openAppDownload(urlOrKey) {
+  const blob = await getDownloadBlob(urlOrKey);
+  if (!blob) return false;
+  const url = URL.createObjectURL(blob);
+  let win = null;
+  try {
+    win = window.open(url, '_blank');
+  } catch (e) { win = null; }
+  if (!win) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   return true;
 }
 

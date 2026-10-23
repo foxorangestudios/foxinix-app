@@ -304,7 +304,11 @@ export async function openChat(id, keepJump) {
         await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
       }
       mergeMessages(id, list);
-      autoDownloadMessages(list);
+      /* W59: del historial solo se completan los adjuntos MÁS RECIENTES
+         (12) al abrir el chat. Así activar la descarga automática no
+         dispara cientos de archivos viejos de golpe; los nuevos siguen
+         bajando solos al llegar por WS. */
+      autoDownloadMessages(list, 12);
       store.hasMore[id] = list.length >= 50;
       store.loaded[id] = true;
       sendSeen(id, maxSeq(store.msgs[id]));
@@ -387,7 +391,7 @@ export async function loadOlder(chatId) {
         await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
       }
       store.msgs[chatId] = list.concat(arr);
-      autoDownloadMessages(list);
+      /* W59: las páginas viejas NO se descargan automáticamente. */
     }
     store.hasMore[chatId] = list.length >= 50;
   } catch (e) {
@@ -653,23 +657,26 @@ export function onIncomingMessage(m) {
   finishIncoming(m);
 }
 
-/* W57/W58: descarga automática según tipo y red. Se guarda en los datos
-   de la app (web, PWA, escritorio y APK); nunca crea por sí sola una
-   copia pública en Descargas. */
+/* W59: descarga automática según tipo y red. Se guarda en los datos de
+   la app (web, PWA, escritorio y APK); nunca crea por sí sola una copia
+   pública en Descargas. */
 function maybeAutoDownload(m) {
   if (!m || !m.media || !m.media.url || m.kind === 'system') return;
+  if (m.sender && store.user && m.sender.id === store.user.id) return;
   const name = m.media.name || 'archivo';
   const type = dlCategory(m.kind, m.media.mime, name);
   const url = mediaUrl(m.media.url, true);
   autoDownload(url, name, m.media.mime || '', type);
 }
 
-/* W58: al abrir un chat también se completan las descargas automáticas
-   de los adjuntos que ya estaban en el historial (no solo los que
-   llegan por WS). La cola evita ráfagas y `hasDownload` evita repetir. */
-function autoDownloadMessages(list) {
+/* W58/W59: al abrir un chat se completan solo los adjuntos recientes
+   (max) del historial; `catchUpChat` y la WS ya entregan lo nuevo. La
+   cola evita ráfagas y `hasDownload` evita repetir. */
+function autoDownloadMessages(list, max) {
   if (!list || !list.length) return;
-  for (let i = 0; i < list.length; i++) {
+  let start = 0;
+  if (max && list.length > max) start = list.length - max;
+  for (let i = start; i < list.length; i++) {
     const m = list[i];
     if (m && m.media) maybeAutoDownload(m);
   }
