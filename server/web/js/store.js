@@ -66,6 +66,7 @@ export const store = reactive({
   ws: 'off',              // off | connecting | on
   call: null,             // W28h: llamada WebRTC 1:1 en curso | null
   search: '',             // filtro de la lista de chats
+  showArchived: false,    // ver la pestaña de chats/grupos archivados
   newChatOpen: false,     // modal "nuevo chat"
   newChatMode: 'dm',      // dm | group | add (agregar miembro al grupo activo)
   /* ---- W27: panel Personas/Amigos (en el centro, sin chat abierto) ---- */

@@ -473,8 +473,7 @@ def main():
         B = ct.register(a.base, f"{ub}@test.local", ub)
         print(f"→ sembrados: {ua} y {ub}")
 
-        st, res = ct.http("POST", a.base + "/api/chats/dm",
-                          {"username": ub}, token=A["access"])
+        st, res = ct.dm_between(a.base, A["access"], B["access"], ua, ub)
         if st not in (200, 201):
             raise SystemExit(f"✗ dm: {st} {res}")
         cid = res["chat"]["id"]

@@ -4,7 +4,7 @@
 La web es la misma que carga el APK de Tauri. Este test verifica que en
 pantalla de teléfono:
 
-  1. Aparece la barra inferior Chats / Personas / Ajustes.
+  1. Aparece la barra inferior Chats / Personas / Archivados / Ajustes.
   2. La lista usa el app bar móvil (sin el pie de usuario de escritorio).
   3. El chat oculta el sidebar y deja las llamadas dentro del menú ⋮.
   4. Personas ocupa la pantalla y Ajustes se comporta como pestaña
@@ -85,8 +85,7 @@ def main():
                             {"avatar_media_id": bup["id"]}, token=B["access"])
         if st != 200:
             raise SystemExit(f"✗ avatar de B: {st} {res}")
-        st, res = base.http("POST", a.base + "/api/chats/dm",
-                            {"username": ub}, token=A["access"])
+        st, res = base.dm_between(a.base, A["access"], B["access"], ua, ub)
         if st != 201:
             raise SystemExit(f"✗ dm: {st} {res}")
         cid = res["chat"]["id"]
@@ -304,7 +303,7 @@ def main():
         js_set = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
                   "let t=Date.now();"
                   "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
-                  "document.querySelector('.mobile-tabs .mt-btn:nth-child(3)').click();"
+                  "Array.from(document.querySelectorAll('.mobile-tabs .mt-btn')).find(function(b){return b.textContent.indexOf('Ajustes')>=0;}).click();"
                   "await s(800);"
                   "const m=document.querySelector('.modal.settings');"
                   "const r=m.getBoundingClientRect();"
@@ -341,7 +340,7 @@ def main():
         js_back = ("(async()=>{const s=ms=>new Promise(r=>setTimeout(r,ms));"
                    "let t=Date.now();"
                    "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
-                   "document.querySelector('.mobile-tabs .mt-btn:nth-child(3)').click();"
+                   "Array.from(document.querySelectorAll('.mobile-tabs .mt-btn')).find(function(b){return b.textContent.indexOf('Ajustes')>=0;}).click();"
                    "await s(600);"
                    "const opened=!!document.querySelector('.settings-veil');"
                    "document.querySelector('.mobile-tabs .mt-btn:nth-child(1)').click();"
@@ -373,7 +372,7 @@ def main():
             "notify:function(){}};"
             "let t=Date.now();"
             "while(Date.now()-t<12000&&!document.querySelector('.mobile-tabs'))await s(120);"
-            "document.querySelector('.mobile-tabs .mt-btn:nth-child(3)').click();"
+            "Array.from(document.querySelectorAll('.mobile-tabs .mt-btn')).find(function(b){return b.textContent.indexOf('Ajustes')>=0;}).click();"
             "await s(500);"
             "const tabs=Array.from(document.querySelectorAll('.m-tab'));"
             "const chat=tabs.find(function(b){return b.textContent.trim()==='Chat';});"

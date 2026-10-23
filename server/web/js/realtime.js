@@ -9,7 +9,8 @@ import { t } from './i18n.js';
    el chat); si no hay clave, el aviso usa un texto neutro. */
 import { decryptInto } from './e2e.js';
 /* W28h: la señalización de llamadas WebRTC reutiliza este socket */
-import { initCall, handleCallEvent } from './call.js';
+import { initCall, handleCallEvent, abortCall } from './call.js';
+import { clearMediaBlobs } from './mediadl.js';
 
 let ws = null;
 let pingTimer = null;
@@ -17,6 +18,7 @@ let reconnectTimer = null;
 let backoff = 1000;
 let stopped = true;
 let hasOpened = false;
+let lastPong = 0;
 
 /* W55: el APK inyecta este puente; en web/escritorio no existe y se
    sigue usando la Notification del navegador. Se consulta en cada aviso
@@ -36,8 +38,12 @@ function nativeNotifyReady() {
 }
 
 /* W45g: cualquier clearSession() (logout, 401 real, cancelación) corta
-   la WS en el acto; no queda recibiendo eventos de una cuenta cerrada. */
-sessionHooks.onLogout = stopWS;
+   la WS en el acto; no queda recibiendo eventos de una cuenta cerrada.
+   P0: además cierra la llamada y libera cámara/micrófono y blobs. */
+sessionHooks.onLogout = function () {
+  clearMediaBlobs();
+  stopWS();
+};
 
 /* chatId → timer para ocultar "escribiendo…". */
 const typingTimers = {};
@@ -65,9 +71,13 @@ export function startWS() {
 
 export function stopWS() {
   stopped = true;
+  /* P0: al desmontar/logout no puede quedar una llamada con la cámara
+     encendida ni un RTCPeerConnection abierto. */
+  abortCall('hangup');
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+  lastPong = 0;
   store.ws = 'off';
 }
 
@@ -105,8 +115,18 @@ function connect() {
     hasOpened = true;
     store.ws = 'on';
     backoff = 1000;
+    lastPong = Date.now();
     if (pingTimer) clearInterval(pingTimer);
-    pingTimer = setInterval(function () { send({ type: 'ping' }); }, 25000);
+    pingTimer = setInterval(function () {
+      /* P1: un socket medio abierto puede seguir en readyState=1 y
+         tragarse los 'seen'. Si el server no responde a dos pings,
+         cerramos y dejamos que el backoff reconecte. */
+      if (ws && ws.readyState === 1 && Date.now() - lastPong > 70000) {
+        try { ws.close(); } catch (e) {}
+        return;
+      }
+      send({ type: 'ping' });
+    }, 25000);
     if (!reconnected) {
       /* Primera conexión: si bootAll ya terminó y hay un chat abierto,
          lo que llegó entre la carga inicial y este handshake se recupera
@@ -138,6 +158,7 @@ function connect() {
   sock.onclose = function (e) {
     if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
     if (ws === sock) ws = null;
+    lastPong = 0;
     store.ws = 'off';
     if (stopped) return;
     if (e.code === 4401) refreshThenReconnect();   // token vencido
@@ -172,6 +193,10 @@ async function refreshThenReconnect() {
 
 function send(obj) {
   if (ws && ws.readyState === 1) {
+    if (lastPong && Date.now() - lastPong > 70000) {
+      try { ws.close(); } catch (e) {}
+      return false;
+    }
     try { ws.send(JSON.stringify(obj)); return true; } catch (e) {}
   }
   return false;
@@ -547,6 +572,7 @@ function handle(ev) {
       return;
 
     case 'pong':
+      lastPong = Date.now();
       return;
 
     case 'message':

@@ -554,12 +554,12 @@ def main():
     AID, BID = A["user"]["id"], B["user"]["id"]
     print(f"· A={AU} B={BU} C={C['user']['username']}")
 
-    st, r = ct.http("POST", a.base + "/api/chats/dm", {"username": BU},
-                    token=A["access"])
+    st, r = ct.dm_between(a.base, A["access"], B["access"],
+                          A["user"]["username"], BU)
     assert st in (200, 201), (st, r)
     dm = r["chat"]["id"]
-    st, r = ct.http("POST", a.base + "/api/chats/dm",
-                    {"username": C["user"]["username"]}, token=B["access"])
+    st, r = ct.dm_between(a.base, B["access"], C["access"],
+                          B["user"]["username"], C["user"]["username"])
     assert st in (200, 201), (st, r)
     dm_bc = r["chat"]["id"]
     st, r = ct.http("POST", a.base + "/api/chats/group",

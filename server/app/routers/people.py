@@ -125,6 +125,13 @@ def _ensure_dm(uid_a: int, uid_b: int) -> dict[str, Any]:
                 raise
             chat_id = existing["id"]
     chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
+    # Aceptar una solicitud reabre un MD que cualquiera hubiera borrado o
+    # archivado: ambas partes acaban de dar su consentimiento.
+    db.run(
+        "UPDATE chat_members SET hidden_at = 0, archived = 0"
+        " WHERE chat_id = ? AND user_id IN (?, ?)",
+        (chat_id, uid_a, uid_b),
+    )
     if not existing:
         hub.notify_chat_created(chat_id, [uid_a, uid_b])
     return chat_brief(chat, uid_a)
@@ -245,6 +252,8 @@ def unfriend(fid: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     )
     for uid in (user["id"], fid):
         hub.emit_to_user(uid, {"type": "people"})
+        # El MD deja de listarse/abrirse: refrescar la lista al toque.
+        hub.emit_to_user(uid, {"type": "chat_updated", "chat_id": 0})
     return {"ok": True}
 
 
@@ -292,6 +301,7 @@ def block_user(body: BlockIn, user: dict = Depends(current_user)) -> dict[str, A
     )
     for uid in (user["id"], peer["id"]):
         hub.emit_to_user(uid, {"type": "people"})
+        hub.emit_to_user(uid, {"type": "chat_updated", "chat_id": 0})
     return {"ok": True, "blocked": peer["id"]}
 
 

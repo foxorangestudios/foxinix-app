@@ -116,7 +116,7 @@ async def security_headers(request, call_next):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Permissions-Policy"] = (
-        "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)"
+        "camera=(self), geolocation=(), payment=(), usb=(), microphone=(self)"
     )
     resp.headers["Content-Security-Policy"] = _CSP
     resp.headers["Strict-Transport-Security"] = "max-age=31536000"

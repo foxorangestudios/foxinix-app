@@ -13,7 +13,13 @@
    abrir la lista y se puede volver a descargar.
 
    Sin dependencias. FF78: Cache API + IndexedDB + Blob + XHR. */
-export const DL_CACHE = 'foxinix-downloads-v1';
+import { store } from './store.js';
+
+/* P1: las descargas persistentes son por CUENTA. Antes el mismo caché e
+   IndexedDB se compartían entre usuarios del mismo dispositivo y la
+   siguiente cuenta veía archivos de la anterior. */
+const DL_CACHE_BASE = 'foxinix-downloads-v1';
+export const DL_CACHE = DL_CACHE_BASE;   // nombre base (compatibilidad)
 
 /* Tipos de descarga y preferencias automáticas por red. Se guardan en
    el dispositivo (localStorage), igual que el resto de preferencias. */
@@ -136,9 +142,9 @@ export function nativeNetwork() {
 }
 
 /* Red actual. En Android manda el puente nativo (ConnectivityManager);
-   en el navegador usamos Network Information API. Si el navegador no
-   expone `type`, en un teléfono asumimos datos móviles cuando la pista
-   es móvil; en un PC asumimos Wi-Fi. */
+   en el navegador usamos Network Information API. Si no se puede
+   determinar, devuelve '' y las descargas automáticas NO se ejecutan:
+   asumir Wi-Fi podía gastar gigabytes de datos móviles. */
 export function currentNetwork() {
   const native = nativeNetwork();
   if (native === 'wifi' || native === 'mobile') return native;
@@ -156,7 +162,7 @@ export function currentNetwork() {
       }
     }
   } catch (e) {}
-  return 'wifi';
+  return '';
 }
 
 export function shouldAutoDownload(type) {
@@ -180,10 +186,34 @@ export function nativeDownload(url, name, mime, type, silent) {
   } catch (e) { return false; }
 }
 
-const DB_NAME = 'foxinix-downloads';
+const DB_BASE = 'foxinix-downloads';
 const DB_VERSION = 1;
 const STORE = 'files';
 let dbPromise = null;
+
+function ownerTag() {
+  const u = store.user;
+  return u && u.id ? 'u' + u.id : 'anon';
+}
+
+export function dlCacheName() {
+  return DL_CACHE_BASE + '-' + ownerTag();
+}
+
+function dbName() {
+  return DB_BASE + '-' + ownerTag();
+}
+
+/* Al cerrar sesión se suelta la conexión lógica; la próxima cuenta abre
+   otra base de datos (sus descargas no se mezclan con las anteriores). */
+export function resetDownloadStore() {
+  const pending = dbPromise;
+  dbPromise = null;
+  if (pending) {
+    try { pending.then(function (db) { try { db.close(); } catch (e) {} }); }
+    catch (e) {}
+  }
+}
 
 function hasIDB() {
   return typeof indexedDB !== 'undefined';
@@ -193,7 +223,7 @@ function dbOpen() {
   if (!hasIDB()) return Promise.reject(new Error('sin IndexedDB'));
   if (dbPromise) return dbPromise;
   dbPromise = new Promise(function (resolve, reject) {
-    const rq = indexedDB.open(DB_NAME, DB_VERSION);
+    const rq = indexedDB.open(dbName(), DB_VERSION);
     rq.onupgradeneeded = function () {
       const db = rq.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -271,7 +301,7 @@ export function downloadKey(url) {
 
 function cacheOpen() {
   if (typeof caches === 'undefined') return Promise.resolve(null);
-  return caches.open(DL_CACHE).catch(function () { return null; });
+  return caches.open(dlCacheName()).catch(function () { return null; });
 }
 
 /* Blob -> archivo público. La objectURL se revoca al terminar el clic. */

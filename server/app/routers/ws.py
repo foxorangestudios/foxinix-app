@@ -35,6 +35,16 @@ def _blocked_any(a: int, b: int) -> bool:
     ))
 
 
+def _friends(a: int, b: int) -> bool:
+    """Regla del producto: los MD y sus llamadas exigen amistad aceptada."""
+    return bool(db.one(
+        "SELECT 1 FROM friend_requests WHERE status = 'accepted'"
+        " AND ((from_user = ? AND to_user = ?) OR (from_user = ? AND to_user = ?))"
+        " LIMIT 1",
+        (a, b, b, a),
+    ))
+
+
 def _extract_token(ws: WebSocket) -> str:
     """Token por subprotocolo ['foxinix', <token>] (navegadores) o, como
     respaldo, por query (cliente QML/desktop que no puede mandar headers)."""
@@ -108,7 +118,16 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 # W14: el UPDATE solo toca la fila donde soy miembro; el
                 # rowcount (db.run) además garantiza que el seq NUEVO avanza
                 # → un no-miembro ya no puede inyectar broadcasts 'read'.
-                if chat_id and seq and db.run(
+                # P1: acotar a chats.last_seq; antes un seq enorme marcaba
+                # como leídos todos los mensajes futuros.
+                room = db.one(
+                    "SELECT c.last_seq FROM chats c JOIN chat_members m"
+                    " ON m.chat_id = c.id WHERE c.id = ? AND m.user_id = ?",
+                    (chat_id, uid),
+                )
+                if room:
+                    seq = min(seq, int(room["last_seq"] or 0))
+                if chat_id and room and seq and db.run(
                     "UPDATE chat_members SET last_read_seq = ?,"
                     " last_delivered_seq = MAX(last_delivered_seq, ?)"
                     " WHERE chat_id = ? AND user_id = ? AND last_read_seq < ?",
@@ -135,17 +154,32 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 # a cualquier DM ajeno, que además era oráculo de
                 # existencia de chats y de presencia del par.
                 mine = db.one(
-                    "SELECT 1 AS x FROM chat_members"
+                    "SELECT hidden_at FROM chat_members"
                     " WHERE chat_id = ? AND user_id = ?",
                     (cid, uid),
                 )
                 if not mine:
                     continue
                 peer = db.one(
-                    "SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id != ?",
+                    "SELECT user_id, hidden_at FROM chat_members"
+                    " WHERE chat_id = ? AND user_id != ?",
                     (cid, uid),
                 )
                 if not peer:
+                    continue
+                # MD sin amistad aceptada o eliminado por cualquiera de
+                # las dos partes: no se relaya la llamada.
+                if not _friends(uid, peer["user_id"]):
+                    if mtype == "call_offer":
+                        await ws.send_text(json.dumps(
+                            {"type": "call_error", "chat_id": cid,
+                             "detail": "Necesitas una solicitud de amistad aceptada"}))
+                    continue
+                if mine.get("hidden_at") or peer.get("hidden_at"):
+                    if mtype == "call_offer":
+                        await ws.send_text(json.dumps(
+                            {"type": "call_error", "chat_id": cid,
+                             "detail": "El chat ya no está disponible"}))
                     continue
                 if _blocked_any(uid, peer["user_id"]):
                     if mtype == "call_offer":

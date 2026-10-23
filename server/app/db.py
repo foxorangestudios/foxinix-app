@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS chat_members (
     last_delivered_seq INTEGER NOT NULL DEFAULT 0,   -- W12: 'recibido'
     pinned    INTEGER NOT NULL DEFAULT 0,            -- W13: fijado en mi lista
     muted     INTEGER NOT NULL DEFAULT 0,            -- W13: notificaciones off
+    archived  INTEGER NOT NULL DEFAULT 0,            -- archivado (solo para mí)
+    hidden_at INTEGER NOT NULL DEFAULT 0,            -- MD eliminado de mi lista
     joined_at    INTEGER NOT NULL,
     PRIMARY KEY (chat_id, user_id)
 );
@@ -269,6 +271,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE chat_members ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
     if "muted" not in cmem:
         conn.execute("ALTER TABLE chat_members ADD COLUMN muted INTEGER NOT NULL DEFAULT 0")
+    if "archived" not in cmem:
+        conn.execute("ALTER TABLE chat_members ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+    if "hidden_at" not in cmem:
+        conn.execute("ALTER TABLE chat_members ADD COLUMN hidden_at INTEGER NOT NULL DEFAULT 0")
     if "forwarded" not in mcols:
         conn.execute(
             "ALTER TABLE messages ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0"

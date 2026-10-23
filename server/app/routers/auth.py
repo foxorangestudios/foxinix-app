@@ -67,6 +67,13 @@ def _rate_limit(key: str, max_hits: int = config.RATE_MAX) -> None:
 
 
 def _client_ip(request: Request) -> str:
+    # Detrás de un proxy de confianza, request.client.host es el proxy y
+    # todos los usuarios compartirían el mismo cubo de rate limit.
+    # FOXMSG_TRUST_PROXY=1 activa X-Forwarded-For (solo el primer salto).
+    if config.TRUST_PROXY:
+        xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if xff:
+            return xff
     return request.client.host if request.client else "?"
 
 
@@ -317,7 +324,27 @@ def update_profile(body: ProfileIn, user: dict = Depends(pending_user)) -> dict[
     if not sets:
         return {"user": _public_user(user)}
     params.append(user["id"])
-    db.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", tuple(params))
+    old_media = {
+        int(x) for x in (user.get("avatar_media_id"), user.get("banner_media_id"))
+        if x
+    }
+    removed: list[tuple[str, int]] = []
+    from . import media as media_mod   # perezoso: evita el ciclo
+    with db.tx() as conn:
+        conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", tuple(params))
+        # Si reemplacé avatar/portada, el media anterior deja de estar
+        # referenciado por mí. Se borra sólo si nadie más lo usa (p. ej.
+        # la misma foto puesta como avatar de un grupo).
+        for mid in old_media:
+            got = media_mod.drop_media_if_unused(conn, mid)
+            if got:
+                removed.append(got)
+    for rel, size in removed:
+        try:
+            media_mod.remove_media_files(config.MEDIA_DIR / rel)
+            media_mod.note_media_size(-size)
+        except OSError:
+            pass
     fresh = _get_user_by("id", str(user["id"]))
     # W15: los contactos deben ver al toque el nombre/avatar/estado nuevos
     # (el avatar trae URL nueva → el cliente baja la nueva miniatura).
@@ -664,9 +691,14 @@ def email_change_verify(body: VerifyIn, user: dict = Depends(current_user)) -> d
 def delete_account(
     body: DeleteAccountIn, request: Request, user: dict = Depends(current_user)
 ) -> dict[str, Any]:
-    """Borrado definitivo: exige usuario + contraseña. Deja un mensaje de
-    sistema en cada chat, borra sus mensajes, su media y la cuenta
-    (cascada: miembros, códigos, reacciones)."""
+    """Borrado definitivo: exige usuario + contraseña.
+
+    - Mensajes propios: se borran de todos los chats.
+    - MD: se eliminan completos para las dos partes.
+    - Grupos: se avisa con un mensaje de sistema y se transfiere la
+      propiedad si hacía falta.
+    - Media: se borra solo si ningún mensaje, perfil, grupo o GIF lo usa.
+    """
     _rate_limit(f"delacct:{_client_ip(request)}", max_hits=10)
     if body.username.strip().lower() != user["username"]:
         raise HTTPException(400, "El usuario no coincide")
@@ -674,47 +706,108 @@ def delete_account(
         raise HTTPException(401, "Contraseña incorrecta")
 
     # Import perezoso: chats.py importa este módulo (ciclo si es global).
-    from .chats import _next_seq, message_out
+    from .chats import _next_seq, _transfer_owner, message_out
+    from . import media as media_mod   # import perezoso: evita el ciclo
 
     name = user["display_name"] or user["username"]
-    member_chats = [r["chat_id"] for r in db.rows(
-        "SELECT chat_id FROM chat_members WHERE user_id = ?", (user["id"],)
-    )]
+    rows = db.rows(
+        "SELECT c.id, c.type, cm.role FROM chats c"
+        " JOIN chat_members cm ON cm.chat_id = c.id WHERE cm.user_id = ?",
+        (user["id"],),
+    )
+    sys_ids: list[tuple[int, int]] = []
+    dm_peers: set[int] = set()
+    removed_media: list[tuple[str, int]] = []
 
-    # 1) sus mensajes salen de todos los chats (reacciones caen en cascada)
-    db.execute("DELETE FROM messages WHERE sender_id = ?", (user["id"],))
+    # Una sola transacción: o se borra todo, o nada. Antes se borraban los
+    # archivos y la cuenta en pasos sueltos y un fallo dejaba media
+    # huérfana o chats con referencias rotas.
+    with db.tx() as conn:
+        # 1) sus mensajes salen de todos los chats (reacciones caen en
+        #    cascada). Recordar sus adjuntos: si el archivo era de otra
+        #    cuenta y solo lo usaba este mensaje, queda huérfano.
+        msg_media = {
+            int(r["media_id"])
+            for r in conn.execute(
+                "SELECT DISTINCT media_id FROM messages"
+                " WHERE sender_id = ? AND media_id IS NOT NULL",
+                (user["id"],),
+            ).fetchall()
+        }
+        conn.execute("DELETE FROM messages WHERE sender_id = ?", (user["id"],))
 
-    # 2) mensaje de sistema en cada chat (sin sender: la cuenta ya no existe)
-    sys_ids: dict[int, int] = {}
-    for chat_id in member_chats:
-        text = f"La cuenta de {name} fue eliminada"
-        with db.tx() as conn:
-            seq = _next_seq(conn, chat_id)
+        # 2) DMs: se eliminan para no dejar "Usuario eliminado" en la lista
+        #    del otro lado. Grupos: transferir propiedad y avisar.
+        for ch in rows:
+            if ch["type"] == "dm":
+                for cm in conn.execute(
+                    "SELECT user_id FROM chat_members WHERE chat_id = ?",
+                    (ch["id"],),
+                ).fetchall():
+                    if cm["user_id"] != user["id"]:
+                        dm_peers.add(int(cm["user_id"]))
+                conn.execute("DELETE FROM chats WHERE id = ?", (ch["id"],))
+                continue
+
+            _transfer_owner(conn, ch["id"], user["id"])
+            left = conn.execute(
+                "SELECT COUNT(*) AS n FROM chat_members WHERE chat_id = ?",
+                (ch["id"],),
+            ).fetchone()
+            if not left or left["n"] <= 1:
+                conn.execute("DELETE FROM chats WHERE id = ?", (ch["id"],))
+                continue
+            seq = _next_seq(conn, ch["id"])
             cur = conn.execute(
                 "INSERT INTO messages (chat_id, seq, sender_id, kind, body, created_at)"
                 " VALUES (?, ?, NULL, 'system', ?, ?)",
-                (chat_id, seq, text, int(time.time())),
+                (ch["id"], seq, f"La cuenta de {name} fue eliminada",
+                 int(time.time())),
             )
-            sys_ids[chat_id] = cur.lastrowid
+            sys_ids.append((int(ch["id"]), int(cur.lastrowid)))
 
-    # 3) su media: archivos en disco y filas
-    from . import media as media_mod   # import perezoso: evita el ciclo
-    for m in db.rows("SELECT path, size FROM media WHERE owner_id = ?", (user["id"],)):
-        try:
-            media_mod.remove_media_files(config.MEDIA_DIR / m["path"])
-            media_mod.note_media_size(-int(m["size"] or 0))
-        except OSError:
-            pass
-    db.execute("DELETE FROM media WHERE owner_id = ?", (user["id"],))
+        # 3) media propia: primero recordar ids; después de borrar users
+        #    ya no se puede consultar owner_id (ON DELETE SET NULL).
+        owned_media = conn.execute(
+            "SELECT id, path, size FROM media WHERE owner_id = ?", (user["id"],)
+        ).fetchall()
 
-    # 4) la cuenta (cascada: chat_members, email_codes, reactions)
-    db.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+        # 4) la cuenta (cascada: chat_members, email_codes, reactions,
+        #    solicitudes y bloqueos)
+        conn.execute("DELETE FROM users WHERE id = ?", (user["id"],))
+
+        # 5) archivos: borrar sólo los que ya nadie referencia (reenvíos,
+        #    avatares de grupo o GIFs favoritos de OTROS usuarios).
+        owned_ids = set()
+        for m in owned_media:
+            mid = int(m["id"])
+            owned_ids.add(mid)
+            if media_mod.media_in_use(conn, mid):
+                conn.execute("UPDATE media SET owner_id = NULL WHERE id = ?", (mid,))
+            else:
+                conn.execute("DELETE FROM media WHERE id = ?", (mid,))
+                removed_media.append((m["path"], int(m["size"] or 0)))
+        # Adjuntos ajenos que solo usaban los mensajes borrados.
+        for mid in msg_media - owned_ids:
+            dropped = media_mod.drop_media_if_unused(conn, mid)
+            if dropped:
+                removed_media.append(dropped)
+
     hub.kick_user(user["id"])
 
-    # 5) en vivo: los chats abiertos ven el aviso y el cambio de miembros
-    for chat_id, msg_id in sys_ids.items():
+    # 6) en vivo: los chats abiertos ven el aviso y el cambio de miembros
+    for chat_id, msg_id in sys_ids:
         hub.emit_to_chat(chat_id, {"type": "members_changed", "chat_id": chat_id})
         row = db.one("SELECT * FROM messages WHERE id = ?", (msg_id,))
         if row:
             hub.emit_to_chat(chat_id, {"type": "message", "message": message_out(row)})
+    for peer in dm_peers:
+        hub.emit_to_user(peer, {"type": "chat_updated", "chat_id": 0})
+
+    for rel, size in removed_media:
+        try:
+            media_mod.remove_media_files(config.MEDIA_DIR / rel)
+            media_mod.note_media_size(-size)
+        except OSError:
+            pass
     return {"ok": True}

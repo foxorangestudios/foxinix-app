@@ -20,7 +20,7 @@ from .. import config, db, medialink, ratelimit
 from ..auth import current_user
 from ..realtime import hub
 from . import media as media_mod
-from .people import _blocked_pair   # W28e: corta directos con bloqueo activo
+from .people import _are_friends, _blocked_pair   # W28e: bloqueo; MD solo con amistad
 from .users import user_brief
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
@@ -35,13 +35,57 @@ def _member_row(chat_id: int, user_id: int) -> dict[str, Any] | None:
     )
 
 
+def _dm_peer_id(chat_id: int, user_id: int) -> int | None:
+    row = db.one(
+        "SELECT user_id FROM chat_members"
+        " WHERE chat_id = ? AND user_id != ? LIMIT 1",
+        (chat_id, user_id),
+    )
+    return int(row["user_id"]) if row else None
+
+
 def _require_member(chat_id: int, user_id: int) -> dict[str, Any]:
     chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
     if not chat:
         raise HTTPException(404, "Chat no encontrado")
-    if not _member_row(chat_id, user_id):
+    mine = _member_row(chat_id, user_id)
+    if not mine or mine.get("hidden_at"):
         raise HTTPException(403, "No eres miembro de este chat")
+    if chat["type"] == "dm":
+        # Regla de producto: para hablar por MD hace falta una solicitud
+        # de amistad ACEPTADA. Los MD antiguos sin amistad quedan ocultos
+        # y tampoco se pueden leer/enviar por una URL directa.
+        peer = _dm_peer_id(chat_id, user_id)
+        if not peer or not _are_friends(user_id, peer):
+            raise HTTPException(
+                403, "Necesitas una solicitud de amistad aceptada para usar este MD")
     return chat
+
+
+def _transfer_owner(conn, chat_id: int, leaving_uid: int) -> int | None:
+    """Pasa la propiedad al admin/miembro más antiguo. Devuelve el nuevo
+    owner o None si no queda nadie. Se usa al salir y al borrar cuenta."""
+    row = conn.execute(
+        "SELECT role FROM chat_members WHERE chat_id = ? AND user_id = ?",
+        (chat_id, leaving_uid),
+    ).fetchone()
+    if not row or row["role"] != "owner":
+        return None
+    nxt = conn.execute(
+        "SELECT user_id FROM chat_members"
+        " WHERE chat_id = ? AND user_id != ?"
+        " ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, joined_at, user_id"
+        " LIMIT 1",
+        (chat_id, leaving_uid),
+    ).fetchone()
+    if not nxt:
+        return None
+    conn.execute(
+        "UPDATE chat_members SET role = 'owner'"
+        " WHERE chat_id = ? AND user_id = ?",
+        (chat_id, nxt["user_id"]),
+    )
+    return int(nxt["user_id"])
 
 
 def _next_seq(conn, chat_id: int) -> int:
@@ -324,6 +368,8 @@ def chat_brief(chat: dict[str, Any], me_id: int) -> dict[str, Any]:
         "my_role": (mine or {}).get("role", "member"),
         "pinned": bool((mine or {}).get("pinned")),   # W13: fijado en MI lista
         "muted": bool((mine or {}).get("muted")),     # W13: silenciado por mí
+        "archived": bool((mine or {}).get("archived")),
+        "peer_id": (title or {}).get("id") if chat["type"] == "dm" else None,
         "peer_read_seq": peer_read,        # W12: semilla de ✓✓ azul (leído)
         "peer_delivered_seq": peer_deliv,  # W12: semilla de ✓✓ (recibido)
         # W29c: mínimos = "todos" (✓✓ de grupos; en DM = máx)
@@ -362,6 +408,59 @@ def _rows_in(
             tuple(params_before) + tuple(chunk) + tuple(params_after),
         ))
     return out
+
+
+def _messages_out(rows: list[dict[str, Any]], chat_id: int) -> list[dict[str, Any]]:
+    """Serializa una página de mensajes con consultas por lote.
+
+    message_out() puntual hacía 5-6 SELECT por mensaje; con 100 mensajes
+    eran ~600 consultas por apertura. Aquí se precargan remitentes,
+    adjuntos, citas, reacciones y roles una sola vez.
+    """
+    if not rows:
+        return []
+    msg_ids = [m["id"] for m in rows]
+    reply_ids = [m["reply_to"] for m in rows if m.get("reply_to")]
+    replies = {r["id"]: r for r in _rows_in(
+        "SELECT * FROM messages WHERE id IN ", reply_ids
+    )}
+    user_ids: list[int] = [m["sender_id"] for m in rows if m.get("sender_id")]
+    user_ids += [r["sender_id"] for r in replies.values() if r.get("sender_id")]
+    users = {u["id"]: u for u in _rows_in(
+        "SELECT * FROM users WHERE id IN ", user_ids
+    )}
+    media_ids = [m["media_id"] for m in rows if m.get("media_id")]
+    medias = {md["id"]: md for md in _rows_in(
+        "SELECT * FROM media WHERE id IN ", media_ids
+    )}
+    reactions_by_msg: dict[int, list[dict[str, Any]]] = {}
+    for r in _rows_in(
+        "SELECT r.message_id, r.emoji, r.user_id, u.username,"
+        " COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS name"
+        " FROM reactions r JOIN users u ON u.id = r.user_id"
+        " WHERE r.message_id IN ",
+        msg_ids,
+    ):
+        reactions_by_msg.setdefault(r["message_id"], []).append({
+            "emoji": r["emoji"],
+            "user_id": r["user_id"],
+            "username": r["username"],
+            "name": r["name"],
+        })
+    roles = {
+        r["user_id"]: r["role"]
+        for r in db.rows(
+            "SELECT user_id, role FROM chat_members WHERE chat_id = ?",
+            (chat_id,),
+        )
+    }
+    return [
+        message_out(
+            m, users=users, medias=medias, replies=replies,
+            reactions_by_msg=reactions_by_msg, roles=roles,
+        )
+        for m in rows
+    ]
 
 
 def _chat_briefs(chats: list[dict[str, Any]], me_id: int) -> list[dict[str, Any]]:
@@ -514,6 +613,8 @@ def _chat_briefs(chats: list[dict[str, Any]], me_id: int) -> list[dict[str, Any]
             "my_role": (mine or {}).get("role", "member"),
             "pinned": bool((mine or {}).get("pinned")),
             "muted": bool((mine or {}).get("muted")),
+            "archived": bool((mine or {}).get("archived")),
+            "peer_id": (title or {}).get("id") if chat["type"] == "dm" else None,
             "peer_read_seq": peer_read,
             "peer_delivered_seq": peer_deliv,
             "peer_read_min_seq": peer_read_min,
@@ -594,6 +695,10 @@ class MuteIn(BaseModel):
     muted: bool
 
 
+class ArchiveIn(BaseModel):
+    archived: bool = True
+
+
 class ForwardIn(BaseModel):
     target_chat_id: int
 
@@ -625,12 +730,26 @@ class ReactIn(BaseModel):
 def list_chats(user: dict = Depends(current_user)) -> dict[str, Any]:
     chats = db.rows(
         "SELECT c.* FROM chats c JOIN chat_members m ON m.chat_id = c.id"
-        " WHERE m.user_id = ? ORDER BY c.created_at DESC",
+        " WHERE m.user_id = ? AND m.hidden_at = 0 ORDER BY c.created_at DESC",
         (user["id"],),
     )
+    # Los MD solo se listan si hay una solicitud de amistad aceptada.
+    # Se resuelve con UNA consulta para todos los chats.
+    friend_ids = {
+        int(r["friend_id"]) for r in db.rows(
+            "SELECT CASE WHEN from_user = ? THEN to_user ELSE from_user END AS friend_id"
+            " FROM friend_requests WHERE status = 'accepted'"
+            " AND (from_user = ? OR to_user = ?)",
+            (user["id"], user["id"], user["id"]),
+        )
+    }
     out = []
     # P1: una sola pasada batched en vez de chat_brief() por chat.
     for brief, c in zip(_chat_briefs(chats, user["id"]), chats):
+        if c["type"] == "dm":
+            peer = brief.get("peer_id")
+            if not peer or int(peer) not in friend_ids:
+                continue
         if brief["last_message"] or c["type"] == "dm" or c["title"]:
             out.append(brief)
     # W13: fijados primero; dentro de cada bloque, por último mensaje.
@@ -655,10 +774,19 @@ def create_dm(body: CreateDmIn, user: dict = Depends(current_user)) -> dict[str,
     if _blocked_pair(user["id"], peer["id"]):
         # W28e: bloqueo activo en cualquier dirección: ni abrir ni usar el DM
         raise HTTPException(403, "Usuario bloqueado")
+    if not _are_friends(user["id"], peer["id"]):
+        raise HTTPException(
+            403, "Envía una solicitud de amistad y espera a que la acepten")
 
     dm_key = ":".join(str(x) for x in sorted((user["id"], peer["id"])))
     existing = db.one("SELECT * FROM chats WHERE dm_key = ?", (dm_key,))
     if existing:
+        # Si borré el chat para mí, volver a abrirlo lo restaura.
+        db.run(
+            "UPDATE chat_members SET hidden_at = 0, archived = 0"
+            " WHERE chat_id = ? AND user_id = ?",
+            (existing["id"], user["id"]),
+        )
         return {"chat": chat_brief(existing, user["id"])}
 
     # W37f (auditoría): CREATIONS estaba declarado sin usarse — crear
@@ -686,11 +814,53 @@ def create_dm(body: CreateDmIn, user: dict = Depends(current_user)) -> dict[str,
         # carrera: otro request creó el mismo dm_key
         existing = db.one("SELECT * FROM chats WHERE dm_key = ?", (dm_key,))
         if existing:
+            db.run(
+                "UPDATE chat_members SET hidden_at = 0, archived = 0"
+                " WHERE chat_id = ? AND user_id = ?",
+                (existing["id"], user["id"]),
+            )
             return {"chat": chat_brief(existing, user["id"])}
         raise
     chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
     hub.notify_chat_created(chat_id, [user["id"], peer["id"]])
     return {"chat": chat_brief(chat, user["id"])}
+
+
+@router.post("/{chat_id}/archive")
+def set_archived(chat_id: int, body: ArchiveIn,
+                 user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Archiva/desarchiva un chat o grupo SOLO para el usuario actual."""
+    _require_member(chat_id, user["id"])
+    db.run(
+        "UPDATE chat_members SET archived = ? WHERE chat_id = ? AND user_id = ?",
+        (1 if body.archived else 0, chat_id, user["id"]),
+    )
+    hub.emit_to_user(user["id"], {"type": "chat_updated", "chat_id": chat_id})
+    return {"ok": True, "archived": bool(body.archived)}
+
+
+@router.delete("/{chat_id}")
+def delete_dm(chat_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Elimina un MD de MI lista (el otro usuario conserva su copia).
+
+    No borra mensajes ni archivos: es un borrado lógico por miembro. Si
+    el otro vuelve a escribir, el chat reaparece automáticamente.
+    """
+    chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
+    if not chat:
+        raise HTTPException(404, "Chat no encontrado")
+    mine = _member_row(chat_id, user["id"])
+    if not mine:
+        raise HTTPException(403, "No eres miembro de este chat")
+    if chat["type"] != "dm":
+        raise HTTPException(400, "Solo se pueden eliminar los MD")
+    db.run(
+        "UPDATE chat_members SET hidden_at = ?, archived = 0"
+        " WHERE chat_id = ? AND user_id = ?",
+        (int(time.time()), chat_id, user["id"]),
+    )
+    hub.emit_to_user(user["id"], {"type": "chat_updated", "chat_id": chat_id})
+    return {"ok": True, "deleted": True}
 
 
 @router.post("/group", status_code=201)
@@ -804,7 +974,21 @@ async def set_group_avatar(chat_id: int, file: UploadFile,
         (user["id"], rel, mime, len(data), (file.filename or "grupo")[:200],
          slug, w, h, int(time.time())),
     )
-    db.run("UPDATE chats SET avatar_media_id = ? WHERE id = ?", (media_id, chat_id))
+    removed = None
+    with db.tx() as conn:
+        old = conn.execute(
+            "SELECT avatar_media_id FROM chats WHERE id = ?", (chat_id,)
+        ).fetchone()
+        conn.execute("UPDATE chats SET avatar_media_id = ? WHERE id = ?",
+                     (media_id, chat_id))
+        if old and old["avatar_media_id"] and old["avatar_media_id"] != media_id:
+            removed = media_mod.drop_media_if_unused(conn, old["avatar_media_id"])
+    if removed:
+        try:
+            media_mod.remove_media_files(config.MEDIA_DIR / removed[0])
+            media_mod.note_media_size(-removed[1])
+        except OSError:
+            pass
     hub.emit_to_chat(chat_id, {"type": "chat_updated", "chat_id": chat_id})
     return {"chat_id": chat_id,
             "avatar_url": medialink.media_url_by_id(media_id, "profile")}
@@ -851,14 +1035,7 @@ def get_messages(
              "user_ids": [user["id"]]},
             exclude=user["id"],
         )
-    roles = {
-        r["user_id"]: r["role"]
-        for r in db.rows(
-            "SELECT user_id, role FROM chat_members WHERE chat_id = ?",
-            (chat_id,),
-        )
-    }
-    return {"messages": [message_out(m, roles=roles) for m in rows]}
+    return {"messages": _messages_out(rows, chat_id)}
 
 
 def _e2e_stored(blob: "E2EBlob | None", text: str) -> tuple[str, str, str]:
@@ -971,6 +1148,19 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
             mentions = _mentions_col(ids)
 
     now = int(time.time())
+    unhide = False
+    if chat["type"] == "dm":
+        # Un MD eliminado de la lista reaparece cuando llega un mensaje
+        # nuevo: el borrado es "hasta que vuelva a haber actividad".
+        unhide = bool(db.one(
+            "SELECT 1 AS x FROM chat_members"
+            " WHERE chat_id = ? AND hidden_at > 0 LIMIT 1",
+            (chat_id,),
+        ))
+        db.run(
+            "UPDATE chat_members SET hidden_at = 0 WHERE chat_id = ?",
+            (chat_id,),
+        )
     try:
         with db.tx() as conn:
             seq = _next_seq(conn, chat_id)
@@ -995,6 +1185,8 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
             return {"message": message_out(prev)}
         raise
 
+    if unhide:
+        hub.emit_to_chat(chat_id, {"type": "chat_updated", "chat_id": chat_id})
     msg = db.one("SELECT * FROM messages WHERE id = ?", (msg_id,))
     out = message_out(msg)
     hub.emit_to_chat(chat_id, {"type": "message", "message": out})
@@ -1051,12 +1243,10 @@ def list_pins(chat_id: int, user: dict = Depends(current_user)) -> dict[str, Any
     )
     # W45: la lista de fijados también respeta el spoiler; el modal muestra
     # "Spoiler" y el clic lleva a la burbuja, que sigue cubierta.
-    out = []
-    for r in rows:
-        m = message_out(r)
+    out = _messages_out(rows, chat_id)
+    for m in out:
         if m.get("spoiler"):
             m["body"] = "Spoiler"
-        out.append(m)
     return {"messages": out}
 
 
@@ -1211,9 +1401,10 @@ def delete_message(
     if media_id:
         as_avatar = db.one(
             "SELECT 1 AS a FROM users WHERE avatar_media_id = ?"
+            " OR banner_media_id = ?"
             " UNION SELECT 1 AS a FROM chats WHERE avatar_media_id = ?"
             " LIMIT 1",
-            (media_id, media_id),
+            (media_id, media_id, media_id),
         )
         # W45e: los reenvíos comparten media_id. Antes, borrar el mensaje
         # original eliminaba el archivo y dejaba el reenvío roto (404).
@@ -1247,23 +1438,26 @@ def delete_message(
 
 @router.post("/{chat_id}/read")
 def mark_read(chat_id: int, body: ReadIn, user: dict = Depends(current_user)) -> dict[str, Any]:
-    _require_member(chat_id, user["id"])
+    chat = _require_member(chat_id, user["id"])
+    # P1: un cliente podía mandar seq=2^31 y dejar "leídos" todos los
+    # mensajes futuros. El recibo nunca puede superar chats.last_seq.
+    seq = max(0, min(int(body.seq), int(chat.get("last_seq") or 0)))
     # W14: solo si el seq NUEVO avanza se escribe y se emite el evento
     # 'read' (antes cada request re-emitió el broadcast aunque no cambiara).
     # W14: el gate de broadcast es el rowcount (execute() devuelve lastrowid,
     # que tras un UPDATE queda en 0).
-    if db.run(
+    if seq and db.run(
         "UPDATE chat_members SET last_read_seq = ?,"
         " last_delivered_seq = MAX(last_delivered_seq, ?)"
         " WHERE chat_id = ? AND user_id = ? AND last_read_seq < ?",
-        (body.seq, body.seq, chat_id, user["id"], body.seq),
+        (seq, seq, chat_id, user["id"], seq),
     ) and not body.silent:
         hub.emit_to_chat(
             chat_id,
-            {"type": "read", "chat_id": chat_id, "user_id": user["id"], "seq": body.seq},
+            {"type": "read", "chat_id": chat_id, "user_id": user["id"], "seq": seq},
             exclude=user["id"],
         )
-    return {"ok": True}
+    return {"ok": True, "seq": seq}
 
 
 @router.post("/{chat_id}/typing")
@@ -1339,7 +1533,7 @@ def search_messages(
                 " ORDER BY seq DESC LIMIT ?",
                 (chat_id, "%" + _esc(folded) + "%", limit),
             )
-    return {"messages": [message_out(m) for m in rows]}
+    return {"messages": _messages_out(rows, chat_id)}
 
 
 @router.post("/{chat_id}/messages/{message_id}/forward", status_code=201)
@@ -1617,6 +1811,51 @@ def list_members(chat_id: int, user: dict = Depends(current_user)) -> dict[str, 
     }
 
 
+@router.post("/{chat_id}/transfer-owner")
+def transfer_owner(chat_id: int, body: MemberIn,
+                   user: dict = Depends(current_user)) -> dict[str, Any]:
+    """El owner actual cede la propiedad a otro miembro (no se puede
+    quedar un grupo sin administración)."""
+    chat = _require_member(chat_id, user["id"])
+    if chat["type"] != "group":
+        raise HTTPException(400, "Solo los grupos tienen propietario")
+    mine = _member_row(chat_id, user["id"])
+    if not mine or mine["role"] != "owner":
+        raise HTTPException(403, "Solo el propietario puede transferir el grupo")
+    target = db.one(
+        "SELECT u.id FROM users u JOIN chat_members cm ON cm.user_id = u.id"
+        " WHERE cm.chat_id = ? AND u.username = ?",
+        (chat_id, body.username.strip().lower()),
+    )
+    if not target or target["id"] == user["id"]:
+        raise HTTPException(400, "Miembro destino inválido")
+    now = int(time.time())
+    name = user["display_name"] or user["username"]
+    with db.tx() as conn:
+        conn.execute(
+            "UPDATE chat_members SET role = 'admin'"
+            " WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user["id"]),
+        )
+        conn.execute(
+            "UPDATE chat_members SET role = 'owner'"
+            " WHERE chat_id = ? AND user_id = ?",
+            (chat_id, target["id"]),
+        )
+        seq = _next_seq(conn, chat_id)
+        cur = conn.execute(
+            "INSERT INTO messages (chat_id, seq, sender_id, kind, body, created_at)"
+            " VALUES (?, ?, NULL, 'system', ?, ?)",
+            (chat_id, seq, f"{name} transfirió la propiedad del grupo", now),
+        )
+        sys_id = cur.lastrowid
+    hub.emit_to_chat(chat_id, {"type": "members_changed", "chat_id": chat_id})
+    row = db.one("SELECT * FROM messages WHERE id = ?", (sys_id,))
+    if row:
+        hub.emit_to_chat(chat_id, {"type": "message", "message": message_out(row)})
+    return {"ok": True}
+
+
 @router.post("/{chat_id}/leave")
 def leave_chat(chat_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
     """Salir de un grupo (W7): borra la membresía, avisa a los demás con
@@ -1626,25 +1865,36 @@ def leave_chat(chat_id: int, user: dict = Depends(current_user)) -> dict[str, An
     if chat["type"] != "group":
         raise HTTPException(400, "Solo se puede salir de grupos")
     name = user["display_name"] or user["username"]
-    db.execute(
-        "DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?",
-        (chat_id, user["id"]),
-    )
-    left = db.one("SELECT COUNT(*) AS n FROM chat_members WHERE chat_id = ?", (chat_id,))
-    if left and left["n"] == 0:
-        # Último en salir: a nadie le queda visible este grupo.
-        db.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
-        return {"ok": True, "deleted": True}
-    sys_msg = f"{name} salió del grupo"
+    sys_id = 0
+    deleted = False
     with db.tx() as conn:
-        seq = _next_seq(conn, chat_id)
-        cur = conn.execute(
-            "INSERT INTO messages (chat_id, seq, sender_id, kind, body, created_at)"
-            " VALUES (?, ?, NULL, 'system', ?, ?)",
-            (chat_id, seq, sys_msg, int(time.time())),
+        # Si era owner, primero pasa la propiedad y luego sale: así nunca
+        # hay una ventana con el grupo sin administración.
+        _transfer_owner(conn, chat_id, user["id"])
+        conn.execute(
+            "DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?",
+            (chat_id, user["id"]),
         )
-        sys_id = cur.lastrowid
+        left = conn.execute(
+            "SELECT COUNT(*) AS n FROM chat_members WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+        if not left or left["n"] == 0:
+            # Último en salir: a nadie le queda visible este grupo.
+            conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+            deleted = True
+        else:
+            seq = _next_seq(conn, chat_id)
+            cur = conn.execute(
+                "INSERT INTO messages (chat_id, seq, sender_id, kind, body, created_at)"
+                " VALUES (?, ?, NULL, 'system', ?, ?)",
+                (chat_id, seq, f"{name} salió del grupo", int(time.time())),
+            )
+            sys_id = cur.lastrowid
+    if deleted:
+        hub.emit_to_user(user["id"], {"type": "chat_updated", "chat_id": chat_id})
+        return {"ok": True, "deleted": True}
     hub.emit_to_chat(chat_id, {"type": "member_left", "chat_id": chat_id, "user_id": user["id"]})
+    hub.emit_to_chat(chat_id, {"type": "members_changed", "chat_id": chat_id})
     sys_row = db.one("SELECT * FROM messages WHERE id = ?", (sys_id,))
     if sys_row:
         hub.emit_to_chat(chat_id, {"type": "message", "message": message_out(sys_row)})

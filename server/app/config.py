@@ -59,6 +59,15 @@ PUBLIC_URL = os.environ.get("FOXMSG_PUBLIC_URL", "").rstrip("/")
 
 PORT = int(os.environ.get("FOXMSG_PORT", "8444"))
 MEDIA_QUOTA = int(os.environ.get("FOXMSG_MEDIA_QUOTA", str(1024**3)))  # 1 GB
+# Vida de las URLs firmadas de media (24 h). Las URLs se renuevan en cada
+# respuesta de la API; una ventana amplia evita que un chat abierto mucho
+# tiempo reciba un 403 la primera vez que carga una imagen perezosa.
+MEDIA_URL_TTL = int(os.environ.get("FOXMSG_MEDIA_URL_TTL", str(24 * 3600)))
+# Solo activar detrás de un proxy de confianza: usa X-Forwarded-For para
+# que los límites de tasa no mezclen a todos los usuarios.
+TRUST_PROXY = os.environ.get("FOXMSG_TRUST_PROXY", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
 
 # Tokens
 ACCESS_TTL = 60 * 60 * 3            # 3 h (acceso)

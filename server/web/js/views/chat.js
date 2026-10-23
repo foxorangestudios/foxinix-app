@@ -27,6 +27,7 @@ import {
 import {
   openChat, closeChat, loadChats, loadOlder, sendText, sendMedia,
   createDm, createGroup, addMember, setMemberRole, removeMember,
+  transferOwner, archiveChat, deleteDmChat,
   toggleReaction, loadMembers, leaveGroup,
   /* W28c */
   togglePin,
@@ -236,6 +237,22 @@ function askLeave(c) {
   };
 }
 
+/* Eliminar un MD de mi lista. El otro usuario conserva su copia. */
+function askDeleteDm(c) {
+  if (!c) return;
+  store.confirmBox = {
+    title: 'Eliminar chat',
+    text: t('Vas a eliminar "{n}" de tu lista.\nEl otro usuario conservará su copia. Si te vuelve a escribir, el chat reaparecerá.',
+      { n: chatTitle(c) }),
+    danger: true,
+    okLabel: 'Eliminar chat',
+    onOk: async function () {
+      await deleteDmChat(c.id);
+      toast(t('Chat eliminado'), 'ok');
+    },
+  };
+}
+
 /* W46: confirmación y aviso al ascender/quitar admin o sacar del grupo.
    El mensaje system del server es el aviso permanente en el chat; acá
    además se pide confirmación y se muestra un toast al actor. */
@@ -257,6 +274,22 @@ function askSetRole(c, m, role) {
       toast(promoting
         ? t('{n} ahora es admin', { n: name })
         : t('{n} ya no es admin', { n: name }), 'ok');
+    },
+  };
+}
+
+function askTransferOwner(c, m) {
+  if (!c || !m) return;
+  const name = m.display_name || m.username;
+  store.confirmBox = {
+    title: 'Transferir propiedad',
+    text: t('¿Transferir la propiedad de este grupo a {n}? Tú pasarás a ser admin y {n} podrá administrar el grupo.',
+      { n: name }),
+    danger: true,
+    okLabel: 'Transferir propiedad',
+    onOk: async function () {
+      await transferOwner(c.id, m.username);
+      toast(t('La propiedad pasó a {n}', { n: name }), 'ok');
     },
   };
 }
@@ -470,6 +503,24 @@ function chatMenu(e, c, key) {
     icon: c.muted ? 'i-bell' : 'i-bell-off',
     fn: function () { setMuted(c.id, !c.muted); },
   });
+  items.push({
+    label: c.archived ? 'Desarchivar chat' : 'Archivar chat',
+    icon: 'i-archive',
+    fn: function () {
+      const want = !c.archived;
+      Promise.resolve(archiveChat(c.id, want)).then(function () {
+        toast(want ? 'Chat archivado' : 'Chat desarchivado', 'ok');
+      }).catch(function (err) {
+        toast((err && err.detail) || 'No se pudo archivar el chat', 'err');
+      });
+    },
+  });
+  if (c.type === 'dm') {
+    items.push({
+      label: 'Eliminar chat', icon: 'i-trash', danger: true,
+      fn: function () { askDeleteDm(c); },
+    });
+  }
   /* W36i: key = el mismo botón alterna abrir/cerrar. El ⋮ de la INFO
      usa 'info' (distinta de la lista): abrir uno no cierra el otro
      con un segundo clic, cada botón se auto-gestiona. */
@@ -2454,6 +2505,9 @@ const NewChatModal = {
       // inputEl es un ref: el foco se le pide al .value (antes fallaba
       // con TypeError y el autofocus nunca funcionaba).
       if (inputEl.value) inputEl.value.focus();
+      // Para decidir «Mensaje» vs «Enviar solicitud» hacen falta las
+      // amistades; si el panel Personas aún no cargó, se piden ahora.
+      if (!store.people) loadPeople().catch(function () {});
     });
 
     const title = Vue.computed(function () {
@@ -2474,7 +2528,28 @@ const NewChatModal = {
       } catch (e) { results.value = []; }
     };
 
-    /* dm: crear chat; group: sumar a la selección; add: agregar al grupo. */
+    const isFriend = function (u) {
+      const fs = (store.people && store.people.friends) || [];
+      for (let i = 0; i < fs.length; i++) if (fs[i].id === u.id) return true;
+      return false;
+    };
+    const sentTo = function (u) {
+      const rs = (store.people && store.people.sent) || [];
+      for (let i = 0; i < rs.length; i++) {
+        if (rs[i].user && rs[i].user.id === u.id) return true;
+      }
+      return false;
+    };
+    const receivedFrom = function (u) {
+      const rs = (store.people && store.people.received) || [];
+      for (let i = 0; i < rs.length; i++) {
+        if (rs[i].user && rs[i].user.id === u.id) return rs[i];
+      }
+      return null;
+    };
+
+    /* dm: crear chat (solo amigos); group: sumar a la selección;
+       add: agregar al grupo. */
     const pick = async function (u) {
       const mode = store.newChatMode;
       if (mode === 'group') {
@@ -2495,6 +2570,35 @@ const NewChatModal = {
           close();
         } catch (e) {
           toast((e && e.detail) || 'No se pudo agregar', 'err');
+        }
+        return;
+      }
+      /* Regla del producto: sin solicitud aceptada no se abre un MD.
+         Si aún no son amigos, este click envía la solicitud. */
+      if (!isFriend(u)) {
+        if (sentTo(u)) {
+          toast('Ya enviaste una solicitud a @' + u.username, 'info');
+          return;
+        }
+        const incoming = receivedFrom(u);
+        if (incoming) {
+          try {
+            await acceptFriendRequest(incoming.id);
+            toast('Solicitud aceptada', 'ok');
+            q.value = '';
+            results.value = [];
+          } catch (e) {
+            toast((e && e.detail) || 'No se pudo aceptar la solicitud', 'err');
+          }
+          return;
+        }
+        try {
+          await sendFriendRequest(u.username);
+          toast('Solicitud enviada a @' + u.username, 'ok');
+          q.value = '';
+          results.value = [];
+        } catch (e) {
+          toast((e && e.detail) || 'No se pudo enviar la solicitud', 'err');
         }
         return;
       }
@@ -2537,7 +2641,9 @@ const NewChatModal = {
 
     return {
       store, title, q, results, inputEl, gtitle, picked,
-      onQuery, pick, pickFirst, unpick, isSelected, createTheGroup, close, mediaUrl,
+      onQuery, pick, pickFirst, unpick, isSelected, isFriend, sentTo,
+      receivedFrom,
+      createTheGroup, close, mediaUrl,
     };
   },
   template:
@@ -2577,9 +2683,14 @@ const NewChatModal = {
               '<span v-else>{{ (u.display_name || u.username).charAt(0).toUpperCase() }}</span>' +
             '</span>' +
             '<span class="ri-col"><span class="ri-name">{{ u.display_name }}</span>' +
-            '<span class="ri-user">@{{ u.username }}</span></span>' +
+            '<span class="ri-user">@{{ u.username }}' +
+              '<span v-if="store.newChatMode === \'dm\' && !isFriend(u)"> · ' +
+                '{{ sentTo(u) ? t(\'Solicitud pendiente\') : receivedFrom(u) ? t(\'Aceptar solicitud\') : t(\'Enviar solicitud\') }}</span>' +
+            '</span></span>' +
             '<svg class="ic ic-sm ri-check" v-if="store.newChatMode === \'group\' && isSelected(u)">' +
               '<use href="#i-check"></use></svg>' +
+            '<svg class="ic ic-sm ri-check" v-else-if="store.newChatMode === \'dm\' && !isFriend(u)">' +
+              '<use href="#i-userplus"></use></svg>' +
           '</button>' +
           '<div class="res-empty" v-if="q.trim().length >= 2 && !results.length">{{ t(\'Sin resultados\') }}</div>' +
           '<div class="res-empty dim" v-else-if="q.trim().length < 2">{{ t(\'Escribe al menos 2 letras\') }}</div>' +
@@ -2612,7 +2723,7 @@ function askLogout() {
 function askDeleteAccount() {
   store.confirmBox = {
     title: 'Eliminar cuenta',
-    text: 'Esta acción es PERMANENTE y no se puede deshacer:\n• Se borra tu cuenta, tu perfil y tu correo.\n• Se borran tus mensajes y tus archivos (fotos, notas de voz).\n• En cada chat queda un aviso de que tu cuenta fue eliminada.\n\nEscribe tu usuario y contraseña para confirmar.',
+    text: 'Esta acción es PERMANENTE y no se puede deshacer:\n• Se borra tu cuenta, tu perfil y tu correo.\n• Se borran tus mensajes y tus archivos (fotos, notas de voz).\n• Tus MD se eliminan por completo; en los grupos queda un aviso de que tu cuenta fue eliminada.\n\nEscribe tu usuario y contraseña para confirmar.',
     danger: true,
     requireUser: true,
     requirePassword: true,
@@ -3107,7 +3218,7 @@ const SettingsModal = {
             <div class="st-sec">
               <div class="st-h">{{ t('Zona de peligro') }}</div>
               <div class="danger-zone">
-                <p><b>{{ t('Eliminar cuenta') }}</b>: {{ t('borra para siempre tu perfil, tus mensajes y tus archivos. En cada chat queda un aviso. No se puede deshacer.') }}</p>
+                <p><b>{{ t('Eliminar cuenta') }}</b>: {{ t('borra para siempre tu perfil, tus mensajes y tus archivos. Tus MD se eliminan por completo; en los grupos queda un aviso. No se puede deshacer.') }}</p>
                 <button class="btn btn-danger btn-full" type="button" @click="doDelete">{{ t('Eliminar mi cuenta') }}</button>
               </div>
             </div>
@@ -4296,10 +4407,56 @@ const ProfilePanel = {
   setup: function () {
     const close = function () { store.profile = null; };
 
+    const friendState = Vue.computed(function () {
+      const p = store.profile;
+      if (!p || !p.user) return 'none';
+      const fs = (store.people && store.people.friends) || [];
+      for (let i = 0; i < fs.length; i++) if (fs[i].id === p.user.id) return 'friend';
+      const sent = (store.people && store.people.sent) || [];
+      for (let i = 0; i < sent.length; i++) {
+        if (sent[i].user && sent[i].user.id === p.user.id) return 'sent';
+      }
+      const recv = (store.people && store.people.received) || [];
+      for (let i = 0; i < recv.length; i++) {
+        if (recv[i].user && recv[i].user.id === p.user.id) return 'received';
+      }
+      return 'none';
+    });
+
     const startChat = async function () {
       const p = store.profile;
       if (!p || !p.user) return;
       const username = p.user.username;
+      if (friendState.value === 'sent') {
+        toast(t('Ya enviaste una solicitud de amistad'), 'info');
+        return;
+      }
+      if (friendState.value === 'received') {
+        const recv = (store.people && store.people.received) || [];
+        let req = null;
+        for (let i = 0; i < recv.length; i++) {
+          if (recv[i].user && recv[i].user.id === p.user.id) { req = recv[i]; break; }
+        }
+        if (!req) { toast(t('La solicitud ya no está disponible'), 'info'); return; }
+        close();
+        try {
+          await acceptFriendRequest(req.id);
+          toast(t('Solicitud aceptada'), 'ok');
+        } catch (e) {
+          toast((e && e.detail) || 'No se pudo aceptar la solicitud', 'err');
+        }
+        return;
+      }
+      if (friendState.value !== 'friend') {
+        close();
+        try {
+          await sendFriendRequest(username);
+          toast(t('Solicitud enviada'), 'ok');
+        } catch (e) {
+          toast((e && e.detail) || 'No se pudo enviar la solicitud', 'err');
+        }
+        return;
+      }
       close();
       try {
         await createDm(username);
@@ -4324,7 +4481,7 @@ const ProfilePanel = {
        línea dice "Desconectado"; activo manda SU estado (texto o preset). */
 
     return {
-      store, close, startChat, inActiveDm, dotClass,
+      store, close, startChat, friendState, inActiveDm, dotClass,
       statusOf, profileQuote, personMenu, joinedLine, md: mdToHtml,
       mediaUrl,
     };
@@ -4377,7 +4534,10 @@ const ProfilePanel = {
             </div>
           </div>
           <div class="pp-foot" v-if="!inActiveDm">
-            <button class="btn btn-full" type="button" @click="startChat">{{ t('Mensaje') }}</button>
+            <button class="btn btn-full" type="button" @click="startChat"
+              :disabled="friendState === 'sent'">
+              {{ friendState === 'friend' ? t('Mensaje') : friendState === 'sent' ? t('Solicitud pendiente') : friendState === 'received' ? t('Aceptar solicitud') : t('Enviar solicitud') }}
+            </button>
           </div>
         </template>
       </div>
@@ -4498,6 +4658,12 @@ const ChatInfoPanel = {
         items.push({
           label: 'Quitar admin', icon: 'i-user',
           fn: function () { askSetRole(c, m, 'member'); },
+        });
+      }
+      if (c.my_role === 'owner') {
+        items.push({
+          label: 'Transferir propiedad', icon: 'i-shield', danger: true,
+          fn: function () { askTransferOwner(c, m); },
         });
       }
       items.push({
@@ -5382,11 +5548,21 @@ export const ChatShell = {
 
     const filteredChats = Vue.computed(function () {
       const q = store.search.trim().toLowerCase();
-      if (!q) return store.chats;
+      /* La lista normal no muestra archivados; la pestaña Archivados
+         muestra sólo esos. */
+      const wantArchived = !!store.showArchived;
       return store.chats.filter(function (c) {
+        if (!!c.archived !== wantArchived) return false;
+        if (!q) return true;
         return chatTitle(c).toLowerCase().indexOf(q) >= 0 ||
           (c.title && c.title.username && c.title.username.toLowerCase().indexOf(q) >= 0);
       });
+    });
+
+    const archivedCount = Vue.computed(function () {
+      let n = 0;
+      for (let i = 0; i < store.chats.length; i++) if (store.chats[i].archived) n++;
+      return n;
     });
 
     const listEmpty = Vue.computed(function () {
@@ -5455,6 +5631,12 @@ export const ChatShell = {
 
     /* ---------- conversación ---------- */
 
+    /* P1: no meter miles de filas en el DOM. Se renderiza la ventana
+       más reciente (300) y se amplía con "Ver anteriores" o al llegar
+       arriba; el historial sigue completo en store.msgs. */
+    const ROWS_PAGE = 300;
+    const renderLimit = Vue.ref(ROWS_PAGE);
+
     const rows = Vue.computed(function () {
       const all = store.msgs[store.activeChatId];
       const out = [];
@@ -5470,6 +5652,9 @@ export const ChatShell = {
         const x = all[i];
         if (x.e2e && x._plain == null) continue;
         arr.push(x);
+      }
+      if (arr.length > renderLimit.value) {
+        arr.splice(0, arr.length - renderLimit.value);
       }
       const meId = store.user ? store.user.id : 0;
       const chat = activeChat.value;
@@ -5561,6 +5746,16 @@ export const ChatShell = {
         prevDay = dk;
       }
       return out;
+    });
+
+    const hiddenRows = Vue.computed(function () {
+      const all = store.msgs[store.activeChatId];
+      if (!all) return 0;
+      let visible = 0;
+      for (let i = 0; i < all.length; i++) {
+        if (!(all[i].e2e && all[i]._plain == null)) visible++;
+      }
+      return Math.max(0, visible - renderLimit.value);
     });
 
     /* W29c: "escribiendo…" por USUARIO: varios pueden escribir a la vez
@@ -5699,10 +5894,14 @@ export const ChatShell = {
     const doLoadOlder = async function () {
       const el = scroller.value;
       const id = store.activeChatId;
+      if (!id || store.loadingOlder) return;
       const prevH = el ? el.scrollHeight : 0;
       const prevTop = el ? el.scrollTop : 0;
-      await loadOlder(id);
+      if (store.hasMore[id]) await loadOlder(id);
       if (store.activeChatId !== id) return;
+      /* La página recién cargada (o la ya cargada que estaba fuera de la
+         ventana) se hace visible. */
+      renderLimit.value += ROWS_PAGE;
       await Vue.nextTick();
       if (el) el.scrollTop = el.scrollHeight - prevH + prevTop;
     };
@@ -5742,6 +5941,7 @@ export const ChatShell = {
 
     Vue.watch(function () { return store.activeChatId; }, async function (id) {
       stick.value = true;
+      renderLimit.value = ROWS_PAGE;
       draft.value = '';
       replyTo.value = null;
       /* W7: al cambiar de chat se limpian menú, picker y panel de info */
@@ -6702,6 +6902,7 @@ export const ChatShell = {
       window.removeEventListener('resize', onResizeW);
     });
     const peopleActive = Vue.computed(function () {
+      if (store.showArchived) return false;
       return isNarrow.value ? !!store.peopleMobile : !store.activeChatId;
     });
     /* W29a: globo con las solicitudes de amistad recibidas (tope 9+). */
@@ -6709,8 +6910,15 @@ export const ChatShell = {
       const p = store.people;
       return (p && p.received) ? p.received.length : 0;
     });
+    const toggleArchived = function () {
+      store.showArchived = !store.showArchived;
+      store.peopleMobile = false;
+      store.search = '';
+      if (isNarrow.value && store.activeChatId) closeChat();
+    };
     const goPeople = function () {
       store.settingsOpen = false;
+      store.showArchived = false;
       store.peopleTab = 'active';
       if (isNarrow.value) {
         if (store.activeChatId) closeChat();
@@ -6727,6 +6935,7 @@ export const ChatShell = {
     const mobileChats = function () {
       store.settingsOpen = false;
       store.peopleMobile = false;
+      store.showArchived = false;
       if (store.activeChatId) closeChat();
     };
 
@@ -6853,6 +7062,20 @@ export const ChatShell = {
        jumpResult; tryJump es el camino inverso (URL → scroll) para
        deep links y para el botón atrás. */
     let lastJump = 0;
+    /* Un mensaje antiguo puede estar cargado pero fuera de la ventana
+       renderizada; antes de hacer scroll hay que ampliarla. */
+    const ensureRendered = function (cid, id) {
+      const arr = store.msgs[cid] || [];
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i].id === id) {
+          const need = arr.length - i;
+          if (need > renderLimit.value) {
+            renderLimit.value = Math.ceil(need / ROWS_PAGE) * ROWS_PAGE;
+          }
+          return;
+        }
+      }
+    };
     const jumpResult = async function (m) {
       const cid = store.activeChatId;
       const arr = store.msgs[cid];
@@ -6873,6 +7096,7 @@ export const ChatShell = {
       lastJump = m.id;
       store.jumpMsg = m.id;
       store.infoOpen = false;   // el panel de info cede el lugar
+      ensureRendered(cid, m.id);
       await Vue.nextTick();
       scrollToMsg(m.id);
     };
@@ -6898,6 +7122,7 @@ export const ChatShell = {
       }
       if (!m) return;
       store.infoOpen = false;   // el panel de info cede el lugar
+      ensureRendered(cid, m.id);
       await Vue.nextTick();
       scrollToMsg(m.id);
     };
@@ -7412,7 +7637,7 @@ export const ChatShell = {
       searchOpen, sQ, sResults, sBusy, sErr,
       toggleSearch, onSearchInput, sSnippet, sTime, jumpResult,
       fwdFor, fwdQ, fwdBusy, fwdChats, doForward,
-      filteredChats, listEmpty, activeChat, rows,
+      filteredChats, archivedCount, listEmpty, activeChat, rows, hiddenRows, showOlder: doLoadOlder,
       chatLoading,   /* W27h */
       quickReact, msgLink,   /* W28a */
       mList, mIdx, mPick,    /* W28b: @menciones */
@@ -7461,7 +7686,7 @@ export const ChatShell = {
       /* W19: sidebar colapsable */
       toggleSide, unfoldSide,
       /* W27c: "Personas" en el panel de chats (sidebar) */
-      goPeople, closePeople, peopleActive, reqCount,
+      goPeople, closePeople, toggleArchived, peopleActive, reqCount,
       /* W54: barra inferior y menú ⋮ de la cabecera en móvil */
       mobileChats, chatMore,
     };
@@ -7514,6 +7739,14 @@ export const ChatShell = {
           '<i class="side-badge" v-if="reqCount > 0">' +
             '{{ reqCount > 9 ? \'9+\' : reqCount }}</i>' +
         '</button>' +
+        '<button class="side-people side-archive" type="button" :class="{ on: store.showArchived }" ' +
+          ':title="store.showArchived ? t(\'Volver a los chats\') : t(\'Archivados\')" ' +
+          '@click="toggleArchived">' +
+          '<svg class="ic ic-sm"><use href="#i-archive"></use></svg>' +
+          '<span>{{ store.showArchived ? t(\'Volver a los chats\') : t(\'Archivados\') }}</span>' +
+          '<i class="side-badge" v-if="!store.showArchived && archivedCount > 0">' +
+            '{{ archivedCount > 9 ? \'9+\' : archivedCount }}</i>' +
+        '</button>' +
         '<div class="chat-list">' +
           '<button class="chat-item" type="button" v-for="c in filteredChats" :key="c.id" ' +
             ':data-chat-id="c.id" ' +
@@ -7550,7 +7783,8 @@ export const ChatShell = {
             '</span>' +
           '</button>' +
           '<div class="list-empty" v-if="listEmpty">' +
-            '<template v-if="store.chats.length">{{ t(\'Sin resultados para “{n}”\', { n: store.search }) }}</template>' +
+            '<template v-if="store.showArchived">{{ t(\'No hay chats archivados.\') }}</template>' +
+            '<template v-else-if="store.chats.length">{{ t(\'Sin resultados para “{n}”\', { n: store.search }) }}</template>' +
             '<template v-else>{{ t(\'Aún no tienes chats.\') }}<br>{{ t(\'Crea uno con el botón ＋.\') }}</template>' +
           '</div>' +
         '</div>' +
@@ -7644,6 +7878,9 @@ export const ChatShell = {
             '<span>{{ t(\'Cargando…\') }}</span>' +
           '</div>' +
           '<div class="load-older" v-if="store.loadingOlder">{{ t(\'Cargando anteriores…\') }}</div>' +
+          '<button class="load-older load-more-older" type="button" v-else-if="hiddenRows" ' +
+            '@click="showOlder">' +
+            '{{ t(\'Ver {n} mensajes anteriores\', { n: hiddenRows }) }}</button>' +
           /* W39: la key es estable entre el pendiente y su ack (el
              id temporal NEGATIVO cambiaba por el del server → Vue
              recreaba el nodo y la animación de entrada se veía como
@@ -7879,6 +8116,14 @@ export const ChatShell = {
             '<i class="mt-badge" v-if="reqCount > 0">{{ reqCount > 9 ? \'9+\' : reqCount }}</i>' +
           '</span>' +
           '<span class="mt-label">{{ t(\'Personas\') }}</span>' +
+        '</button>' +
+        '<button class="mt-btn" type="button" :class="{ on: store.showArchived && !store.settingsOpen }" ' +
+          '@click="toggleArchived">' +
+          '<span class="mt-ic-wrap">' +
+            '<svg class="ic"><use href="#i-archive"></use></svg>' +
+            '<i class="mt-badge" v-if="archivedCount > 0">{{ archivedCount > 9 ? \'9+\' : archivedCount }}</i>' +
+          '</span>' +
+          '<span class="mt-label">{{ t(\'Archivados\') }}</span>' +
         '</button>' +
         '<button class="mt-btn" type="button" :class="{ on: store.settingsOpen }" ' +
           '@click="openSettings()">' +

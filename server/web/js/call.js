@@ -23,8 +23,13 @@ let localStream = null;
 let remoteStream = null;
 let pendingOffer = null;    // oferta entrante esperando "Contestar"
 let ringTimer = null;       // tono de llamada entrante
+let callTimer = null;       // sin respuesta / conexión colgada
 let iceQueue = [];          // candidatos llegados antes de la remota
 let actx = null;
+let starting = false;       // getUserMedia en curso (evita doble clic)
+let callGen = 0;            // invalida getUserMedia que termina tras colgar
+const RING_TIMEOUT = 60000; // 60 s para contestar
+const CONNECT_TIMEOUT = 45000; // 45 s para establecer la conexión
 
 export function initCall(send) { sendFn = send; }
 
@@ -53,6 +58,24 @@ function stopRing() {
   if (ringTimer) { clearInterval(ringTimer); ringTimer = null; }
 }
 
+function stopCallTimer() {
+  if (callTimer) { clearTimeout(callTimer); callTimer = null; }
+}
+
+/* Sin esto una llamada ignorada o una conexión que nunca completa deja
+   cámara/micrófono activos indefinidamente. */
+function armCallTimer(ms, reason) {
+  stopCallTimer();
+  callTimer = setTimeout(function () {
+    callTimer = null;
+    if (!store.call || store.call.state === 'active') return;
+    if (sendFn) sendFn({ type: 'call_hangup', chat_id: store.call.chatId, reason: reason });
+    cleanup();
+    store.call = null;
+    toast(reason === 'timeout' ? t('Sin respuesta') : t('La llamada se cortó'));
+  }, ms);
+}
+
 function startRing() {
   stopRing();
   try {
@@ -70,15 +93,28 @@ function startRing() {
 
 /* ------------------------------------------------------- ciclo base */
 
+function releaseStream(stream) {
+  if (!stream) return;
+  try {
+    const trs = stream.getTracks();
+    for (let i = 0; i < trs.length; i++) trs[i].stop();
+  } catch (e) {}
+}
+
 function cleanup() {
   stopRing();
+  stopCallTimer();
+  /* Cualquier getUserMedia pendiente queda invalidado: si el usuario
+     cuelga/logout mientras el navegador pide permiso, al resolverse no
+     puede volver a encender la cámara. */
+  callGen++;
+  starting = false;
   if (pc) {
     try { pc.close(); } catch (e) {}
     pc = null;
   }
   if (localStream) {
-    const trs = localStream.getTracks();
-    for (let i = 0; i < trs.length; i++) trs[i].stop();
+    releaseStream(localStream);
     localStream = null;
   }
   remoteStream = null;
@@ -92,13 +128,23 @@ function endCall(reason) {
   if (reason === 'busy') toast(t('Ocupado'));
   else if (reason === 'rejected') toast(t('Llamada rechazada'));
   else if (reason === 'failed') toast(t('La llamada falló'));
+  else if (reason === 'timeout') toast(t('Sin respuesta'));
 }
 
 /* --------------------------------------------------------- peer */
 
+function iceServers() {
+  /* Permite añadir TURN sin tocar el código: window.FOXINIX_ICE_SERVERS
+     = [{urls:'turn:...', username:'...', credential:'...'}, ...].
+     En redes móviles/NAT restrictivas STUN solo no basta. */
+  const custom = window.FOXINIX_ICE_SERVERS;
+  if (Array.isArray(custom) && custom.length) return custom;
+  return [{ urls: 'stun:stun.l.google.com:19302' }];
+}
+
 function newPC(chatId, video) {
   const P = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-  pc = new P({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  pc = new P({ iceServers: iceServers() });
   pc.onicecandidate = function (ev) {
     sendFn({
       type: 'call_ice', chat_id: chatId,
@@ -123,6 +169,7 @@ function newPC(chatId, video) {
         (cs === 'connected' || ics === 'connected' || ics === 'completed')) {
       store.call.state = 'active';
       store.call.startedAt = Date.now();
+      stopCallTimer();
     } else if (cs === 'failed' || ics === 'failed') {
       endCall('failed');
     }
@@ -171,21 +218,34 @@ export async function startCall(chat, video) {
             (window.RTCPeerConnection || window.webkitRTCPeerConnection));
   } catch (e) { ok = false; }
   if (!ok) { toast(t('No se pudo iniciar la llamada')); return; }
+  if (starting) { toast(t('Ya hay una llamada en curso')); return; }
+  starting = true;
+  const gen = ++callGen;
   navigator.mediaDevices.getUserMedia({ audio: true, video: !!video })
     .then(function (stream) {
+      if (gen !== callGen || !store.hasSession) {
+        starting = false;
+        releaseStream(stream);
+        return;
+      }
+      starting = false;
       localStream = stream;
       store.call = {
         chatId: chat.id, peerId: peer ? peer.id : 0, peer: peer,
         state: 'outgoing', video: !!video, muted: false, camOff: false,
         startedAt: 0, remote: false,
       };
+      armCallTimer(CONNECT_TIMEOUT + 15000, 'timeout');
       newPC(chat.id, video);
       stream.getTracks().forEach(function (tr) { pc.addTrack(tr, stream); });
       return pc.createOffer();
     })
-    .then(function (offer) { return pc.setLocalDescription(offer); })
+    .then(function (offer) {
+      if (gen !== callGen || !store.call || !pc) return;
+      return pc.setLocalDescription(offer);
+    })
     .then(function () {
-      if (!store.call) return;
+      if (gen !== callGen || !store.call || !pc) return;
       const sent = sendFn({
         type: 'call_offer', chat_id: store.call.chatId,
         video: !!video, sdp: pc.localDescription.sdp,
@@ -193,6 +253,7 @@ export async function startCall(chat, video) {
       if (!sent) { endCall(null); toast(t('Sin conexión')); }
     })
     .catch(function () {
+      if (gen !== callGen) return;
       cleanup();
       store.call = null;
       toast(t('No se pudo iniciar la llamada'));
@@ -211,18 +272,30 @@ export async function acceptCall() {
     return;
   }
   if (!store.call || store.call.state !== 'incoming' || !pendingOffer) return;
-  if (pendingOffer !== ev) return;
+  if (pendingOffer !== ev || starting) return;
   stopRing();
+  stopCallTimer();
+  starting = true;
+  const gen = ++callGen;
   navigator.mediaDevices.getUserMedia({ audio: true, video: !!ev.video })
     .then(function (stream) {
+      if (gen !== callGen || !store.call || store.call.state !== 'incoming'
+          || !pendingOffer || pendingOffer !== ev || !store.hasSession) {
+        starting = false;
+        releaseStream(stream);
+        return;
+      }
+      starting = false;
       localStream = stream;
       store.call.state = 'connecting';
+      armCallTimer(CONNECT_TIMEOUT, 'timeout');
       newPC(ev.chat_id, !!ev.video);
       stream.getTracks().forEach(function (tr) { pc.addTrack(tr, stream); });
       return pc.setRemoteDescription({ type: 'offer', sdp: ev.sdp })
         .then(function () { return pc.createAnswer(); })
         .then(function (ans) { return pc.setLocalDescription(ans); })
         .then(function () {
+          if (gen !== callGen || !store.call || !pc) return;
           flushIce();
           const sent = sendFn({
             type: 'call_answer', chat_id: ev.chat_id,
@@ -232,10 +305,26 @@ export async function acceptCall() {
         });
     })
     .catch(function () {
+      if (gen !== callGen) return;
       cleanup();
       store.call = null;
       toast(t('No se pudo iniciar la llamada'));
     });
+}
+
+/* Cierre forzado: logout, pérdida de sesión, desmontaje de la pantalla.
+   Avisa best-effort al otro lado y SIEMPRE libera cámara/micrófono. */
+export function abortCall(reason) {
+  if (store.call && sendFn) {
+    try {
+      sendFn({
+        type: 'call_hangup', chat_id: store.call.chatId,
+        reason: reason || 'hangup',
+      });
+    } catch (e) {}
+  }
+  cleanup();
+  store.call = null;
 }
 
 export function rejectCall() {
@@ -246,10 +335,7 @@ export function rejectCall() {
 }
 
 export function hangupCall() {
-  if (!store.call) return;
-  sendFn({ type: 'call_hangup', chat_id: store.call.chatId, reason: 'hangup' });
-  cleanup();
-  store.call = null;
+  abortCall('hangup');
 }
 
 export function toggleMute() {
@@ -296,6 +382,7 @@ export function handleCallEvent(ev) {
       muted: false, camOff: false, startedAt: 0, remote: false,
     };
     startRing();
+    armCallTimer(RING_TIMEOUT, 'missed');
     return;
   }
 
@@ -331,9 +418,5 @@ export function handleCallEvent(ev) {
    al otro lado (best-effort: el WS suele alcanzar a enviarlo antes de
    morir; si no, el peer lo corta con su timeout de conexión). */
 window.addEventListener('pagehide', function () {
-  if (store.call) {
-    sendFn({ type: 'call_hangup', chat_id: store.call.chatId, reason: 'hangup' });
-    cleanup();
-    store.call = null;
-  }
+  if (store.call) abortCall('hangup');
 });

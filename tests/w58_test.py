@@ -138,8 +138,8 @@ def main():
          f"req={st} accept={st3} rid={rid}")
 
     dm = None
-    st, dmres = ct.http("POST", a.base + "/api/chats/dm",
-                        {"username": BU}, token=A["access"])
+    st, dmres = ct.dm_between(a.base, A["access"], B["access"],
+                              A["user"]["username"], BU)
     if st in (200, 201):
         dm = dmres["chat"]["id"]
 

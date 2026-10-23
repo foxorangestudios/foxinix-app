@@ -349,7 +349,10 @@ export async function catchUpChat(chatId) {
         await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
       }
       mergeMessages(chatId, list);
-      autoDownloadMessages(list);
+      /* P1: tras reconectar no se descarga el historial entero. Solo la
+         primera página y como máximo 12 adjuntos; las páginas antiguas
+         esperan a que el usuario abra/las pida. */
+      if (page === 0) autoDownloadMessages(list.slice(-12), 12);
       added += list.length;
       if (list.length < 100) break;
       /* Si el eco de la WS ya insertó todo, maxSeq no cambió: cortar. */
@@ -415,6 +418,33 @@ export async function createDm(username) {
   return chat;
 }
 
+/* Archivar/desarchivar un chat o grupo. */
+export async function archiveChat(chatId, archived) {
+  const r = await api('POST', '/api/chats/' + chatId + '/archive',
+    { archived: !!archived }, { retry401: true });
+  const c = findChat(chatId);
+  if (c) c.archived = !!archived;
+  if (archived && store.activeChatId === chatId) closeChat();
+  return r;
+}
+
+/* Eliminar un MD de MI lista (el otro conserva su copia). */
+export async function deleteDmChat(chatId) {
+  const r = await api('DELETE', '/api/chats/' + chatId, undefined,
+    { retry401: true });
+  store.chats = store.chats.filter(function (c) { return c.id !== chatId; });
+  if (store.activeChatId === chatId) closeChat();
+  delete store.msgs[chatId];
+  delete store.loaded[chatId];
+  delete store.hasMore[chatId];
+  delete store.syncNeeded[chatId];
+  delete store.typing[chatId];
+  delete store.readSeqs[chatId];
+  delete store.deliveredSeqs[chatId];
+  if (store.info && store.info.chatId === chatId) store.info = null;
+  return r;
+}
+
 /* Grupo nuevo (yo = owner). members: usernames. */
 export async function createGroup(title, members) {
   const r = await api('POST', '/api/chats/group',
@@ -454,6 +484,14 @@ export async function setMemberRole(chatId, userId, role) {
 export async function removeMember(chatId, userId) {
   const r = await api('DELETE', '/api/chats/' + chatId + '/members/' + userId,
     undefined, { retry401: true });
+  refreshAfterMemberChange(chatId);
+  return r;
+}
+
+/* El owner cede el grupo a otro miembro (evita grupos sin administrar). */
+export async function transferOwner(chatId, username) {
+  const r = await api('POST', '/api/chats/' + chatId + '/transfer-owner',
+    { username: username }, { retry401: true });
   refreshAfterMemberChange(chatId);
   return r;
 }
@@ -639,7 +677,10 @@ export function sendSeen(chatId, seq) {
      last_read_seq en el server; si no, al recargar la lista todo vuelve
      a aparecer como no leído. silent evita avisar a los demás. */
   const silent = store.prefs.receipts === false;
-  if (!silent && hooks.sendSeen && hooks.sendSeen(chatId, seq)) return;
+  /* La WS es el camino rápido, pero no confirma la entrega. Se manda
+     también por REST: si el socket está medio abierto, el recibo no se
+     pierde. El server ignora el duplicado (last_read_seq no avanza). */
+  if (!silent && hooks.sendSeen) hooks.sendSeen(chatId, seq);
   api('POST', '/api/chats/' + chatId + '/read',
     { seq: seq, silent: silent }).catch(function () {});
 }

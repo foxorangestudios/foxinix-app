@@ -117,6 +117,50 @@ def send(base, tok, chat_id, payload):
     raise SystemExit("✗ send: 429 persistente tras reintentos")
 
 
+def ensure_friends(base, a_tok, b_tok, a_user, b_user):
+    """Regla del producto: un MD exige solicitud de amistad aceptada.
+
+    Los tests históricos creaban el DM directamente. Este helper deja la
+    amistad lista (o reutiliza una existente) antes de abrir el chat.
+    """
+    st, res = http("POST", base + "/api/people/requests",
+                   {"username": b_user}, token=a_tok)
+    if st == 201:
+        rid = res["id"]
+        st, res = http("POST", f"{base}/api/people/requests/{rid}/accept",
+                       {}, token=b_tok)
+        if st != 200:
+            raise SystemExit(f"✗ aceptar amistad: {st} {res}")
+        return
+    if st != 409:
+        raise SystemExit(f"✗ solicitud de amistad: {st} {res}")
+    # 409 = ya amigos o solicitud pendiente (en cualquier dirección).
+    for tok, other in ((b_tok, a_user), (a_tok, b_user)):
+        st, data = http("GET", base + "/api/people", token=tok)
+        if st != 200:
+            continue
+        for f in data.get("friends", []):
+            if f.get("username", "").lower() == other.lower():
+                return
+        for r in data.get("received", []):
+            u = r.get("user") or {}
+            if u.get("username", "").lower() == other.lower():
+                st, res = http(
+                    "POST", f"{base}/api/people/requests/{r['id']}/accept",
+                    {}, token=tok)
+                if st != 200:
+                    raise SystemExit(f"✗ aceptar amistad pendiente: {st} {res}")
+                return
+    raise SystemExit("✗ no se pudo establecer la amistad de prueba")
+
+
+def dm_between(base, a_tok, b_tok, a_user, b_user):
+    """Crea/reutiliza el MD después de asegurar la amistad."""
+    ensure_friends(base, a_tok, b_tok, a_user, b_user)
+    return http("POST", base + "/api/chats/dm", {"username": b_user},
+                token=a_tok)
+
+
 def max_seq(base, tok, chat_id):
     st, res = http("GET", f"{base}/api/chats/{chat_id}/messages?limit=100", token=tok)
     msgs = res.get("messages", [])
@@ -314,9 +358,9 @@ def main():
         B = register(a.base, email_b, user_b)
         print(f"→ sembrados: {user_a} (A) y {user_b} (B)")
 
-        # 2) DM A→B
-        st, res = http("POST", a.base + "/api/chats/dm",
-                       {"username": user_b}, token=A["access"])
+        # 2) DM A→B (con amistad aceptada, regla nueva)
+        st, res = dm_between(a.base, A["access"], B["access"],
+                             user_a, user_b)
         if st != 201:
             raise SystemExit(f"✗ dm: {st} {res}")
         cid = res["chat"]["id"]

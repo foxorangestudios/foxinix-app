@@ -75,17 +75,15 @@ def _build_msg(to_email: str, subject: str, text: str, html_body: str) -> EmailM
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.set_content(text)
+    msg.add_alternative(html_body, subtype="html")
     if f"cid:{LOGO_CID}" in html_body and LOGO_PATH.is_file():
-        msg.add_alternative(
-            "<multipart><related>" + html_body + "</related></multipart>",
-            subtype="html",
-        )
+        # add_related() convierte la parte HTML en multipart/related y
+        # conserva el HTML como primera parte. Antes se inyectaban los
+        # literales "<multipart><related>" dentro del HTML.
         rel = msg.get_payload()[1]
         rel.add_related(LOGO_PATH.read_bytes(), "image", "webp",
                         cid=LOGO_CID, filename="logo.webp",
                         disposition="inline")
-    else:
-        msg.add_alternative(html_body, subtype="html")
     return msg
 
 

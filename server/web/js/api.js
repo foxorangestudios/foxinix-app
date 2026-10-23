@@ -2,6 +2,7 @@
    Reglas: 401 → refresh y reintenta una vez; 403 → cuenta sin verificar. */
 import { store, go, goReplace, authFallback, toast } from './store.js';
 import { t } from './i18n.js';
+import { resetDownloadStore } from './downloads.js';
 
 const SKEY = 'fm.session';
 
@@ -111,15 +112,58 @@ export function clearSession() {
   store.deliveredSeqs = {};
   store.ws = 'off';
   store.search = '';
+  store.showArchived = false;
   store.newChatOpen = false;
   store.newChatMode = 'dm';
-  /* W6: nada de la cuenta puede quedar visible en la pantalla principal */
+  /* W6: nada de la cuenta puede quedar visible en la pantalla principal.
+     También se limpian los estados que antes sobrevivían al logout y
+     reaparecían al entrar con otra cuenta en el mismo dispositivo. */
   store.settingsOpen = false;
   store.settingsTab = 'cuenta';
   store.meProfileOpen = false;
+  store.meEditOpen = false;
   store.profile = null;
   store.confirmBox = null;
   store.drafts = {};
+  store.gifFavs = [];
+  store.gifFavsLoaded = false;
+  store.e2eSas = {};
+  store.e2ePend = {};
+  store.pinsRev = 0;
+  store.spoilSeen = {};
+  store.linkPrev = {};
+  store.presence = {};
+  store.notifyTarget = null;
+  store.jumpMsg = 0;
+  store.pendingPath = null;
+  store.people = null;
+  store.blocks = [];
+  store.peopleMobile = false;
+  store.peopleTab = 'active';
+  store.call = null;
+  store.dlSaved = {};
+  store.dlRev++;
+  store.dlAutoRev++;
+  store.sasOpen = false;
+  store.sasFor = 0;
+  store.readsBox = null;
+  store.lb = null;
+  store.pinsModal = false;
+  store.galModal = false;
+  store.ctx = null;
+  store.reactFor = 0;
+  store.editFor = 0;
+  store.editDraft = '';
+  store.infoOpen = false;
+  store.info = null;
+  store.grpEdit = { chatId: 0, src: '' };
+  store.pwOpen = false;
+  store.emOpen = false;
+  store.renameGroupId = 0;
+  store.renameGroupTitle = '';
+  store.wallPanelOpen = false;
+  store.permGate = null;
+  resetDownloadStore();
 }
 
 /** Aplica la respuesta de register/login (tokens + usuario + verificación).

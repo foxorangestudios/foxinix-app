@@ -114,8 +114,7 @@ def main():
         C = ct.register(a.base, f"{uc}@test.local", uc)
         print(f"→ sembrados: {ua}, {ub}, {uc}")
 
-        st, res = ct.http("POST", a.base + "/api/chats/dm",
-                          {"username": ub}, token=A["access"])
+        st, res = ct.dm_between(a.base, A["access"], B["access"], ua, ub)
         if st not in (200, 201):
             raise SystemExit(f"✗ dm A-B: {st} {res}")
         dm = res["chat"]["id"]
@@ -182,8 +181,7 @@ def main():
              f"s5={s5:.0f} s6={s6:.0f} s7={s7:.0f}")
 
         # 5) UI: C (sin bloquear) martilla el composer → pantalla de aviso
-        st, res = ct.http("POST", a.base + "/api/chats/dm",
-                          {"username": ub}, token=C["access"])
+        st, res = ct.dm_between(a.base, C["access"], B["access"], uc, ub)
         if st not in (200, 201):
             raise SystemExit(f"✗ dm C-B: {st} {res}")
         dm_c = res["chat"]["id"]

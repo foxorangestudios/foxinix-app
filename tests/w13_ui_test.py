@@ -692,6 +692,16 @@ def main():
         B = register(a.base, f"{user_b}@test.local", user_b)
         print(f"→ sembrados: {user_a} (A) y {user_b} (B)")
 
+        # Nueva regla: el MD exige una solicitud de amistad aceptada.
+        st, res = http("POST", a.base + "/api/people/requests",
+                       {"username": user_b}, token=A["access"])
+        if st != 201:
+            raise SystemExit(f"✗ solicitud de amistad: {st} {res}")
+        st, res = http("POST",
+                       f"{a.base}/api/people/requests/{res['id']}/accept",
+                       {}, token=B["access"])
+        if st != 200:
+            raise SystemExit(f"✗ aceptar amistad: {st} {res}")
         st, res = http("POST", a.base + "/api/chats/dm",
                        {"username": user_b}, token=A["access"])
         if st != 201:

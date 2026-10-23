@@ -175,8 +175,8 @@ def main():
         print(f"→ sembrados: {user_a} (A), {user_b} (B), {user_c} (C)")
 
         # DM + conversación mínima (objetivo de respuesta/reacción)
-        st, res = ct.http("POST", a.base + "/api/chats/dm",
-                          {"username": user_b}, token=A["access"])
+        st, res = ct.dm_between(a.base, A["access"], B["access"],
+                                user_a, user_b)
         if st != 201:
             raise SystemExit(f"✗ dm: {st} {res}")
         cid = res["chat"]["id"]

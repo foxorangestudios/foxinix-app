@@ -451,8 +451,8 @@ def main():
     BU = B["user"]["username"]
     print(f"· A={A['user']['username']} B={BU}")
 
-    st, r = ct.http("POST", a.base + "/api/chats/dm", {"username": BU},
-                    token=A["access"])
+    st, r = ct.dm_between(a.base, A["access"], B["access"],
+                          A["user"]["username"], BU)
     assert st in (200, 201), (st, r)
     dm = r["chat"]["id"]
     ct.send(a.base, B["access"], dm,

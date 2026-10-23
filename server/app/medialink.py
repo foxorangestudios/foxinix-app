@@ -16,9 +16,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from . import db, security
+from . import config, db, security
 
-TTL = 6 * 3600  # vida de la firma (segundos)
+TTL = config.MEDIA_URL_TTL  # vida de la firma (segundos)
 
 
 def signed_url(kind: str, slug: str, ext: str) -> str:

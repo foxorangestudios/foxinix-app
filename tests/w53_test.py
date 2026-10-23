@@ -138,8 +138,8 @@ def main():
     A = ct.register(a.base, f"w53a{tag}@t.fi", f"w53a{tag}")
     B = ct.register(a.base, f"w53b{tag}@t.fi", f"w53b{tag}")
 
-    st, g = ct.http("POST", a.base + "/api/chats/dm",
-                    {"username": B["user"]["username"]}, token=A["access"])
+    st, g = ct.dm_between(a.base, A["access"], B["access"],
+                          A["user"]["username"], B["user"]["username"])
     if st not in (200, 201):
         raise SystemExit(f"✗ crear dm: {st} {g}")
     dm = g["chat"]["id"]

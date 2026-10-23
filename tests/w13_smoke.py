@@ -112,6 +112,13 @@ A_user, A = signup(f"w13a{u}", f"w13a{u}@example.com")
 B_user, B = signup(f"w13b{u}", f"w13b{u}@example.com")
 print("registro+verify de A y B ok")
 
+# Nueva regla: antes de abrir el MD hay que aceptar la solicitud de amistad.
+st, b = http("POST", "/api/people/requests",
+             {"username": B_user["username"]}, token=A)
+assert st == 201, (st, b)
+rid = json.loads(b)["id"]
+st, b = http("POST", f"/api/people/requests/{rid}/accept", {}, token=B)
+assert st == 200, (st, b)
 st, b = http("POST", "/api/chats/dm", {"username": B_user["username"]}, token=A)
 assert st in (200, 201), (st, b)
 dm = json.loads(b)["chat"]["id"]

@@ -949,6 +949,12 @@ html.native-bg *::after {
   border-radius: 8px;
   margin-bottom: 6px;
 }
+button.load-older {
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+button.load-older:hover { color: var(--t1); background: var(--row-hover); }
 
 .day-pill {
   align-self: center;

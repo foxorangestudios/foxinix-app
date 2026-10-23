@@ -60,7 +60,29 @@ export function forgetCached(url) {
   const k = pathKey(url);
   const obj = blobs.get(k);
   blobs.delete(k);
-  if (obj) rawBlobs.delete(obj);
+  if (obj) {
+    rawBlobs.delete(obj);
+    try { URL.revokeObjectURL(obj); } catch (e) {}
+  }
+}
+
+/* Al cerrar sesión hay que soltar los blobs de la cuenta anterior: sin
+   esto el límite de 200 entradas no acota la memoria real y la próxima
+   cuenta puede seguir viendo objectURLs de la anterior. */
+export function clearMediaBlobs() {
+  /* Abortar también las descargas silenciosas en vuelo: si terminan
+     después del logout, volverían a llenar la caché con media de la
+     cuenta anterior. */
+  for (const k in prefetching) {
+    const xhr = prefetching[k];
+    delete prefetching[k];
+    try { xhr.abort(); } catch (e) {}
+  }
+  blobs.forEach(function (obj) {
+    try { URL.revokeObjectURL(obj); } catch (e) {}
+  });
+  blobs.clear();
+  rawBlobs.clear();
 }
 
 function canPlay(tag, type) {
@@ -155,7 +177,10 @@ function storeBlob(url, obj, raw) {
     const first = blobs.keys().next().value;
     const o = blobs.get(first);
     blobs.delete(first);
-    if (o) rawBlobs.delete(o);
+    if (o) {
+      rawBlobs.delete(o);
+      try { URL.revokeObjectURL(o); } catch (e) {}
+    }
   }
 }
 
@@ -453,7 +478,14 @@ export const dlDirective = {
   unmounted: function (el) {
     const fr = frameOf(el);
     if (io && fr && fr.__dlObs) { io.unobserve(fr); fr.__dlObs = false; }
-    if (el.__dl) el.__dl.dead = true;
+    /* El estado vive en el MARCO (fr.__dlState), no en el <img>/<video>.
+       Antes se consultaba el.__dl (inexistente) y la XHR seguía viva
+       aunque Vue eliminara el mensaje de la lista. */
+    const st = fr && fr.__dlState;
+    if (st) {
+      st.dead = true;
+      if (st.xhr) { try { st.xhr.abort(); } catch (e) {} }
+    }
   },
 };
 

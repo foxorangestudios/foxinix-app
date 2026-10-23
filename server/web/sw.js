@@ -8,7 +8,10 @@
      aleatorio por subida → el contenido de una ruta nunca cambia.
    Firefox 78 (Mypal) lo soporta; en orígenes http no seguros el registro
    falla en main.js y la app sigue funcionando sin SW. */
-const SHELL_CACHE = 'foxinix-shell-v100';  // W59: descargas app, perfil, usuario y barras Android (r4)
+const SHELL_CACHE = 'foxinix-shell-v101';  // W60: MD con solicitud, archivados, llamadas y rendimiento
+/* Los emojis Twemoji/Noto viven en su PROPIO caché: cambiar la versión
+   del shell ya no obliga a volver a descargar cientos de SVG. */
+const EMOJI_CACHE = 'foxinix-emoji-v1';
 /* W50: el caché de medios y las descargas explícitas viven en cachés
    SEPARADAS del shell. Así una actualización de la app no borra los
    archivos ya vistos/descargados. El de medios se poda por tamaño; el de
@@ -77,7 +80,7 @@ function precacheList(c, urls, marker) {
       return c.match(u).then(function (hit) {
         if (hit) return null;
         return fetch(u).then(function (r4) {
-          if (r2 && r2.ok) return c.put(u, r2);
+          if (r4 && r4.ok) return c.put(u, r4);
         }).catch(function () {});
       });
     })).then(function () {
@@ -194,7 +197,7 @@ self.addEventListener('message', function (e) {
   const d = e.data || {};
   if (d.type !== 'emo-style') return;
   emoPref = d.style || 'system';
-  if (emoPref === 'twemoji') caches.open(SHELL_CACHE).then(maybeEmo);
+  if (emoPref === 'twemoji') caches.open(EMOJI_CACHE).then(maybeEmo);
 });
 
 self.addEventListener('fetch', function (e) {
@@ -209,7 +212,7 @@ self.addEventListener('fetch', function (e) {
      twemoji; una tanda a la vez; el marcador dice si ya terminó). */
   if (!extrasDone && !extrasRunning) caches.open(SHELL_CACHE).then(maybeExtras);
   if (emoPref === 'twemoji' && !emoDone && !emoRunning) {
-    caches.open(SHELL_CACHE).then(maybeEmo);
+    caches.open(EMOJI_CACHE).then(maybeEmo);
   }
 
   /* W15/W50: media cache-first por RUTA (la firma `?exp&sig` rota en
@@ -255,7 +258,7 @@ self.addEventListener('fetch', function (e) {
     url.pathname.indexOf('/static/emoji-noto/') === 0;
   if (isEmoji) {
     e.respondWith(
-      caches.open(SHELL_CACHE).then(async function (c) {
+      caches.open(EMOJI_CACHE).then(async function (c) {
         const hit = await c.match(req);
         if (hit) return hit;
         const res = await fetch(req).catch(function () { return null; });

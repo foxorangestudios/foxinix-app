@@ -418,19 +418,58 @@ def _compat_file(path: Path, fmt: str) -> Path | None:
 
 
 def remove_media_files(path: Path) -> None:
-    """Borra el original y sus derivados (.thumb.webp, .compat.*)."""
+    """Borra el original y TODOS sus derivados.
+
+    Las miniaturas se llaman `<stem>.thumb.webp` (no `<name>.*`), así que
+    el patrón anterior dejaba basura en disco. Se borran ambos patrones
+    y cualquier `.thumb.tmp.webp` intermedio.
+    """
+    candidates: set[Path] = {path}
     try:
-        path.unlink(missing_ok=True)
+        candidates.update(path.parent.glob(path.stem + ".*"))
     except OSError:
         pass
     try:
-        for extra in path.parent.glob(path.name + ".*"):
-            try:
-                extra.unlink(missing_ok=True)
-            except OSError:
-                pass
+        candidates.update(path.parent.glob(path.name + ".*"))
     except OSError:
         pass
+    for extra in candidates:
+        try:
+            extra.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def media_in_use(conn, media_id: int) -> bool:
+    """¿Algún mensaje, perfil, grupo o GIF favorito sigue apuntando al media?"""
+    row = conn.execute(
+        "SELECT 1 AS x FROM messages WHERE media_id = ?"
+        " UNION ALL SELECT 1 AS x FROM users WHERE avatar_media_id = ?"
+        " UNION ALL SELECT 1 AS x FROM users WHERE banner_media_id = ?"
+        " UNION ALL SELECT 1 AS x FROM chats WHERE avatar_media_id = ?"
+        " UNION ALL SELECT 1 AS x FROM gif_favs WHERE media_id = ?"
+        " LIMIT 1",
+        (media_id, media_id, media_id, media_id, media_id),
+    ).fetchone()
+    return bool(row)
+
+
+def drop_media_if_unused(conn, media_id: int) -> tuple[str, int] | None:
+    """Borra la fila media si ya nadie la referencia.
+
+    Devuelve (ruta_relativa, tamaño) para borrar el archivo DESPUÉS de
+    confirmar la transacción. Así una base y un disco no quedan
+    desincronizados si algo falla.
+    """
+    if not media_id or media_in_use(conn, media_id):
+        return None
+    row = conn.execute(
+        "SELECT path, size FROM media WHERE id = ?", (media_id,)
+    ).fetchone()
+    if not row:
+        return None
+    conn.execute("DELETE FROM media WHERE id = ?", (media_id,))
+    return (row["path"], int(row["size"] or 0))
 
 
 @router.post("", status_code=201)

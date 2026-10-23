@@ -490,8 +490,8 @@ def main():
             raise SystemExit(f"✗ perfil B: {st} {res}")
 
         # DM A↔B con un mensaje (para abrir la conversación)
-        st, res = ct.http("POST", a.base + "/api/chats/dm",
-                          {"username": user_b}, token=A["access"])
+        st, res = ct.dm_between(a.base, A["access"], B["access"],
+                                user_a, user_b)
         if st != 201:
             raise SystemExit(f"✗ dm: {st} {res}")
         ct.send(a.base, A["access"], res["chat"]["id"],

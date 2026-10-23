@@ -254,8 +254,8 @@ def main():
     print(f"· usuarios A={A['user']['username']} B={B['user']['username']}")
 
     # --- siembra REST: DM A-B con dos mensajes de B --------------------
-    st, g = ct.http("POST", a.base + "/api/chats/dm",
-                    {"username": B["user"]["username"]}, token=A["access"])
+    st, g = ct.dm_between(a.base, A["access"], B["access"],
+                          A["user"]["username"], B["user"]["username"])
     if st != 200 and st != 201:
         raise SystemExit(f"✗ crear dm: {st} {g}")
     dm = g["chat"]["id"]

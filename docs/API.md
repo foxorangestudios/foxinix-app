@@ -110,9 +110,11 @@ pasa a ser el correo definitivo (y el código queda borrado).
 ```
 → `{"ok": true}`
 - Exige **usuario y contraseña** escritos (el cliente los pide en la caja de confirmación).
-- Borra en cascada sus mensajes, sus archivos (media) y la cuenta; en cada chat queda un
-  mensaje de sistema **"La cuenta de X fue eliminada"** (remitente nulo) para que la
-  conversación no se rompa. Los tokens dejan de servir con la cuenta.
+- El borrado es **transaccional**: elimina sus mensajes, sus archivos (solo si ningún
+  mensaje, avatar, grupo o GIF favorito de otra cuenta sigue usándolos) y la cuenta.
+- Sus **MD se eliminan completos** (el otro miembro deja de verlos). En los **grupos**
+  queda un mensaje de sistema **"La cuenta de X fue eliminada"** (remitente nulo) y, si
+  era owner, la propiedad pasa al admin/miembro más antiguo. Los tokens dejan de servir.
 
 ## Usuarios
 
@@ -127,12 +129,17 @@ pasa a ser el correo definitivo (y el código queda borrado).
 ## Chats
 
 - `GET /api/chats` → `{"chats": [chat]}` ordenado por actividad (**fijados primero**, W13).
-- `POST /api/chats/dm` `{"username"}` → `{"chat"}` (idempotente: si ya existe, lo devuelve)
+  Incluye archivados (con `archived: true`) y **oculta** los MD sin una solicitud de
+  amistad aceptada, además de los MD que yo haya eliminado (`hidden_at`). Al recibir un
+  mensaje nuevo, un MD eliminado vuelve a aparecer.
+- `POST /api/chats/dm` `{"username"}` → `{"chat"}` (idempotente: si ya existe, lo devuelve).
+  **Requiere amistad aceptada**; si no, → `403`. Crear el MD reabre uno archivado o
+  eliminado por cualquiera de las dos partes.
 - `POST /api/chats/group` `{"title", "members": ["bruno"]}` → `{"chat"}` (yo = owner)
 
-**chat**: `{id, type: "dm"|"group", title: {user|{display_name}}, avatar_url, member_count, last_message, unread, my_role, pinned, muted, peer_read_seq, peer_delivered_seq}`
+**chat**: `{id, type: "dm"|"group", title: {user|{display_name}}, avatar_url, member_count, last_message, unread, my_role, pinned, muted, archived, peer_read_seq, peer_delivered_seq}`
 - `peer_read_seq` / `peer_delivered_seq` (W12): el **máximo** de esos contadores entre los OTROS miembros — el cliente los usa para sembrar las palomitas (✓ enviado · ✓✓ recibido · ✓✓ azul leído) tras recargar.
-- `pinned` / `muted` (W13): ajustes **personales** por miembro (`chat_members`); cada usuario fija/silencia solo su propia lista.
+- `pinned` / `muted` / `archived`: ajustes **personales** por miembro (`chat_members`); cada usuario fija, silencia o archiva solo su propia lista.
 
 - `GET /api/chats/{id}/messages?before_seq=&limit=50` → `{"messages": [...]}` (asc, `limit≤100`)
 - `POST /api/chats/{id}/messages` → 201 `{"message": {...}}`
@@ -148,6 +155,9 @@ pasa a ser el correo definitivo (y el código queda borrado).
 - `POST /api/chats/{id}/typing` → avisa "escribiendo" por WS a los demás.
 - `POST /api/chats/{id}/pin` `{"pinned": true|false}` → `{"ok": true, "pinned"}` (W13) — fija/desfija el chat en **mi** lista; solo miembros.
 - `POST /api/chats/{id}/mute` `{"muted": true|false}` → `{"ok": true, "muted"}` (W13) — silencia sonido y notificaciones del chat **para mí**; el cliente también atenúa el badge.
+- `POST /api/chats/{id}/archive` `{"archived": true|false}` → `{"ok": true, "archived"}` — archiva/desarchiva **para mí** un MD o un grupo; no afecta al otro miembro.
+- `DELETE /api/chats/{id}` → `{"ok": true}` — **solo MD**: lo elimina de **mi** lista (`hidden_at`). El otro conserva su copia y mis mensajes; si llega un mensaje nuevo, el chat reaparece. En un grupo → `400`.
+- `POST /api/chats/{id}/transfer-owner` `{"username"}` → `{"ok": true}` — **solo el owner** de un grupo cede la propiedad a otro miembro (pasa a `admin`); deja mensaje de sistema y evento `members_changed`.
 - `GET /api/chats/{id}/search?q=&limit=50` → `{"messages": [...]}` (W13) — busca por **cuerpo** dentro del chat (más recientes primero). Primero coincide el texto literal (con `%`/`_` escapados); sin resultados, repite con el texto **plegado** sin acentos ni mayúsculas ("cafe" encuentra "café").
 - `POST /api/chats/{id}/messages/{message_id}/forward` → 201 `{"message"}` (W13) — `{"target_chat_id": n}`: reenvía a otro **de mis chats**. Copia `kind`/`body`/`media_id` (el archivo queda compartido)/`peaks`/`dur` y marca `forwarded: true`; el nuevo mensaje es mío y consume el rate limit. `system` → `400`; destino = origen → `400`; no-miembro del destino → `403`; mensaje inexistente → `404`.
 - `POST /api/chats/{id}/members` `{"username"}` → agrega a un grupo (+ mensaje `system`).
@@ -155,11 +165,11 @@ pasa a ser el correo definitivo (y el código queda borrado).
 - `PATCH /api/chats/{id}` `{"title": "Nuevo nombre"}` → **solo owner/admin** de un grupo (W57). El título tiene 1..60 caracteres; emite `chat_updated` a todos los miembros para refrescar la lista y la cabecera. Un no-miembro → `403`; un directo o un chat inexistente → `404`.
 - `PATCH /api/chats/{id}/members/{user_id}` `{"role": "admin"|"member"}` → **solo owner/admin**. Asciende o quita el rol de admin, deja un mensaje `system` visible para todos y emite `member_role` + `members_changed`. El owner no puede cambiarse; un admin sólo puede ascender a miembros comunes (no toca a otro admin ni al owner) → `403`/`400`.
 - `DELETE /api/chats/{id}/members/{user_id}` → **solo owner/admin** saca a un miembro del grupo. Deja un mensaje `system` para los que quedan, emite `member_left` + `members_changed` y avisa al expulsado con `member_removed` (aunque ya no pertenezca al chat). El owner no puede ser eliminado; un admin sólo puede sacar a miembros comunes → `403`/`400`.
-- `POST /api/chats/{id}/leave` → `{"ok": true}` o `{"ok": true, "deleted": true}` (W7) — **solo grupos**: elimina mi membresía y manda mensaje `system` + evento `member_left`; si era el último miembro, borra el chat entero. En un directo → `400`.
+- `POST /api/chats/{id}/leave` → `{"ok": true}` o `{"ok": true, "deleted": true}` (W7) — **solo grupos**: elimina mi membresía y manda mensaje `system` + evento `member_left`; si era owner, la propiedad pasa al admin/miembro más antiguo; si era el último miembro, borra el chat entero. En un directo → `400`.
 - `POST|DELETE /api/chats/{id}/reactions/{message_id}` `{"emoji": "👍"}`
   - **1 reacción por usuario por mensaje**: el server guarda por `(message_id, user_id)`; un POST nuevo **reemplaza** el emoji anterior del mismo usuario y DELETE (con o sin emoji) la quita.
 - `PUT /api/chats/{id}/messages/{message_id}` `{"body"}` → `{"message"}` (W8) — **solo texto propio**: actualiza `body` y `edited_at` (el cliente lo muestra como "editado") y avisa a todos por WS `message_edited`. Ajeno → `403`; no-texto o vacío → `400`.
-- `DELETE /api/chats/{id}/messages/{message_id}` → `{"ok": true}` (W8) — **solo mensajes propios**: borra la fila (las reacciones caen en cascada y las citas quedan sin origen) y, si tenía archivo adjunto que nadie usa de avatar, borra el archivo de disco y libera cuota. Avisa por WS `message_deleted`. Ajeno → `403`.
+- `DELETE /api/chats/{id}/messages/{message_id}` → `{"ok": true}` (W8) — **solo mensajes propios**: borra la fila (las reacciones caen en cascada y las citas quedan sin origen) y, si tenía archivo adjunto que ya no usa ningún mensaje, avatar, banner, grupo ni GIF favorito, borra el archivo de disco y libera cuota. Avisa por WS `message_deleted`. Ajeno → `403`.
 
 **message**: `{id, seq, chat_id, kind, body, media, reply_to, client_msg_id, created_at, edited_at, forwarded, peaks, dur, sender, reactions}`
 - `seq` es **correlativo por chat** (base para caché incremental y `unread`).
@@ -171,18 +181,18 @@ pasa a ser el correo definitivo (y el código queda borrado).
 ## Media
 
 - `POST /api/media` (multipart `file`) → 201 `{id, url, mime, size, name}`
-  - Límites: 50 MB/archivo, cuota global 1 GB (→ `507`), tipos: imagen/video/audio/pdf/texto/zip.
+  - Límites: 15 MB/archivo, cuota global 1 GB (→ `507`), tipos: imagen/video/audio/pdf/texto/zip.
   - **Imágenes → WebP** (W8): todo lo que Pillow pueda leer se recodifica a `image/webp` calidad 95, **sin redimensionar**, con orientación EXIF aplicada y sin metadatos (GIF animados → WebP animado). El `mime` y el `size` de la respuesta ya son los convertidos. SVG y formatos que Pillow no soporta quedan como se subieron (requiere `Pillow` instalado; sin él, se guarda el original).
-  - `url` (W11) viene **firmada**: `/media/file/{slug}.{ext}?exp={unix}&sig={hmac}` — el slug es aleatorio de 32 hex y `sig` (HMAC-SHA256 truncado) caduca con `exp` (6 h, se renueva en cada respuesta de la API). **El token de cuenta ya no viaja en ninguna URL.**
+  - `url` (W11) viene **firmada**: `/media/file/{slug}.{ext}?exp={unix}&sig={hmac}` — el slug es aleatorio de 32 hex y `sig` (HMAC-SHA256 truncado) caduca con `exp` (**24 h** por defecto, `FOXMSG_MEDIA_URL_TTL`; se renueva en cada respuesta de la API). **El token de cuenta ya no viaja en ninguna URL.**
 - `GET /media/profile/{slug}.{ext}?exp=&sig=` → avatar (de usuario o de grupo).
 - `GET /media/file/{slug}.{ext}?exp=&sig=` → archivo de mensaje.
   - La firma **es** la credencial: sin `sig` válido → `403` (vencida, alterada o ausente). El slug se valida contra la firma **antes** de consultar la base, así que no hay enumeración posible.
 - `GET /api/media/{id}?token=<access>` → **legacy** (compat con clientes viejos): sigue requiriendo token por header o query (QML no manda headers en `Image.source`).
 - `GET /api/media/quota/stats` → `{used_bytes, quota_bytes, percent}`
 
-## WebSocket — `GET /api/ws?token=<access>`
+## WebSocket — `GET /api/ws`
 
-(No usa header; el token va en la query.)
+El access token viaja como **subprotocolo** `['foxinix', <access>]` (no en la URL ni en headers); un token inválido se rechaza con `403`.
 
 **Servidor → cliente**
 | tipo | payload |
@@ -201,10 +211,13 @@ pasa a ser el correo definitivo (y el código queda borrado).
 | `member_left` | `{chat_id, user_id}` (salida de grupo; si era el último, el chat se borra) |
 | `chat_created` | `{chat_id}` |
 | `presence` | `{user_id, online}` |
+| `call_offer` / `call_answer` / `call_ice` / `call_hangup` | `{chat_id, from, sdp|candidate, video?}` — solo se relayan en un MD con **amistad aceptada**, sin bloqueo y visible para ambas partes |
+| `call_error` | `{chat_id, detail}` — la llamada no se puede entregar (sin amistad, chat eliminado o usuario bloqueado) |
 
 **Cliente → servidor**
 - `{"type": "ping"}` → `{"type": "pong"}` (keepalive)
 - `{"type": "seen", "chat_id": n, "seq": n}` → marcar leído sin round-trip REST
+- `{"type": "call_offer|call_answer|call_ice|call_hangup", ...}` → señalización WebRTC 1:1 (el servidor no ve ni guarda media)
 
 **Reconexión**: al reconectar, refrescar `GET /api/chats` y pedir mensajes con `before_seq = último_seq_caché` por chat.
 
