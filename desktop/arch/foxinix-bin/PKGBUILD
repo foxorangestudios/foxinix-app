@@ -17,7 +17,7 @@ options=('!strip' '!debug')
 noextract=("Foxinix-${pkgver}-linux-x86_64.AppImage")
 source=("Foxinix-${pkgver}-linux-x86_64.AppImage::https://github.com/foxorangestudios/foxinix-app/releases/download/v${pkgver}/Foxinix-${pkgver}-linux-x86_64.AppImage"
         "LICENSE::https://raw.githubusercontent.com/foxorangestudios/foxinix-app/v${pkgver}/LICENSE")
-sha256sums=('f8c3dffbbc8a34aef167dd1b52baf043358cebe2fc2dee9c54d476ece98e17f5'
+sha256sums=('f1dc21181784a5aca14d1fe954d6510b4ed85a71aa803b4b87f10628a4ee4c17'
             'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30')
 
 package() {
