@@ -669,16 +669,19 @@ function maybeAutoDownload(m) {
   autoDownload(url, name, m.media.mime || '', type);
 }
 
-/* W58/W59: al abrir un chat se completan solo los adjuntos recientes
-   (max) del historial; `catchUpChat` y la WS ya entregan lo nuevo. La
-   cola evita ráfagas y `hasDownload` evita repetir. */
+/* W58/W59: al abrir un chat se completan solo los últimos `max`
+   ADJUNTOS del historial (no los últimos mensajes: puede haber texto
+   entre medio). `catchUpChat` y la WS ya entregan lo nuevo. La cola
+   evita ráfagas y `hasDownload` evita repetir. */
 function autoDownloadMessages(list, max) {
   if (!list || !list.length) return;
-  let start = 0;
-  if (max && list.length > max) start = list.length - max;
-  for (let i = start; i < list.length; i++) {
+  let seen = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
-    if (m && m.media) maybeAutoDownload(m);
+    if (!m || !m.media) continue;
+    if (max && seen >= max) break;
+    maybeAutoDownload(m);
+    seen++;
   }
 }
 

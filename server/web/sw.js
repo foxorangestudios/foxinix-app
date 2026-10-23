@@ -8,7 +8,7 @@
      aleatorio por subida → el contenido de una ruta nunca cambia.
    Firefox 78 (Mypal) lo soporta; en orígenes http no seguros el registro
    falla en main.js y la app sigue funcionando sin SW. */
-const SHELL_CACHE = 'foxinix-shell-v99';  // W59: descargas app, perfil, usuario y barras Android (r3)
+const SHELL_CACHE = 'foxinix-shell-v100';  // W59: descargas app, perfil, usuario y barras Android (r4)
 /* W50: el caché de medios y las descargas explícitas viven en cachés
    SEPARADAS del shell. Así una actualización de la app no borra los
    archivos ya vistos/descargados. El de medios se poda por tamaño; el de
@@ -76,7 +76,7 @@ function precacheList(c, urls, marker) {
     return Promise.all(chunk.map(function (u) {
       return c.match(u).then(function (hit) {
         if (hit) return null;
-        return fetch(u).then(function (r3) {
+        return fetch(u).then(function (r4) {
           if (r2 && r2.ok) return c.put(u, r2);
         }).catch(function () {});
       });
