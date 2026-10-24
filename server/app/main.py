@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from . import cleanup, config, db
 from .realtime import hub
 from .routers import auth as auth_router
-from .routers import chats, gifs, links, media, people, users, ws
+from .routers import assets, chats, gifs, links, media, people, users, ws
 
 logging.basicConfig(
     level=getattr(logging, os.environ.get("FOXMSG_LOG", "INFO").upper(), logging.INFO),
@@ -131,6 +131,7 @@ app.include_router(media.router)
 app.include_router(media.pub)
 app.include_router(links.router)   # W35c: vista previa de enlaces
 app.include_router(gifs.router)    # W36k: favoritos de GIFs
+app.include_router(assets.router)  # W61: biblioteca de GIFs/stickers subidos
 app.include_router(ws.router)
 
 # ------------------------------------------------ frontend web (estáticos)

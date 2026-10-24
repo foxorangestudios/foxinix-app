@@ -35,6 +35,9 @@ def user_brief(
         "display_name": u["display_name"] or u["username"],
         "avatar_url": avatar,
         "banner_url": banner,
+        "banner_position": int(
+            u.get("banner_position") if u.get("banner_position") is not None else 50
+        ),
         "bio": u.get("bio", ""),
         "status_text": u.get("status_text", ""),
         "status_preset": u.get("status_preset", ""),

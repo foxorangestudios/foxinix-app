@@ -94,6 +94,9 @@ def _public_user(u: dict[str, Any]) -> dict[str, Any]:
         "status_preset": u.get("status_preset", ""),
         "avatar_url": avatar,
         "banner_url": banner,
+        "banner_position": int(
+            u.get("banner_position") if u.get("banner_position") is not None else 50
+        ),
         "username_changed_at": int(u.get("username_changed_at") or 0),
         "email_verified": bool(u["email_verified"]),
     }
@@ -321,6 +324,10 @@ def update_profile(body: ProfileIn, user: dict = Depends(pending_user)) -> dict[
                 raise HTTPException(400, "La portada debe ser una imagen")
             sets.append("banner_media_id = ?")
             params.append(body.banner_media_id)
+    # W61: la posición se puede ajustar sin volver a subir la portada.
+    if body.banner_position is not None:
+        sets.append("banner_position = ?")
+        params.append(int(body.banner_position))
     if not sets:
         return {"user": _public_user(user)}
     params.append(user["id"])

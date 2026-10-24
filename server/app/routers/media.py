@@ -448,8 +448,9 @@ def media_in_use(conn, media_id: int) -> bool:
         " UNION ALL SELECT 1 AS x FROM users WHERE banner_media_id = ?"
         " UNION ALL SELECT 1 AS x FROM chats WHERE avatar_media_id = ?"
         " UNION ALL SELECT 1 AS x FROM gif_favs WHERE media_id = ?"
+        " UNION ALL SELECT 1 AS x FROM user_assets WHERE media_id = ?"
         " LIMIT 1",
-        (media_id, media_id, media_id, media_id, media_id),
+        (media_id, media_id, media_id, media_id, media_id, media_id),
     ).fetchone()
     return bool(row)
 

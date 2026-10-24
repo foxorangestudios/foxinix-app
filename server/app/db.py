@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS users (
     pending_email  TEXT NOT NULL DEFAULT '',  -- correo nuevo esperando código (W6)
     avatar_media_id INTEGER,
     banner_media_id INTEGER,                  -- W58: portada del perfil
+    banner_position INTEGER NOT NULL DEFAULT 50,  -- W61: foco vertical (%)
     email_verified INTEGER NOT NULL DEFAULT 0,
     token_version  INTEGER NOT NULL DEFAULT 0,
     created_at     INTEGER NOT NULL,
@@ -202,6 +203,19 @@ CREATE TABLE IF NOT EXISTS gif_favs (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, media_id, name)
 );
+
+-- W61: biblioteca personal de GIFs y stickers subidos. Cada usuario puede
+-- guardar hasta 10 de cada tipo; al marcar uno recibido se copia aquí para
+-- poder reenviarlo desde el selector.
+CREATE TABLE IF NOT EXISTS user_assets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL,                 -- 'gif' | 'sticker'
+    media_id   INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, kind, media_id)
+);
+CREATE INDEX IF NOT EXISTS idx_assets_user ON user_assets(user_id, kind);
 """
 
 
@@ -244,6 +258,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN pending_email TEXT NOT NULL DEFAULT ''")
     if "banner_media_id" not in existing:
         conn.execute("ALTER TABLE users ADD COLUMN banner_media_id INTEGER")
+    if "banner_position" not in existing:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN banner_position INTEGER NOT NULL DEFAULT 50"
+        )
     # W59: el cambio de usuario tiene un enfriamiento de 12 horas.
     if "username_changed_at" not in existing:
         conn.execute(

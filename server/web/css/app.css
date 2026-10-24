@@ -1365,6 +1365,15 @@ audio.b-audio { display: none; }
   flex: none;
 }
 .composer .icon-btn { margin-bottom: 2px; }
+/* W61: aviso de autoarchivo cuando el borrador pasa de 3000. */
+.composer-long {
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--t2);
+  padding: 0 4px;
+}
+.composer-long .ic { flex: none; margin-right: 5px; }
 
 .composer-input {
   flex: 1;
@@ -4223,6 +4232,31 @@ body { font-size: calc(15px * var(--fs)); }
 .pf-edit-banner-actions { display: flex; flex-wrap: wrap; margin-top: 10px; }
 .pf-edit-banner-actions .btn { margin: 0 6px 4px 0; }
 .pf-edit-banner-actions .ic { margin-right: 5px; }
+/* W61: encuadre de la portada (arrastrar o barra) y "Ver más" de la bio. */
+.pf-edit-banner-img.can-drag { cursor: grab; touch-action: none; }
+.pf-edit-banner-img.is-dragging { cursor: grabbing; }
+.pf-edit-banner-img img { user-select: none; -webkit-user-drag: none; }
+.pf-pos-hint {
+  position: absolute; left: 8px; bottom: 6px; z-index: 2;
+  padding: 3px 7px; border-radius: 999px;
+  background: rgba(0, 0, 0, .55); color: #fff;
+  font-size: 10.5px; pointer-events: none;
+}
+.pf-pos-row {
+  display: flex; align-items: center; flex-wrap: wrap;
+  margin-top: 2px; font-size: 12px; color: var(--t2);
+}
+.pf-pos-row label { margin-right: 8px; white-space: nowrap; }
+.pf-pos-range { flex: 1; min-width: 110px; margin-right: 8px; accent-color: var(--accent); }
+.pf-pos-val { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.pf-bio-count { margin-top: 3px; text-align: right; font-size: 11px; color: var(--t3); }
+.pf-bio-more {
+  margin-top: 4px; padding: 0; border: 0; background: none;
+  color: var(--accent); font: inherit; font-size: 12.5px;
+  font-weight: 600; cursor: pointer;
+}
+.pf-bio-more:hover { text-decoration: underline; }
+.pf-zoom { cursor: zoom-in; }
 
 /* W59: cambio de @usuario (aviso de 12 h + contraseña) */
 .uname-field { text-align: left; }
@@ -4656,12 +4690,16 @@ body { font-size: calc(15px * var(--fs)); }
 }
 .callbox.incoming .call-accept { animation: callpulse 1.4s ease-in-out infinite; }
 .call-fab {
+  position: fixed; right: 18px; bottom: 18px; z-index: 80;
   width: 62px; height: 62px; border: 0; border-radius: 50%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: var(--online); color: #fff; cursor: pointer;
+  background: var(--online); color: #fff; cursor: grab;
+  touch-action: none;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .45), 0 0 0 4px rgba(35, 165, 90, .18);
   animation: callfab 2s ease-in-out infinite;
 }
+.call-fab.moved { right: auto; bottom: auto; }
+.call-fab.dragging { cursor: grabbing; animation: none; }
 .call-fab-ic { display: flex; }
 .call-fab-ic .ic { width: 24px; height: 24px; }
 .call-fab-t {
@@ -5138,6 +5176,34 @@ body { font-size: calc(15px * var(--fs)); }
   text-transform: uppercase;
   letter-spacing: .5px;
 }
+/* W61: biblioteca propia de GIFs/stickers en el selector. */
+.st-sec-row { display: flex; align-items: center; justify-content: space-between; }
+.st-sec-row > span { display: flex; align-items: baseline; }
+.st-count {
+  margin-left: 5px; font-style: normal; font-weight: 600;
+  color: var(--t3); letter-spacing: 0;
+}
+.st-up {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel2); color: var(--t1);
+  cursor: pointer; user-select: none;
+}
+.st-up:hover { background: var(--accent); color: var(--on-accent); }
+.st-up.busy { opacity: .45; pointer-events: none; }
+.st-up .ic { width: 16px; height: 16px; }
+.st-empty {
+  margin: 3px 9px 7px;
+  font-size: 12px; color: var(--t3);
+}
+.st-sticker img { object-fit: contain; padding: 5px; }
+/* W61: sticker con imagen dentro de la burbuja (sin marco). */
+.b-sticker-img { display: inline-block; line-height: 0; cursor: zoom-in; }
+.b-sticker {
+  display: block; width: auto; height: auto;
+  max-width: 150px; max-height: 150px;
+  object-fit: contain;
+}
 
 /* W36: la barra flotante del mensaje vive FUERA de la burbuja (encima):
    la lista respira 40px arriba para que nunca quede recortada. */
@@ -5365,6 +5431,8 @@ body { font-size: calc(15px * var(--fs)); }
     bottom: calc(82px + var(--sab, 0px));
     width: auto; height: auto; max-height: none;
   }
+  /* W61: el globo arrastrable nace por encima de la barra inferior. */
+  .call-fab { right: 14px; bottom: calc(82px + var(--sab, 0px)); }
   .callbox.incoming, .callbox.calling {
     top: 0; bottom: 0; height: auto; max-height: none;
   }

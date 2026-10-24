@@ -82,6 +82,6 @@ VERIFY_DEADLINE_DAYS = 5            # borrado permanente si no verifica en 5 dí
 
 # Límites
 MAX_MEDIA_BYTES = 15 * 1024 * 1024  # W48: 15 MB por archivo
-MAX_BODY_CHARS = 4000
+MAX_BODY_CHARS = 3000
 RATE_WINDOW = 300                   # ventana de rate limit (5 min)
 RATE_MAX = 30                       # intentos por ventana (login/envíos)

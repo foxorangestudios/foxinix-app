@@ -168,6 +168,33 @@ export function isOneEmoji(txt) {
   return !!(txt && EMO_FILE[txt.trim()]);
 }
 
+/* W61: 1–3 emojis (con o sin espacios entre ellos) → burbuja grande.
+   Se buscan las secuencias MÁS LARGAS del set (ZWJ, tonos de piel,
+   banderas…) para que un emoji compuesto cuente como UNO. */
+const EMO_KEYS = Object.keys(EMO_FILE).sort(function (a, b) {
+  return b.length - a.length;
+});
+export function isEmojiBurst(txt) {
+  const s = String(txt == null ? '' : txt).trim();
+  if (!s) return false;
+  let i = 0;
+  let count = 0;
+  while (i < s.length) {
+    const ch = s.charAt(i);
+    if (/\s/.test(ch)) { i++; continue; }
+    let hit = '';
+    for (let k = 0; k < EMO_KEYS.length; k++) {
+      const key = EMO_KEYS[k];
+      if (key && s.startsWith(key, i)) { hit = key; break; }
+    }
+    if (!hit) return false;
+    count++;
+    if (count > 3) return false;
+    i += hit.length;
+  }
+  return count > 0;
+}
+
 /* W30b: ¿ya se precargó el lote de SVG en esta sesión de pestaña? */
 let _prefetched = false;
 

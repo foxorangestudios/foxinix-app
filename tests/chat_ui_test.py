@@ -213,7 +213,8 @@ def cleanup_db():
             except Exception:
                 pass
         for table in ("reactions", "messages", "chat_members", "chats",
-                      "media", "email_codes", "friend_requests", "users"):
+                      "user_assets", "gif_favs", "media", "email_codes",
+                      "friend_requests", "users"):
             con.execute(f"DELETE FROM {table}")
         con.commit()
         n = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]

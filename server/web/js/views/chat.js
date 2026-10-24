@@ -53,6 +53,8 @@ import {
   loadBlocks, blockUser, unblockUser,
   /* W58 */
   hydrateDownloads,
+  /* W61 */
+  charCount, MAX_TEXT_CHARS,
 } from '../actions.js';
 /* W15: descarga de archivos con progreso, cancelación y reintento. */
 import {
@@ -61,7 +63,7 @@ import {
 } from '../mediadl.js';
 import { emojiCats, emojiCat, emojiRecent, emojiSearch, emojiPush,
   emojiCode, shortcodesToEmoji, emojiCodesPrefix,
-  emoFile, emoSrc, splitEmojis, isOneEmoji,
+  emoFile, emoSrc, splitEmojis, isEmojiBurst,
   reactBump, reactRank } from '../emoji.js';
 import { startWS, stopWS } from '../realtime.js';
 import { AvatarEditor } from './avatar-editor.js';
@@ -814,6 +816,70 @@ const ensureGifFavs = function () {
   return api('GET', '/api/gifs/favorites').then(function (r) {
     store.gifFavs = (r && r.favorites) || [];
   }).catch(function () { store.gifFavsLoaded = false; });
+};
+/* W61: biblioteca propia de GIFs/stickers subidos (máx. 10 por tipo). */
+const ASSET_MAX = 10;
+const assetList = function (kind) {
+  return kind === 'gif' ? store.userAssets.gifs : store.userAssets.stickers;
+};
+const ensureUserAssets = function () {
+  if (store.userAssetsLoaded) return Promise.resolve();
+  store.userAssetsLoaded = true;
+  return api('GET', '/api/assets').then(function (r) {
+    store.userAssets = {
+      gifs: (r && r.gifs) || [],
+      stickers: (r && r.stickers) || [],
+    };
+  }).catch(function () { store.userAssetsLoaded = false; });
+};
+const assetWithMedia = function (kind, mediaId) {
+  const list = assetList(kind);
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].media_id === mediaId) return list[i];
+  }
+  return null;
+};
+const uploadUserAsset = async function (kind, file) {
+  if (!file) return null;
+  if (assetList(kind).length >= ASSET_MAX) {
+    toast(kind === 'gif' ? t('Máximo 10 GIFs') : t('Máximo 10 stickers'), 'err');
+    return null;
+  }
+  const up = await uploadMedia(file);
+  const r = await api('POST', '/api/assets', { kind: kind, media_id: up.id });
+  if (r && r.asset) {
+    const list = assetList(kind).slice();
+    list.unshift(r.asset);
+    if (kind === 'gif') store.userAssets.gifs = list;
+    else store.userAssets.stickers = list;
+    return r.asset;
+  }
+  return null;
+};
+const removeUserAsset = function (kind, asset) {
+  if (!asset) return Promise.resolve();
+  return api('DELETE', '/api/assets/' + asset.id).then(function () {
+    const list = assetList(kind).filter(function (x) { return x.id !== asset.id; });
+    if (kind === 'gif') store.userAssets.gifs = list;
+    else store.userAssets.stickers = list;
+  });
+};
+const toggleStickerAsset = function (m) {
+  if (!m || !m.media) return;
+  const found = assetWithMedia('sticker', m.media.id);
+  if (!found && assetList('sticker').length >= ASSET_MAX) {
+    toast(t('Máximo 10 stickers'), 'err');
+    return;
+  }
+  const p = found
+    ? removeUserAsset('sticker', found)
+    : api('POST', '/api/assets', { kind: 'sticker', media_id: m.media.id })
+      .then(function (r) {
+        if (r && r.asset) store.userAssets.stickers = [r.asset].concat(store.userAssets.stickers || []);
+      });
+  p.catch(function (e) {
+    toast((e && e.detail) || t('No se pudo guardar el favorito'), 'err');
+  });
 };
 const isGifFav = function (m) {
   ensureGifFavs();
@@ -1918,13 +1984,24 @@ const MessageRow = {
     /* W29b: título de un emoji = su :shortcode: (o el carácter solo). */
     const titleOf = function (ch) { return emojiCode(ch); };
 
-    /* W41: UN solo emoji en el cuerpo → el mensaje se pinta como
+    /* W41/W61: 1–3 emojis en el cuerpo → el mensaje se pinta como
        sticker (emoji grande, sin caja y con la hora en pastillita).
-       No con cita (el bloque .b-reply rompería el look transparente)
-       ni en edición (se ve el textarea). */
+       Con E2E el texto real está en _plain, no en body. No con cita
+       (el bloque .b-reply rompería el look transparente) ni en edición
+       (se ve el textarea). */
     const emoBig = function () {
-      return props.row.ref.kind === 'text' && !editing.value &&
-        !props.row.ref.reply_to && isOneEmoji(props.row.ref.body);
+      const ref0 = props.row.ref;
+      if (ref0.kind !== 'text' || editing.value || ref0.reply_to) return false;
+      const txt = (ref0._plain != null ? ref0._plain : ref0.body) || '';
+      return isEmojiBurst(txt);
+    };
+    /* W61: un sticker con imagen se puede guardar en la biblioteca. */
+    const stickerAssetOn = function () {
+      const m = props.row.ref.media;
+      return !!(m && assetWithMedia('sticker', m.id));
+    };
+    const saveStickerAsset = function () {
+      toggleStickerAsset(props.row.ref);
     };
 
     /* W29c: hover en un chip → quiénes reaccionaron ("😂 juan, maria"). */
@@ -2101,6 +2178,7 @@ const MessageRow = {
       /* W29b */
       emoFile, emoSrc, titleOf, reactTitle,
       emoBig,   /* W41 */
+      stickerAssetOn, saveStickerAsset,   /* W61 */
     };
   },
   template:
@@ -2138,11 +2216,16 @@ const MessageRow = {
             '@click.stop="toggleFavGif(row.ref)">' +
             '<svg class="ic ic-sm"><use :href="isGifFav(row.ref) ? \'#i-star-fill\' : \'#i-star\'"></use></svg>' +
           '</button>' +
-          /* W60: guardar un sticker recibido en favoritos */
-          '<button v-if="row.ref.kind === \'sticker\'" class="b-act" type="button" ' +
+          /* W60/W61: guardar un sticker recibido (emoji o imagen) */
+          '<button v-if="row.ref.kind === \'sticker\' && !row.ref.media" class="b-act" type="button" ' +
             ':title="isStkFav(row.ref.body) ? t(\'Quitar de favoritos\') : t(\'Guardar en stickers\')" ' +
             '@click.stop="toggleStkFav(row.ref.body)">' +
             '<svg class="ic ic-sm"><use :href="isStkFav(row.ref.body) ? \'#i-star-fill\' : \'#i-star\'"></use></svg>' +
+          '</button>' +
+          '<button v-else-if="row.ref.kind === \'sticker\' && row.ref.media" class="b-act" type="button" ' +
+            ':title="stickerAssetOn() ? t(\'Quitar de favoritos\') : t(\'Guardar en stickers\')" ' +
+            '@click.stop="saveStickerAsset">' +
+            '<svg class="ic ic-sm"><use :href="stickerAssetOn() ? \'#i-star-fill\' : \'#i-star\'"></use></svg>' +
           '</button>' +
           /* W17: ⋯ abre el mismo menú del clic derecho, anclado a la
              burbuja (no tapa el mensaje). */
@@ -2252,6 +2335,15 @@ const MessageRow = {
               '<svg class="ic ic-sm"><use href="#i-refresh"></use></svg></button>' +
           '</span>' +
         '</div>' +
+        /* W61: sticker subido (imagen) — se pinta grande, sin marco. */
+        '<span class="b-sticker-img" v-else-if="row.ref.kind === \'sticker\' && row.ref.media" ' +
+          'role="button" :title="t(\'Ver con zoom\')" ' +
+          '@click="$emit(\'zoom\', { url: mediaUrl(row.ref.media.url, false, true), ' +
+            'orig: mediaUrl(row.ref.media.url, true, true), name: row.ref.media.name || \'sticker\', ' +
+            'mime: row.ref.media.mime, kind: \'sticker\' })">' +
+          '<img class="b-sticker" :src="mediaUrl(row.ref.media.url)" ' +
+            ':alt="row.ref.media.name || \'sticker\'" loading="lazy" @load="$emit(\'imgload\')">' +
+        '</span>' +
         /* W8: clic en la imagen → vista previa con zoom (lightbox).
            W15: v-dl baja el original con anillo; mientras tanto se ve la
            miniatura del server difuminada (?thumb=1).
@@ -2418,7 +2510,8 @@ const MessageRow = {
         '</div>' +
         /* W8: edición en línea del mensaje propio */
         '<div class="b-editform" v-if="editing">' +
-          '<textarea class="input" ref="editEl" rows="2" v-model="store.editDraft" ' +
+          '<textarea class="input" ref="editEl" rows="2" maxlength="3000" ' +
+            'v-model="store.editDraft" ' +
             '@keydown.esc="cancelEdit" @keydown.ctrl.enter="saveEdit"></textarea>' +
           '<div class="bef-btns">' +
             '<button class="btn btn-ghost btn-sm" type="button" @click="cancelEdit">{{ t(\'Cancelar\') }}</button>' +
@@ -3931,6 +4024,60 @@ const DownloadViewer = {
     </div>`,
 };
 
+/* W61: posición vertical de la portada (0 = arriba, 100 = abajo). */
+function bannerPositionOf(u) {
+  const n = Number(u && u.banner_position);
+  if (!Number.isFinite(n)) return 50;
+  return Math.max(0, Math.min(100, n));
+}
+
+function bannerStyle(u) {
+  return { objectPosition: '50% ' + bannerPositionOf(u) + '%' };
+}
+
+/* W61: abre una portada/avatar en el visor existente, con el original
+   (sin la miniatura ?thumb=1) para poder ampliarlo y descargarlo. */
+function openMediaViewer(url, name) {
+  if (!url) return;
+  store.lb = {
+    url: mediaUrl(url, false, true),
+    orig: mediaUrl(url, true, true),
+    name: name || '',
+  };
+}
+
+/* W61: bio con "Ver más". A partir de 100 caracteres se recorta en una
+   palabra completa y el botón despliega el texto completo (300 máx.). */
+const BioText = {
+  props: {
+    text: { type: String, default: '' },
+    limit: { type: Number, default: 100 },
+  },
+  setup: function (props) {
+    const open = Vue.ref(false);
+    const more = Vue.computed(function () {
+      return charCount(props.text) > props.limit;
+    });
+    const shown = Vue.computed(function () {
+      const txt = props.text || '';
+      if (!more.value || open.value) return txt;
+      const chars = Array.from(txt);
+      let cut = chars.slice(0, props.limit).join('');
+      const sp = Math.max(cut.lastIndexOf(' '), cut.lastIndexOf('\n'));
+      if (sp > Math.floor(props.limit * 0.6)) cut = cut.slice(0, sp);
+      return cut.replace(/[\s,;:.!?]+$/, '') + '…';
+    });
+    return { open, more, shown, md: mdToHtml, t };
+  },
+  template:
+    '<div class="pf-bio-wrap">' +
+      '<div class="pp-bio md-body" v-html="md(shown)"></div>' +
+      '<button v-if="more" class="pf-bio-more" type="button" @click="open = !open">' +
+        '{{ open ? t(\'Ver menos\') : t(\'Ver más\') }}' +
+      '</button>' +
+    '</div>',
+};
+
 /* ---------------------------------------------------- MeProfileModal */
 
 const MeProfileModal = {
@@ -4000,8 +4147,10 @@ const MeProfileModal = {
       menuOpen, statusDraft, statusBusy, statusErr,
       toggleStatus, choosePreset, saveCustom, clearCustom,
       dotClass, statusOf, joinedLine, md: mdToHtml, mediaUrl,
+      bannerStyle, viewMedia: openMediaViewer,
     };
   },
+  components: { BioText },
   template: `
     <div class="modal-veil" @click.self="close">
       <div class="modal meprof" role="dialog" :aria-label="t('Tu perfil')">
@@ -4014,7 +4163,9 @@ const MeProfileModal = {
           <div class="mp-view pf-view" v-if="store.user">
             <!-- W58: portada + avatar solapado a la mitad + estado citado -->
             <div class="pf-banner" :class="{ 'is-empty': !store.user.banner_url }">
-              <img v-if="store.user.banner_url" :src="mediaUrl(store.user.banner_url)" alt="">
+              <img v-if="store.user.banner_url" :src="mediaUrl(store.user.banner_url)"
+                :style="bannerStyle(store.user)" alt="" class="pf-zoom"
+                :title="t('Ver portada')" @click="viewMedia(store.user.banner_url, 'portada')">
               <span v-else class="pf-banner-art" aria-hidden="true">
                 <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
               </span>
@@ -4022,7 +4173,9 @@ const MeProfileModal = {
             <div class="pf-idrow">
               <span class="av-wrap pf-avwrap" :class="dotClass(store.user, store.ws === 'on')">
                 <span class="avatar pp-av" :class="{ 'has-photo': !!store.user.avatar_url }">
-                  <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">
+                  <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)"
+                    alt="" class="pf-zoom" :title="t('Ver foto')"
+                    @click="viewMedia(store.user.avatar_url, 'foto')">
                   <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
                 </span>
               </span>
@@ -4040,9 +4193,7 @@ const MeProfileModal = {
                 </button>
               </div>
             </div>
-            <div class="pf-bio-wrap" v-if="store.user.bio">
-              <div class="pp-bio md-body" v-html="md(store.user.bio)"></div>
-            </div>
+            <bio-text v-if="store.user.bio" :text="store.user.bio"></bio-text>
             <div class="pp-rows pf-rows">
               <div class="pp-row" v-if="store.user.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(store.user) }}</span></div>
             </div>
@@ -4113,6 +4264,14 @@ const MeProfileEditModal = {
     const bannerPreview = Vue.ref('');
     const hadBanner = !!u.banner_url;
     const bannerGone = Vue.ref(false);
+    /* W61: foco vertical de la portada. Se puede arrastrar o mover con
+       la barra; se guarda en el perfil para todas las vistas. */
+    const bannerPos = Vue.ref(bannerPositionOf(u));
+    const bannerEl = Vue.ref(null);
+    const bannerDragging = Vue.ref(false);
+    const bannerPosStyle = Vue.computed(function () {
+      return { objectPosition: '50% ' + Math.round(bannerPos.value) + '%' };
+    });
     const hasBanner = Vue.computed(function () {
       return !!bannerPreview.value ||
         (!bannerGone.value && !!(store.user && store.user.banner_url));
@@ -4180,6 +4339,7 @@ const MeProfileEditModal = {
       bannerFile.value = f;
       bannerPreview.value = URL.createObjectURL(f);
       bannerGone.value = false;
+      bannerPos.value = 50;          // una portada nueva empieza centrada
     };
 
     const removeBanner = function () {
@@ -4188,6 +4348,34 @@ const MeProfileEditModal = {
       bannerFile.value = null;
       bannerPreview.value = '';
       bannerGone.value = hadBanner;
+      bannerPos.value = 50;
+    };
+
+    /* W61: arrastrar la portada (ratón o dedo) para elegir qué franja se
+       ve. Arriba muestra la parte superior (0 %), abajo la inferior. */
+    const startBannerDrag = function (e) {
+      if (!hasBanner.value) return;
+      if (e && e.button) return;
+      const el = bannerEl.value;
+      if (!el) return;
+      if (e && e.preventDefault) e.preventDefault();
+      const h = Math.max(1, el.getBoundingClientRect().height || 96);
+      const y0 = e.clientY;
+      const p0 = bannerPos.value;
+      bannerDragging.value = true;
+      const move = function (ev) {
+        const dy = ev.clientY - y0;
+        bannerPos.value = Math.max(0, Math.min(100, p0 - (dy / h) * 100));
+      };
+      const up = function () {
+        bannerDragging.value = false;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     };
 
     const removeAvatar = function () {
@@ -4224,7 +4412,7 @@ const MeProfileEditModal = {
     const save = async function () {
       err.value = '';
       if (name.value.length > 50) { err.value = 'El nombre supera los 50 caracteres'; return; }
-      if (bio.value.length > 150) { err.value = 'La bio supera los 150 caracteres'; return; }
+      if (charCount(bio.value) > 300) { err.value = 'La bio supera los 300 caracteres'; return; }
       if (statusText.value.length > 80) { err.value = 'El estado supera los 80 caracteres'; return; }
       busy.value = true;
       try {
@@ -4233,6 +4421,7 @@ const MeProfileEditModal = {
           bio: bio.value.trim(),
           status_text: statusText.value.trim(),
           status_preset: preset.value,
+          banner_position: Math.round(bannerPos.value),
         };
         if (file.value) {
           const up = await uploadMedia(file.value);
@@ -4263,6 +4452,9 @@ const MeProfileEditModal = {
     return {
       store, name, bio, statusText, preset, preview, hasPhoto, avatarGone,
       bannerPreview, hasBanner, bannerGone, pickBanner, removeBanner,
+      bannerPos, bannerPosStyle, bannerDragging, bannerEl, startBannerDrag,
+      bioCount: Vue.computed(function () { return charCount(bio.value); }),
+      bioMax: 300, maxText: MAX_TEXT_CHARS,
       busy, err, pick, removeAvatar, close, save,
       openUname,   /* W60: modal aparte para el @usuario */
       /* W27: editor de foto (encuadre + rotación); W27b: recuerda el
@@ -4287,13 +4479,18 @@ const MeProfileEditModal = {
           <!-- W58: portada del perfil. Se sube tal cual y se muestra
                como cover; no hay recorte para no añadir otro editor. -->
           <div class="pf-edit-banner" v-if="!edSrc">
-            <div class="pf-edit-banner-img" :class="{ 'is-empty': !hasBanner }">
-              <img v-if="bannerPreview" :src="bannerPreview" alt="">
+            <div class="pf-edit-banner-img" ref="bannerEl"
+              :class="{ 'is-empty': !hasBanner, 'can-drag': hasBanner, 'is-dragging': bannerDragging }"
+              @pointerdown="startBannerDrag">
+              <img v-if="bannerPreview" :src="bannerPreview" :style="bannerPosStyle"
+                alt="" draggable="false">
               <img v-else-if="hasBanner && store.user && store.user.banner_url"
-                :src="mediaUrl(store.user.banner_url)" alt="">
+                :src="mediaUrl(store.user.banner_url)" :style="bannerPosStyle"
+                alt="" draggable="false">
               <span v-else class="pf-banner-art" aria-hidden="true">
                 <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
               </span>
+              <span class="pf-pos-hint" v-if="hasBanner">{{ t('Arrastra para encuadrar') }}</span>
             </div>
             <!-- W59: la foto va MONTADA sobre la portada, no debajo.
                  Mientras se recorta se oculta y manda el editor. -->
@@ -4323,6 +4520,12 @@ const MeProfileEditModal = {
               </label>
               <button class="btn btn-ghost btn-sm" type="button" v-if="hasBanner"
                 @click="removeBanner">{{ t('Quitar portada') }}</button>
+            </div>
+            <div class="pf-pos-row" v-if="hasBanner">
+              <label for="pf-banner-pos">{{ t('Posición de la portada') }}</label>
+              <input id="pf-banner-pos" class="pf-pos-range" type="range"
+                min="0" max="100" step="1" v-model.number="bannerPos">
+              <span class="pf-pos-val">{{ Math.round(bannerPos) }}%</span>
             </div>
           </div>
           <!-- W27: con el editor abierto ocupa el centro; al aplicar
@@ -4361,8 +4564,9 @@ const MeProfileEditModal = {
             <p class="st-hint mp-preset-hint">{{ t('No molestar silencia los avisos; solo las menciones directas (@usuario) te avisan. Invisible te deja conectado sin aparecer en línea.') }}</p>
             <div class="field">
               <label>Bio</label>
-              <textarea class="input" v-model.trim="bio" maxlength="150" rows="2"
+              <textarea class="input" v-model.trim="bio" maxlength="300" rows="3"
                 :placeholder="t('Cuéntanos algo sobre ti…')"></textarea>
+              <div class="pf-bio-count">{{ bioCount }}/300</div>
               <p class="st-hint">{{ t('Se muestra con') }} <b>markdown</b>: {{ t('**negrita**, *cursiva*, \`código\`, ~~tachado~~ y [links](https://…)') }}</p>
             </div>
           </template>
@@ -4673,17 +4877,19 @@ const ReadsBox = {
    un canvas y se cachea como data URL; el CSS solo escala esa imagen
    diminuta y le aplica un blur barato (nada de backdrop-filter). */
 const callBlurCache = {};
-function callBlurBanner(url) {
+function callBlurBanner(url, position) {
   if (!url) return Promise.resolve('');
-  if (callBlurCache[url] !== undefined) {
-    return Promise.resolve(callBlurCache[url]);
+  const pos = Math.max(0, Math.min(100, Number(position) || 50));
+  const cacheKey = url + '|' + pos;
+  if (callBlurCache[cacheKey] !== undefined) {
+    return Promise.resolve(callBlurCache[cacheKey]);
   }
   return new Promise(function (resolve) {
     let done = false;
     const finish = function (v) {
       if (done) return;
       done = true;
-      callBlurCache[url] = v;
+      callBlurCache[cacheKey] = v;
       resolve(v);
     };
     const img = new Image();
@@ -4698,7 +4904,7 @@ function callBlurBanner(url) {
         const scale = Math.max(48 / sw, 27 / sh);
         const dw = sw * scale;
         const dh = sh * scale;
-        ctx.drawImage(img, (48 - dw) / 2, (27 - dh) / 2, dw, dh);
+        ctx.drawImage(img, (48 - dw) / 2, (27 - dh) * (pos / 100), dw, dh);
         finish(c.toDataURL('image/jpeg', 0.55));
       } catch (e) {
         finish('');
@@ -4723,6 +4929,11 @@ const CallBox = {
     const mySpeak = Vue.ref(false);
     const remoteMuted = Vue.ref(false);
     const menu = Vue.ref(null);
+    /* W61: la burbuja minimizada se puede arrastrar a cualquier parte. */
+    const fabEl = Vue.ref(null);
+    const fabDragging = Vue.ref(false);
+    const fabPos = Vue.ref(null);        // {left, top} en píxeles
+    let fabDragEnd = 0;
     let timer = null;
     let speakTimer = null;
     let audioCtx = null;
@@ -4745,6 +4956,24 @@ const CallBox = {
     };
 
     const peer = function () { return store.call ? store.call.peer : null; };
+    /* W61: respaldo para señales antiguas que solo traían nombre. Si el
+       peer no trae avatar/portada, se completa con su perfil público. */
+    let peerFetch = '';
+    const ensurePeerProfile = function () {
+      const p = peer();
+      if (!p || !p.username) return;
+      if (p.avatar_url && p.banner_url) return;
+      const key = (p.id || 0) + '|' + p.username;
+      if (peerFetch === key) return;
+      peerFetch = key;
+      api('GET', '/api/users/' + encodeURIComponent(p.username))
+        .then(function (r) {
+          if (r && r.user && store.call && store.call.peer) {
+            store.call.peer = Object.assign({}, store.call.peer, r.user);
+          }
+        })
+        .catch(function () {});
+    };
     const peerName = function () {
       const p = peer();
       if (!p) return '';
@@ -4790,16 +5019,18 @@ const CallBox = {
     const makeBgs = function () {
       const p = peer();
       const b = p && p.banner_url ? p.banner_url : '';
-      if (b !== peerBanner) {
-        peerBanner = b;
+      const bp = p ? bannerPositionOf(p) : 50;
+      if (b + '|' + bp !== peerBanner) {
+        peerBanner = b + '|' + bp;
         peerBg.value = '';
-        callBlurBanner(b).then(function (u) { peerBg.value = u; });
+        callBlurBanner(b, bp).then(function (u) { peerBg.value = u; });
       }
       const mb = store.user && store.user.banner_url ? store.user.banner_url : '';
-      if (mb !== myBanner) {
-        myBanner = mb;
+      const mp = bannerPositionOf(store.user);
+      if (mb + '|' + mp !== myBanner) {
+        myBanner = mb + '|' + mp;
         myBg.value = '';
-        callBlurBanner(mb).then(function (u) { myBg.value = u; });
+        callBlurBanner(mb, mp).then(function (u) { myBg.value = u; });
       }
     };
 
@@ -4967,24 +5198,81 @@ const CallBox = {
     const minimize = function () { minimized.value = true; };
     const restore = function () { minimized.value = false; };
 
+    const fabStyle = Vue.computed(function () {
+      const p = fabPos.value;
+      if (!p) return {};
+      return { left: p.left + 'px', top: p.top + 'px', right: 'auto', bottom: 'auto' };
+    });
+    const clampFab = function () {
+      const p = fabPos.value;
+      if (!p) return;
+      const size = 62;
+      const m = 6;
+      fabPos.value = {
+        left: Math.max(m, Math.min(p.left, (window.innerWidth || 360) - size - m)),
+        top: Math.max(m, Math.min(p.top, (window.innerHeight || 640) - size - m)),
+      };
+    };
+    const startFabDrag = function (e) {
+      if (e && e.button) return;
+      const el = fabEl.value;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const x0 = e.clientX;
+      const y0 = e.clientY;
+      let moved = false;
+      fabDragging.value = true;
+      const move = function (ev) {
+        if (!moved && Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 5) return;
+        moved = true;
+        const size = 62;
+        const m = 6;
+        fabPos.value = {
+          left: Math.max(m, Math.min(r.left + (ev.clientX - x0),
+            (window.innerWidth || 360) - size - m)),
+          top: Math.max(m, Math.min(r.top + (ev.clientY - y0),
+            (window.innerHeight || 640) - size - m)),
+        };
+      };
+      const up = function () {
+        fabDragging.value = false;
+        if (moved) fabDragEnd = Date.now();
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    };
+    const fabClick = function () {
+      /* Un arrastre no debe restaurar la llamada al soltar. */
+      if (Date.now() - fabDragEnd < 400) return;
+      restore();
+    };
+
     Vue.onMounted(function () {
       retick();
       timer = setInterval(retick, 1000);
       speakTimer = setInterval(pollSpeaking, 250);
       setTimeout(attach, 0);
       makeBgs();
+      ensurePeerProfile();
       document.addEventListener('click', closeMenu);
       document.addEventListener('keydown', closeMenu);
+      window.addEventListener('resize', clampFab);
     });
     Vue.onUpdated(function () {
       attach();
       makeBgs();
+      ensurePeerProfile();
     });
     Vue.onUnmounted(function () {
       if (timer) clearInterval(timer);
       if (speakTimer) clearInterval(speakTimer);
       document.removeEventListener('click', closeMenu);
       document.removeEventListener('keydown', closeMenu);
+      window.removeEventListener('resize', clampFab);
       if (audioCtx) {
         try { audioCtx.close(); } catch (e) {}
       }
@@ -4996,6 +5284,7 @@ const CallBox = {
     return {
       store, t, remoteEl, pipEl, elapsed, minimized, callText, chatListEl,
       peerBg, myBg, peerSpeak, mySpeak, remoteMuted, menu,
+      fabEl, fabStyle, fabDragging, startFabDrag, fabClick,
       peerName, peerIni, peerAvatar, myAvatar, myIni,
       isIncoming, inCall, hasVideo, selfCamOn, stateLine, bgStyle,
       callMessages, sendChat, scrollChat,
@@ -5008,7 +5297,9 @@ const CallBox = {
   template:
     '<div class="callbox" :class="{ incoming: isIncoming(), calling: !inCall() && !isIncoming(), active: inCall(), minimized: minimized }"' +
       ' role="dialog" :aria-label="t(\'Llamada\')">' +
-      '<button class="call-fab" type="button" v-if="minimized" @click.stop="restore"' +
+      '<button class="call-fab" type="button" v-if="minimized" ref="fabEl"' +
+        ' :class="{ dragging: fabDragging, moved: !!fabStyle.left }"' +
+        ' :style="fabStyle" @pointerdown="startFabDrag" @click.stop="fabClick"' +
         ' :title="t(\'Volver a la llamada\')">' +
         '<span class="call-fab-ic"><svg class="ic"><use href="#i-phone"></use></svg></span>' +
         '<span class="call-fab-t">{{ elapsed }}</span>' +
@@ -5095,7 +5386,7 @@ const CallBox = {
               '{{ t(\'No hay mensajes todavía.\') }}</div>' +
           '</div>' +
           '<form class="call-chat-form" @submit.prevent="sendChat">' +
-            '<input class="call-chat-in" v-model="callText" maxlength="2000"' +
+            '<input class="call-chat-in" v-model="callText" maxlength="3000"' +
               ' :placeholder="t(\'Escribe un mensaje…\')" :aria-label="t(\'Mensaje\')">' +
             '<button class="icon-btn call-send" type="submit" :disabled="!callText.trim()"' +
               ' :title="t(\'Enviar\')" :aria-label="t(\'Enviar\')">' +
@@ -5268,9 +5559,10 @@ const ProfilePanel = {
     return {
       store, close, startChat, friendState, inActiveDm, dotClass,
       statusOf, profileQuote, personMenu, joinedLine, md: mdToHtml,
-      mediaUrl,
+      mediaUrl, bannerStyle, viewMedia: openMediaViewer,
     };
   },
+  components: { BioText },
   template: `
     <div class="modal-veil" v-if="store.profile" @click.self="close" role="dialog" :aria-label="t('Perfil')">
       <div class="modal pmodal">
@@ -5290,7 +5582,10 @@ const ProfilePanel = {
           <div class="pp-body pf-body">
             <div class="pf-banner" :class="{ 'is-empty': !store.profile.user.banner_url }">
               <img v-if="store.profile.user.banner_url"
-                :src="mediaUrl(store.profile.user.banner_url)" alt="" loading="lazy">
+                :src="mediaUrl(store.profile.user.banner_url)"
+                :style="bannerStyle(store.profile.user)" alt="" loading="lazy"
+                class="pf-zoom" :title="t('Ver portada')"
+                @click="viewMedia(store.profile.user.banner_url, 'portada')">
               <span v-else class="pf-banner-art" aria-hidden="true">
                 <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
               </span>
@@ -5299,7 +5594,9 @@ const ProfilePanel = {
               <span class="av-wrap pf-avwrap" :class="dotClass(store.profile.user)">
                 <span class="avatar pp-av" :class="{ 'has-photo': !!store.profile.user.avatar_url }">
                   <img v-if="store.profile.user.avatar_url"
-                    :src="mediaUrl(store.profile.user.avatar_url)" alt="" loading="lazy">
+                    :src="mediaUrl(store.profile.user.avatar_url)" alt="" loading="lazy"
+                    class="pf-zoom" :title="t('Ver foto')"
+                    @click="viewMedia(store.profile.user.avatar_url, 'foto')">
                   <span v-else>{{ (store.profile.user.display_name || store.profile.user.username).charAt(0).toUpperCase() }}</span>
                 </span>
               </span>
@@ -5311,9 +5608,7 @@ const ProfilePanel = {
                 <span class="pf-quote-text">{{ profileQuote(store.profile.user) }}</span>
               </div>
             </div>
-            <div class="pf-bio-wrap" v-if="store.profile.user.bio">
-              <div class="pp-bio md-body" v-html="md(store.profile.user.bio)"></div>
-            </div>
+            <bio-text v-if="store.profile.user.bio" :text="store.profile.user.bio"></bio-text>
             <div class="pp-rows pf-rows">
               <div class="pp-row" v-if="store.profile.user.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(store.profile.user) }}</span></div>
             </div>
@@ -5688,6 +5983,7 @@ const ChatInfoPanel = {
       infoMenu, memberSections, grpAvatar, canPhoto, pickPhoto,
       grpEditing, onGrpPhoto, onGrpPhotoCancel,
       dotClass, statusOf, profileQuote, joinedLine, mediaUrl, md: mdToHtml,
+      bannerStyle, viewMedia: openMediaViewer,
       titleOf: chatTitle,
       /* W28c/W29l */
       pins, pinsLoading, openPins, closePins, goPin,
@@ -5699,7 +5995,7 @@ const ChatInfoPanel = {
       e2eSas, e2ePendHint,
     };
   },
-  components: { AvatarEditor },
+  components: { AvatarEditor, BioText },
   template: `
     <aside class="profile-panel" v-if="store.infoOpen && chat" :aria-label="t(chat.type === 'dm' ? 'Info del usuario' : 'Info del chat')">
       <header class="pp-head">
@@ -5716,7 +6012,10 @@ const ChatInfoPanel = {
       <template v-if="chat.type === 'dm'">
         <div class="pp-body pf-body" v-if="peer">
           <div class="pf-banner pf-banner-sm" :class="{ 'is-empty': !peer.banner_url }">
-            <img v-if="peer.banner_url" :src="mediaUrl(peer.banner_url)" alt="" loading="lazy">
+            <img v-if="peer.banner_url" :src="mediaUrl(peer.banner_url)"
+              :style="bannerStyle(peer)" alt="" loading="lazy"
+              class="pf-zoom" :title="t('Ver portada')"
+              @click="viewMedia(peer.banner_url, 'portada')">
             <span v-else class="pf-banner-art" aria-hidden="true">
               <svg class="fox" viewBox="-7 -30 334 362"><use href="#i-logo-mark"></use></svg>
             </span>
@@ -5724,7 +6023,9 @@ const ChatInfoPanel = {
           <div class="pf-idrow">
             <span class="av-wrap pf-avwrap" :class="dotClass(peer)">
               <span class="avatar pp-av" :class="{ 'has-photo': !!peer.avatar_url }">
-                <img v-if="peer.avatar_url" :src="mediaUrl(peer.avatar_url)" alt="" loading="lazy">
+                <img v-if="peer.avatar_url" :src="mediaUrl(peer.avatar_url)" alt="" loading="lazy"
+                  class="pf-zoom" :title="t('Ver foto')"
+                  @click="viewMedia(peer.avatar_url, 'foto')">
                 <span v-else>{{ (peer.display_name || peer.username).charAt(0).toUpperCase() }}</span>
               </span>
             </span>
@@ -5736,9 +6037,7 @@ const ChatInfoPanel = {
               <span class="pf-quote-text">{{ profileQuote(peer) }}</span>
             </div>
           </div>
-          <div class="pf-bio-wrap" v-if="peer.bio">
-            <div class="pp-bio md-body" v-html="md(peer.bio)"></div>
-          </div>
+          <bio-text v-if="peer.bio" :text="peer.bio"></bio-text>
           <div class="pp-rows pf-rows">
             <div class="pp-row" v-if="peer.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(peer) }}</span></div>
           </div>
@@ -6389,6 +6688,9 @@ export const ChatShell = {
       /* W45: el preview de la lista no debe destapar un spoiler. */
       if (lm.spoiler) return who + t('Spoiler');
       if (lm.kind === 'image') return who + t('Imagen');
+      if (lm.kind === 'sticker') {
+        return who + (lm.media ? t('Sticker') : (lm.body || ''));
+      }
       if (lm.kind === 'voice') return who + t('Nota de voz');
       if (lm.kind === 'file') {
         /* W11: los videos se distinguen de los archivos comunes */
@@ -7080,6 +7382,9 @@ export const ChatShell = {
       const src = replyTo.value;
       /* W23: el mensaje se escribe en el compositor (puede venir vacío) */
       const body = typeof cap === 'string' ? cap : draft.value;
+      /* W61: si el pie supera 3000, el adjunto va sin pie y el texto se
+         archiva aparte como mensaje.txt/message.txt. */
+      const longBody = charCount(body) > MAX_TEXT_CHARS;
       /* W29d/h: el interruptor (o el long-press) marca este adjunto. */
       const spo = spoilNext.value || spoilOnce;
       spoilOnce = false;
@@ -7093,8 +7398,12 @@ export const ChatShell = {
       mOpen.value = false;                    // W28b
       if (input.value) input.value.style.height = 'auto';
       try {
-        await sendMedia(store.activeChatId, a.file, null, src, body,
-          null, null, { spoiler: spo });
+        await sendMedia(store.activeChatId, a.file, null, src,
+          longBody ? '' : body, null, null, { spoiler: spo });
+        if (longBody) {
+          await sendText(store.activeChatId, body, src, 'text',
+            { spoiler: false });
+        }
         if (spo && !draft.value.trim()) spoilNext.value = false;
       } catch (err) {
         /* la burbuja queda con su reintento; el interruptor se suelta
@@ -7102,6 +7411,10 @@ export const ChatShell = {
         spoilNext.value = false;
       }
     };
+
+    /* W61: aviso discreto cuando el texto se archivará como .txt. */
+    const draftCount = Vue.computed(function () { return charCount(draft.value); });
+    const draftLong = Vue.computed(function () { return draftCount.value > MAX_TEXT_CHARS; });
 
     /* Una imagen/video sola abre la ficha (W23: el texto va en el
        compositor); el resto se manda de una. También entra por Ctrl+V
@@ -7317,6 +7630,9 @@ export const ChatShell = {
         initInfoPanel();                       // W7: info por defecto si hay lugar
       };
       bootPermissions().catch(function () {}).then(start);
+      /* W61: la biblioteca propia se carga al arrancar para que las
+         estrellas de los stickers recibidos ya salgan rellenas. */
+      ensureUserAssets();
       document.addEventListener('click', onDocClick);
       window.addEventListener('keydown', onEsc);
       /* W54d: teclado de Android (resize del WebView o viewport visual) */
@@ -7431,8 +7747,9 @@ export const ChatShell = {
     const pickTab = Vue.ref('emo');
     const setPickTab = function (id) {
       pickTab.value = id;
-      /* W36k: abrir la pestaña GIFs trae los favoritos (una sola vez) */
+      /* W36k/W61: abrir GIFs o Stickers trae la biblioteca propia. */
       if (id === 'gif') ensureGifFavs();
+      if (id === 'gif' || id === 'st') ensureUserAssets();
       if (pickEl.value) {
         Vue.nextTick(function () { clampPanel(pickEl.value, true); });
       }
@@ -7450,6 +7767,7 @@ export const ChatShell = {
       if (on) {
         pickTab.value = 'emo';   // al abrir, muestra los emojis
         clearAc();
+        ensureUserAssets();
         Vue.nextTick(function () { clampPanel(pickEl.value, true); });
       }
     };
@@ -7480,6 +7798,56 @@ export const ChatShell = {
           return f.media_id ? x.media_id !== f.media_id : x.name !== f.name;
         });
       }).catch(function () { toast('No se pudo quitar el favorito', 'err'); });
+    };
+
+    /* W61: subir y enviar GIFs/stickers propios. */
+    const assetBusy = Vue.ref(false);
+    const onAssetUpload = async function (kind, ev) {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = '';
+      if (!f) return;
+      if (kind === 'gif' && f.type !== 'image/gif') {
+        toast(t('Elige un archivo GIF'), 'err');
+        return;
+      }
+      if (kind === 'sticker' && !/^image\//.test(f.type || '')) {
+        toast(t('Elige una imagen'), 'err');
+        return;
+      }
+      if (f.size > 15 * 1024 * 1024) {
+        toast(t('Máximo 15 MB por archivo'), 'err');
+        return;
+      }
+      if (assetList(kind).length >= ASSET_MAX) {
+        toast(kind === 'gif' ? t('Máximo 10 GIFs') : t('Máximo 10 stickers'), 'err');
+        return;
+      }
+      assetBusy.value = true;
+      try {
+        const a = await uploadUserAsset(kind, f);
+        if (a) toast(kind === 'gif' ? t('GIF agregado') : t('Sticker agregado'), 'ok');
+      } catch (e) {
+        toast((e && e.detail) || t('No se pudo subir el archivo'), 'err');
+      } finally {
+        assetBusy.value = false;
+      }
+    };
+    const sendAsset = function (kind, a) {
+      if (!a || !a.media_id) return;
+      store.emoOpen = false;
+      api('POST', '/api/chats/' + store.activeChatId + '/messages', {
+        kind: kind === 'gif' ? 'image' : 'sticker',
+        body: '',
+        media_id: a.media_id,
+        client_msg_id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      }).catch(function (e) {
+        toast((e && e.detail) || t('No se pudo enviar el archivo'), 'err');
+      });
+    };
+    const delAsset = function (kind, a) {
+      removeUserAsset(kind, a).catch(function (e) {
+        toast((e && e.detail) || t('No se pudo borrar el archivo'), 'err');
+      });
     };
     const favGifSrc = function (f) {
       /* los de la biblioteca son estáticos; los subidos llevan firma
@@ -8052,8 +8420,15 @@ export const ChatShell = {
         label: 'Copiar enlace al mensaje', icon: 'i-link',
         fn: function () { copyText(msgLink(m)); toast('Enlace copiado'); },
       });
-      /* W60: guardar/quitar un sticker recibido */
-      if (m.kind === 'sticker' && m.body) {
+      /* W60/W61: guardar/quitar un sticker recibido (emoji o imagen) */
+      if (m.kind === 'sticker' && m.media) {
+        const on = !!assetWithMedia('sticker', m.media.id);
+        items.push(on
+          ? { label: 'Quitar de favoritos', icon: 'i-star-fill',
+              fn: function () { toggleStickerAsset(m); } }
+          : { label: 'Guardar en stickers', icon: 'i-star',
+              fn: function () { toggleStickerAsset(m); } });
+      } else if (m.kind === 'sticker' && m.body) {
         items.push(isStkFav(m.body)
           ? { label: 'Quitar de favoritos', icon: 'i-star-fill',
               fn: function () { toggleStkFav(m.body); } }
@@ -8453,6 +8828,7 @@ export const ChatShell = {
     return {
       store,
       scroller, input, fileInput, draft,
+      draftCount, draftLong, maxText: MAX_TEXT_CHARS,
       rootEl,
       canCall, doCall,   /* W28h */
       /* W13 */
@@ -8494,6 +8870,8 @@ export const ChatShell = {
       /* W36k */
       onGifFav, onFavDel, favGifSrc, isLibGifFav, toggleLibGif,
       isStkFav, toggleStkFav,
+      /* W61: biblioteca propia de GIFs/stickers */
+      assetBusy, onAssetUpload, sendAsset, delAsset, assetList, assetMax: ASSET_MAX,
       stkList: STICKERS, gifList: GIF_LIST,
       /* W29h: enviar manteniendo presionado 3 s = spoiler */
       holdOn, holdDown, holdUp, clickSend,
@@ -8784,6 +9162,11 @@ export const ChatShell = {
               '<svg class="ic ic-sm"><use href="#i-x"></use></svg>' +
             '</button>' +
           '</div>' +
+          /* W61: texto de más de 3000 → se enviará como archivo. */
+          '<div class="composer-long" v-if="draftLong">' +
+            '<svg class="ic ic-sm"><use href="#i-file"></use></svg>' +
+            '<span>{{ t(\'Se enviará como archivo de texto\') }} · {{ draftCount }}/{{ maxText }}</span>' +
+          '</div>' +
           '<div class="comp-row" v-if="rec === \'off\'">' +
             '<label class="icon-btn" :title="t(\'Adjuntar archivo\')">' +
               '<svg class="ic"><use href="#i-clip"></use></svg>' +
@@ -8852,6 +9235,27 @@ export const ChatShell = {
                     '</span>' +
                   '</div>' +
                 '</template>' +
+                /* W61: stickers subidos por el usuario (máx. 10). */
+                '<div class="st-sec st-sec-row">' +
+                  '<span>{{ t(\'Mis stickers\') }}' +
+                    ' <i class="st-count">{{ store.userAssets.stickers.length }}/10</i></span>' +
+                  '<label class="st-up" :class="{ busy: assetBusy }" :title="t(\'Subir sticker\')">' +
+                    '<svg class="ic ic-sm"><use href="#i-plus"></use></svg>' +
+                    '<input type="file" accept="image/png,image/webp,image/gif,image/jpeg" ' +
+                      'style="display:none" @change="onAssetUpload(\'sticker\', $event)">' +
+                  '</label>' +
+                '</div>' +
+                '<div class="st-grid" v-if="store.userAssets.stickers.length">' +
+                  '<span class="st-g-wrap" v-for="a in store.userAssets.stickers" :key="\'sa-\' + a.id">' +
+                    '<button class="st-g st-sticker" type="button" @click="sendAsset(\'sticker\', a)" ' +
+                      ':title="t(\'Enviar\')">' +
+                      '<img :src="mediaUrl(a.url)" alt="" loading="lazy"></button>' +
+                    '<button class="st-fav on" type="button" :title="t(\'Borrar de mi biblioteca\')" ' +
+                      '@click.stop="delAsset(\'sticker\', a)">' +
+                      '<svg class="ic ic-sm"><use href="#i-x"></use></svg></button>' +
+                  '</span>' +
+                '</div>' +
+                '<div class="st-empty" v-else>{{ t(\'Aún no has subido stickers\') }}</div>' +
                 '<div class="st-sec">{{ t(\'Todos los stickers\') }}</div>' +
                 '<div class="st-grid">' +
                   '<span class="st-wrap" v-for="s in stkList" :key="s">' +
@@ -8878,6 +9282,27 @@ export const ChatShell = {
                       '<svg class="ic ic-sm"><use href="#i-star-fill"></use></svg></button>' +
                   '</span>' +
                 '</div>' +
+                /* W61: GIFs subidos por el usuario (máx. 10). */
+                '<div class="st-sec st-sec-row">' +
+                  '<span>{{ t(\'Mis GIFs\') }}' +
+                    ' <i class="st-count">{{ store.userAssets.gifs.length }}/10</i></span>' +
+                  '<label class="st-up" :class="{ busy: assetBusy }" :title="t(\'Subir GIF\')">' +
+                    '<svg class="ic ic-sm"><use href="#i-plus"></use></svg>' +
+                    '<input type="file" accept="image/gif" style="display:none" ' +
+                      '@change="onAssetUpload(\'gif\', $event)">' +
+                  '</label>' +
+                '</div>' +
+                '<div class="st-grid" v-if="store.userAssets.gifs.length">' +
+                  '<span class="st-g-wrap" v-for="a in store.userAssets.gifs" :key="\'ga-\' + a.id">' +
+                    '<button class="st-g" type="button" @click="sendAsset(\'gif\', a)" ' +
+                      ':title="t(\'Enviar\')">' +
+                      '<img :src="mediaUrl(a.url)" alt="" loading="lazy"></button>' +
+                    '<button class="st-fav on" type="button" :title="t(\'Borrar de mi biblioteca\')" ' +
+                      '@click.stop="delAsset(\'gif\', a)">' +
+                      '<svg class="ic ic-sm"><use href="#i-x"></use></svg></button>' +
+                  '</span>' +
+                '</div>' +
+                '<div class="st-empty" v-else>{{ t(\'Aún no has subido GIFs\') }}</div>' +
                 '<div class="st-sec">{{ t(\'Biblioteca\') }}</div>' +
                 '<div class="st-grid">' +
                   '<span class="st-g-wrap" v-for="g in gifList" :key="g">' +

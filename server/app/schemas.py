@@ -98,11 +98,13 @@ class LogoutIn(BaseModel):
 
 class ProfileIn(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=50)
-    bio: Optional[str] = Field(default=None, max_length=150)
+    bio: Optional[str] = Field(default=None, max_length=300)
     status_text: Optional[str] = Field(default=None, max_length=80)
     status_preset: Optional[str] = None  # '' | online | busy | dnd | invisible (W6)
     avatar_media_id: Optional[int] = None  # null = quitar avatar
     banner_media_id: Optional[int] = None  # W58: null = quitar portada
+    # W61: punto focal vertical (0 = arriba, 100 = abajo) de la portada.
+    banner_position: Optional[int] = Field(default=None, ge=0, le=100)
 
     @field_validator("status_preset")
     @classmethod

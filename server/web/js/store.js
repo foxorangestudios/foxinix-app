@@ -47,6 +47,10 @@ export const store = reactive({
       return Array.isArray(v) ? v.filter(function (s) { return typeof s === 'string' && s; }) : [];
     } catch (e) { return []; }
   })(),
+  /* W61: biblioteca personal de GIFs/stickers subidos (máx. 10 de cada
+     tipo). Los carga /api/assets al abrir el selector. */
+  userAssets: { gifs: [], stickers: [] },
+  userAssetsLoaded: false,
   /* W29f: cifrado de extremo a extremo (por chat, persistido aparte) */
   e2e: {},                 // chatId → 1
   e2eSas: {},              // chatId → '8 2 0 7 0 2' (código de verificación)

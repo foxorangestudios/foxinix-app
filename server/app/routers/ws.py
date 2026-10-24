@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .. import security, db, auth
 from ..realtime import hub
+from .auth import _peer_user
 
 log = logging.getLogger("foxmsg.ws")
 router = APIRouter(tags=["ws"])
@@ -186,11 +187,15 @@ async def ws_endpoint(ws: WebSocket) -> None:
                         await ws.send_text(json.dumps(
                             {"type": "call_error", "chat_id": cid, "detail": "Usuario bloqueado"}))
                     continue
+                # W61: el panel de llamada necesita el perfil COMPLETO
+                # (avatar, portada, posición, bio/estado), no solo el
+                # nombre. Se relee la fila para no usar datos viejos si
+                # el usuario cambió su perfil después de conectar la WS.
+                fresh = db.one("SELECT * FROM users WHERE id = ?", (uid,)) or user
                 out: dict[str, Any] = {
                     "type": mtype,
                     "chat_id": cid,
-                    "from": {"id": uid, "username": user["username"],
-                             "display_name": user["display_name"] or user["username"]},
+                    "from": _peer_user(fresh),
                 }
                 if mtype in ("call_offer", "call_answer"):
                     sdp = str(msg.get("sdp") or "")

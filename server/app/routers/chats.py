@@ -1078,15 +1078,27 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
     if body.kind == "text" and not body.body.strip() and not body.e2e:
         # W29f: con cifrado E2E el cuerpo llega vacío (va en e2e.ct).
         raise HTTPException(400, "El mensaje está vacío")
-    if body.kind == "sticker" and not (0 < len(body.body.strip()) <= 8):
-        # W28g: un sticker es un emoji corto, no un mensaje con cuerpo.
+    if body.kind == "sticker" and not body.media_id and not (0 < len(body.body.strip()) <= 8):
+        # W28g: un sticker es un emoji corto; W61: o una imagen propia.
         raise HTTPException(400, "Sticker inválido")
-    if body.kind in ("image", "file", "voice"):
+    if body.kind in ("image", "file", "voice") or (body.kind == "sticker" and body.media_id):
         if not body.media_id:
             raise HTTPException(400, "Falta el archivo adjunto")
         media = db.one("SELECT * FROM media WHERE id = ?", (body.media_id,))
-        if not media or media["owner_id"] != user["id"]:
+        if not media:
             raise HTTPException(400, "Archivo inválido")
+        # W61: además del dueño, se puede reenviar un GIF/sticker guardado
+        # en la biblioteca propia o en los favoritos de GIFs (W36k).
+        saved = db.one(
+            "SELECT 1 AS x FROM user_assets WHERE user_id = ? AND media_id = ?"
+            " UNION ALL SELECT 1 AS x FROM gif_favs WHERE user_id = ? AND media_id = ?"
+            " LIMIT 1",
+            (user["id"], body.media_id, user["id"], body.media_id),
+        )
+        if media["owner_id"] != user["id"] and not saved:
+            raise HTTPException(400, "Archivo inválido")
+        if body.kind == "sticker" and not (media["mime"] or "").startswith("image/"):
+            raise HTTPException(400, "El sticker debe ser una imagen")
 
     # Idempotencia: si ya existe este client_msg_id, devolver el mensaje original
     if body.client_msg_id:

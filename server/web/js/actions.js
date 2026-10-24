@@ -11,6 +11,14 @@ import {
 /* Puentes que registra realtime.js para mandar 'seen' por WS (fallback: REST). */
 export const hooks = { sendSeen: null };
 
+/* W61: tope de texto de un mensaje. Al superarlo, el compositor lo sube
+   como `mensaje.txt`/`message.txt` en vez de enviar una burbuja enorme. */
+export const MAX_TEXT_CHARS = 3000;
+
+export function charCount(txt) {
+  return Array.from(String(txt == null ? '' : txt)).length;
+}
+
 /* ------------------------------------------------------- utilidades */
 
 /* URL de media. Las nuevas vienen firmadas (?exp=&sig=) y NO llevan token
@@ -42,7 +50,7 @@ dlHooks.onSaved = function (meta) {
   store.dlRev++;
 };
 
-export function mediaUrl(url, noCache) {
+export function mediaUrl(url, noCache, full) {
   if (!url) return '';
   let u = url;
   if (!/[?&](sig|token)=/.test(u) && u.indexOf('/media/') !== 0) {
@@ -50,8 +58,8 @@ export function mediaUrl(url, noCache) {
   }
   /* W15: los avatares se piden como miniatura del server (?thumb=1, la
      genera y cachea el server): cargan de una y se ven nítidos al tamaño
-     real del avatar. */
-  if (u.indexOf('/media/profile/') === 0 && u.indexOf('thumb=') < 0) {
+     real del avatar. W61: el visor de imágenes pide el original (full). */
+  if (!full && u.indexOf('/media/profile/') === 0 && u.indexOf('thumb=') < 0) {
     u = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'thumb=1';
   }
   /* W15: si el archivo ya se bajó en esta sesión, sirve el blob (memoria);
@@ -795,6 +803,14 @@ export async function sendText(chatId, text, srcMsg, kind, opts) {
   if (!text) return;
   kind = kind || 'text';   // W28g: 'sticker' reutiliza el mismo flujo
   opts = opts || {};
+  /* W61: un mensaje de más de 3000 caracteres no se manda como burbuja:
+     se sube como archivo de texto con el nombre del idioma activo. */
+  if (kind === 'text' && charCount(text) > MAX_TEXT_CHARS) {
+    const name = store.lang === 'en' ? 'message.txt' : 'mensaje.txt';
+    const file = new File([text], name, { type: 'text/plain' });
+    return sendMedia(chatId, file, 'file', srcMsg, '', null, null,
+      { spoiler: !!opts.spoiler });
+  }
   /* W29d/W29f: el server recibe el flag de spoiler y, si el chat está
      activo para E2E, SÓLO el blob cifrado (body vacío). El texto en
      claro vive en la burbuja local (tmp._plain). */
@@ -967,6 +983,12 @@ export async function sendMedia(chatId, file, kind, srcMsg, caption, peaks, dur,
   }
   kind = kind || (/^image\//.test(file.type || '') ? 'image' : 'file');
   opts = opts || {};
+  /* W61: el pie de foto también es un mensaje; el server no acepta más
+     de 3000 caracteres. Se acota en el cliente para no romper la subida. */
+  caption = caption || '';
+  if (charCount(caption) > MAX_TEXT_CHARS) {
+    caption = Array.from(caption).slice(0, MAX_TEXT_CHARS).join('');
+  }
   /* W29f: pie de foto cifrado si el chat está activo para E2E (el
      archivo viaja por URL normal, sin cifrar: así está diseñado). */
   let bodySend = caption || '';
@@ -1079,6 +1101,10 @@ function bumpPreview(chatId, m) {
 export async function editMessage(chatId, msgId, text) {
   text = (text || '').replace(/\s+$/, '');
   if (!text) return;
+  if (charCount(text) > MAX_TEXT_CHARS) {
+    toast(t('El mensaje supera los 3000 caracteres'), 'err');
+    return;
+  }
   let bodySend = text;
   let e2eBlob = null;
   if (isEncrypting(chatId)) {
