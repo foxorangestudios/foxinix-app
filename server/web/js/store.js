@@ -39,6 +39,14 @@ export const store = reactive({
   /* W36k: favoritos de GIFs (biblioteca y subidos) */
   gifFavs: [],             // [{media_id, name, url}]
   gifFavsLoaded: false,
+  /* W60: stickers favoritos (el emoji ES el sticker). Persisten en el
+     dispositivo para que el panel abra con los de siempre. */
+  stkFavs: (function () {
+    try {
+      const v = JSON.parse(readLs('fm.stkFavs') || '[]');
+      return Array.isArray(v) ? v.filter(function (s) { return typeof s === 'string' && s; }) : [];
+    } catch (e) { return []; }
+  })(),
   /* W29f: cifrado de extremo a extremo (por chat, persistido aparte) */
   e2e: {},                 // chatId → 1
   e2eSas: {},              // chatId → '8 2 0 7 0 2' (código de verificación)
@@ -67,6 +75,16 @@ export const store = reactive({
   call: null,             // W28h: llamada WebRTC 1:1 en curso | null
   search: '',             // filtro de la lista de chats
   showArchived: false,    // ver la pestaña de chats/grupos archivados
+  /* W60: la sección Archivados es privada. El bloqueo se guarda como
+     hash SHA-256 en localStorage y se desbloquea por sesión. */
+  archiveUnlocked: false,
+  archiveLockPrompt: false,
+  archiveLockErr: '',
+  /* Se hidrata al cargar; las funciones de abajo lo mantienen al día. */
+  archiveHasLock: !!readLs('fm.archive.lock'),
+  archiveLockBusy: false,
+  /* Visor de descargas dentro de la app (sin abrir pestañas). */
+  dlViewer: null,         // {name, mime, url, kind, size} | null
   newChatOpen: false,     // modal "nuevo chat"
   newChatMode: 'dm',      // dm | group | add (agregar miembro al grupo activo)
   /* ---- W27: panel Personas/Amigos (en el centro, sin chat abierto) ---- */
@@ -77,6 +95,7 @@ export const store = reactive({
   settingsTab: 'apariencia',  // apariencia | chat | atajos | cuenta (W8: cuenta = última)
   meProfileOpen: false,   // modal "Tu perfil" (solo vista; W27b)
   meEditOpen: false,      // modal "Editar perfil" (foto, nombre, estado, bio)
+  unameOpen: false,       // W60: modal aparte para cambiar el @usuario
   sasOpen: false,         // W39: modal con el código de verificación E2E
   sasFor: 0,              // W39: chat cuyo código se muestra
   peopleMobile: false,    // W27b: pantalla Personas a pantalla completa (móvil)
@@ -587,4 +606,81 @@ export function setFont(size) {
   store.font = size;
   document.documentElement.setAttribute('data-font', size);
   try { localStorage.setItem('fm.font', size); } catch (e) {}
+}
+
+/* ---------- W60: bloqueo de la sección Archivados ----------
+
+   La contraseña NUNCA se guarda en claro: solo un hash SHA-256 con un
+   prefijo fijo. En contextos no seguros (http:// en LAN, donde
+   crypto.subtle no existe) se usa un hash local FNV-1a repetido: no es
+   criptográfico, pero evita dejar la clave escrita y sigue protegiendo
+   la sección de miradas casuales. La comprobación es local y por
+   dispositivo, igual que el resto de preferencias. */
+const ARCHIVE_LOCK_KEY = 'fm.archive.lock';
+
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return ('00000000' + h.toString(16)).slice(-8);
+}
+
+function localHash(pw) {
+  /* 4 rondas con sal distinta: suficiente para que el valor guardado no
+     sea la contraseña ni un hash trivial de una sola pasada. */
+  let out = '';
+  let seed = 'foxinix-archivo:' + pw;
+  for (let i = 0; i < 4; i++) {
+    out += fnv1a(seed + ':' + i) + fnv1a(seed.split('').reverse().join('') + i);
+  }
+  return 's1:' + out;
+}
+
+function bytesToHex(buf) {
+  const b = new Uint8Array(buf);
+  let out = '';
+  for (let i = 0; i < b.length; i++) out += ('0' + b[i].toString(16)).slice(-2);
+  return out;
+}
+
+function archiveDigest(pw) {
+  const text = 'foxinix-archivo:' + pw;
+  if (window.crypto && window.crypto.subtle && window.TextEncoder) {
+    try {
+      const data = new TextEncoder().encode(text);
+      return window.crypto.subtle.digest('SHA-256', data).then(function (buf) {
+        return bytesToHex(buf);
+      }).catch(function () { return localHash(pw); });
+    } catch (e) { /* cae al hash local */ }
+  }
+  return Promise.resolve(localHash(pw));
+}
+
+export function hasArchiveLock() {
+  return !!readLs(ARCHIVE_LOCK_KEY);
+}
+
+export async function setArchiveLock(pw) {
+  if (!pw || String(pw).length < 4) throw new Error('short');
+  const hash = await archiveDigest(String(pw));
+  localStorage.setItem(ARCHIVE_LOCK_KEY, hash);
+  store.archiveHasLock = true;
+  store.archiveUnlocked = true;
+}
+
+export async function checkArchiveLock(pw) {
+  const saved = readLs(ARCHIVE_LOCK_KEY);
+  if (!saved) return true;
+  const hash = await archiveDigest(String(pw || ''));
+  return hash === saved;
+}
+
+export function clearArchiveLock() {
+  try { localStorage.removeItem(ARCHIVE_LOCK_KEY); } catch (e) {}
+  store.archiveHasLock = false;
+  store.archiveUnlocked = false;
+  store.archiveLockPrompt = false;
+  store.archiveLockErr = '';
 }

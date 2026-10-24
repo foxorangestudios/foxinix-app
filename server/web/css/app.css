@@ -773,17 +773,12 @@ html.native-bg *::after {
   border: 2.5px solid var(--st-ring);
   background-origin: border-box;
 }
-/* W58: Ausente = relleno del color del tema + luna amarilla. La luna
-   va en ::before (encima del círculo) y se usa en TODOS los avatares,
-   no solo en el grande del perfil. */
-.av-wrap.on.st-busy::after { background: var(--st-ring); }
-.av-wrap.on.st-busy::before {
-  content: '';
-  position: absolute;
-  z-index: 3;
-  right: 1px; bottom: 1px;
-  width: 8px; height: 8px;
+/* W60: Ausente = la luna ocupa TODO el círculo de estado (antes era
+   una luna de 8 px dentro de un disco del color del tema y se veía
+   diminuta). El disco entero se recorta con la silueta de la luna. */
+.av-wrap.on.st-busy::after {
   background: var(--st-busy);
+  border-color: transparent;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
   -webkit-mask-position: center;
@@ -793,6 +788,7 @@ html.native-bg *::after {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
+.av-wrap.on.st-busy::before { content: none; }
 /* W57: No molestar = rojo lleno con barra gruesa del color del tema.
    Sin aro transparente: el borde también es del color del tema. */
 .av-wrap.on.st-dnd::after {
@@ -1759,6 +1755,7 @@ audio.b-audio { display: none; }
 .ep-scroll {
   position: relative;
   flex: 1;
+  -webkit-overflow-scrolling: touch;
   min-width: 0;
   overflow-y: auto;
   padding: 2px 6px 8px;
@@ -3764,6 +3761,7 @@ body { font-size: calc(15px * var(--fs)); }
   color: var(--t2);
 }
 .ci-icons .ic { margin-right: 4px; }
+.ci-icons .ci-call { color: var(--online); }
 .badge.muted { opacity: .55; }
 
 /* W37b: buscar en el chat como MODAL (antes era un panel lateral).
@@ -4228,6 +4226,16 @@ body { font-size: calc(15px * var(--fs)); }
 
 /* W59: cambio de @usuario (aviso de 12 h + contraseña) */
 .uname-field { text-align: left; }
+.modal.uname-modal { width: min(460px, 100%); }
+.uname-modal .cf-body { padding: 14px 16px 12px; }
+.uname-modal .cf-text { margin-bottom: 12px; }
+.uname-current-lg { margin-bottom: 10px; }
+.uname-current-lg b { font-size: 16px; }
+.uname-modal .uname-warn { margin: 0 0 12px; }
+.uname-modal .field { text-align: left; }
+.uname-modal .m-foot { padding: 10px 16px; }
+.uname-modal .m-foot .btn { width: auto; flex: 1; }
+.uname-modal .m-foot .btn + .btn { margin-left: 8px; }
 .uname-current {
   display: flex;
   align-items: center;
@@ -4481,36 +4489,202 @@ body { font-size: calc(15px * var(--fs)); }
   justify-content: center;
 }
 
-/* --------------------------------------------------- W28h: llamadas
+/* --------------------------------------------------- W60: llamadas
 
-   .callbox: panel flotante inferior-derecha (entrante o en curso), con
-   video remoto, PIP local y controles. El pulsar de "Contestar" en la
-   entrante anima solo con transform (FF78: sin filter/backdrop). */
-.callbox { position: fixed; right: 18px; bottom: 18px; z-index: 62;
-  min-width: 248px; max-width: 320px; padding: 12px;
+   Panel estilo Discord: en PC ocupa la derecha del chat (no la pantalla
+   completa); en móvil es pantalla completa y se puede minimizar a un
+   icono verde. Dos participantes con portada difuminada PREPROCESADA,
+   aro verde al hablar, chat debajo y controles abajo. */
+.callbox {
+  position: fixed; top: 12px; right: 12px; bottom: 12px; z-index: 68;
+  width: 380px; max-width: calc(100vw - 24px);
+  display: flex; flex-direction: column;
+}
+.callbox.minimized { top: auto; bottom: 18px; width: auto; height: auto;
+  max-height: none; }
+.callbox.incoming.minimized, .callbox.calling.minimized {
+  top: auto; bottom: 18px; height: auto; max-height: none;
+}
+.callbox.incoming {
+  top: auto; bottom: 24px; height: 560px;
+  max-height: calc(100vh - 48px);
+}
+.callbox.calling {
+  top: auto; bottom: 24px; height: 500px;
+  max-height: calc(100vh - 48px);
+}
+.call-panel {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
   background: var(--float); border: 1px solid var(--border);
-  border-radius: 10px; box-shadow: 0 10px 26px rgba(0, 0, 0, .5); }
-.callbox.incoming { border-color: var(--accent); }
-.call-head { display: flex; align-items: center; }
-.call-head > * + * { margin-left: 10px; }
-.call-col { display: flex; flex-direction: column; min-width: 0; }
-.call-col b { color: var(--t0); font-size: 14px; }
-.call-state { color: var(--t2); font-size: 12px; }
-.call-remote { display: block; width: 100%; max-height: 240px; margin-top: 10px;
-  border-radius: 8px; background: #000; object-fit: cover; }
-.call-pip { position: absolute; right: 24px; top: 66px; width: 88px;
-  border-radius: 6px; background: #000; object-fit: cover; }
-.call-ctl { display: flex; justify-content: center; margin-top: 10px; }
-.call-ctl > * + * { margin-left: 12px; }
-.callbox .icon-btn { background: var(--panel2); }
-.call-accept { background: var(--online); }
-.call-accept:hover { background: #1e8e4c; }
-.call-reject { background: var(--panel2); color: var(--t1); }
-.call-reject:hover { background: var(--err); color: #fff; }
-.callbox .call-hang { background: var(--err); color: #fff; }
-.callbox .call-hang:hover { background: #c22; }
-@keyframes callpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+}
+.callbox.incoming .call-panel { border-color: var(--accent); }
+.call-head {
+  order: 0;
+  flex: 0 0 auto; display: flex; align-items: center;
+  padding: 11px 12px; border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.call-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.call-col b {
+  color: var(--t0); font-size: 14.5px; line-height: 1.25;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.call-state {
+  color: var(--t2); font-size: 12px; line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.call-min { flex: 0 0 auto; width: 32px; height: 32px; margin-left: 8px;
+  background: var(--panel2); }
+.call-participants {
+  order: 1;
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 10px;
+}
+.call-participants > * + * { margin-top: 8px; }
+.call-tile {
+  position: relative; flex: 1; min-height: 0;
+  border: 2px solid transparent; border-radius: 10px; overflow: hidden;
+  background: #101216; user-select: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.call-tile.speaking {
+  border-color: var(--online);
+  box-shadow: 0 0 0 2px rgba(35, 165, 90, .28),
+    0 0 18px rgba(35, 165, 90, .22);
+}
+.call-tile-bg {
+  position: absolute; left: -20px; right: -20px; top: -20px; bottom: -20px;
+  background: linear-gradient(135deg, #34304d, #17323d);
+  background-size: cover; background-position: center;
+  filter: blur(20px) brightness(.5) saturate(1.1);
+  transform: scale(1.12);
+}
+.call-tile.self .call-tile-bg {
+  background-image: linear-gradient(135deg, #24344d, #34233d);
+}
+.call-remote, .call-pip {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  width: 100%; height: 100%; z-index: 1;
+  background: #000; object-fit: cover;
+}
+.call-avatar {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.call-avatar .avatar {
+  border: 2px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .55);
+}
+.call-tile-foot {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  display: flex; align-items: center; padding: 24px 10px 8px;
+  color: #fff; font-size: 12.5px; font-weight: 600;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, .74));
+  pointer-events: none;
+}
+.call-tile-foot > * + * { margin-left: 6px; }
+.call-tile-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.call-tile-foot .ic { flex: 0 0 auto; color: #ffb4b4; }
+.call-chat {
+  order: 2;
+  flex: 0 0 auto; height: 182px; min-height: 0;
+  display: flex; flex-direction: column;
+  border-top: 1px solid var(--border); background: var(--panel);
+}
+.call-chat-hd {
+  flex: 0 0 auto; padding: 7px 12px 3px;
+  color: var(--t3); font-size: 10.5px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase;
+}
+.call-chat-list {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; padding: 0 12px 6px;
+}
+.call-msg {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  margin-top: 5px; color: var(--t1); font-size: 12.5px; line-height: 1.35;
+}
+.call-msg.mine { color: var(--t0); }
+.call-msg-name { margin-right: 5px; color: var(--accent); font-weight: 700; }
+.call-msg-txt { word-break: break-word; }
+.call-msg-time {
+  margin-left: 6px; color: var(--t3); font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.call-chat-empty { padding: 8px 0; color: var(--t3); font-size: 12px; }
+.call-chat-form {
+  flex: 0 0 auto; display: flex; align-items: center; padding: 6px 8px 8px;
+}
+.call-chat-in {
+  flex: 1; min-width: 0; height: 34px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 17px;
+  background: var(--panel2); color: var(--t0);
+  font: inherit; font-size: 13px; outline: none;
+}
+.call-chat-in:focus { border-color: var(--accent); }
+.call-send { flex: 0 0 auto; width: 36px; height: 36px; margin-left: 6px;
+  background: var(--accent); color: #fff; }
+.call-send:disabled { opacity: .45; cursor: default; }
+.call-controls {
+  order: 3;
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  padding: 9px 14px calc(9px + var(--sab, 0px));
+  border-top: 1px solid var(--border); background: var(--panel);
+}
+.call-controls > * + * { margin-left: 14px; }
+.call-round {
+  width: 48px; height: 48px; border: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel2); color: var(--t1); cursor: pointer;
+  transition: background .12s, transform .12s;
+}
+.call-round:hover { background: var(--border); color: var(--t0); }
+.call-round:active { transform: scale(.94); }
+.call-round .ic { width: 22px; height: 22px; }
+.call-round.off { background: var(--err); color: #fff; }
+.call-round.accept { background: var(--online); color: #fff; }
+.call-round.accept:hover { background: #1e8e4c; }
+.call-round.reject, .call-round.hang { background: var(--err); color: #fff; }
+.call-round.reject:hover, .call-round.hang:hover { background: #c22; }
+@keyframes callpulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
 .callbox.incoming .call-accept { animation: callpulse 1.4s ease-in-out infinite; }
+.call-fab {
+  width: 62px; height: 62px; border: 0; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--online); color: #fff; cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45), 0 0 0 4px rgba(35, 165, 90, .18);
+  animation: callfab 2s ease-in-out infinite;
+}
+.call-fab-ic { display: flex; }
+.call-fab-ic .ic { width: 24px; height: 24px; }
+.call-fab-t {
+  margin-top: 1px; font-size: 10px; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+@keyframes callfab {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+.call-menu {
+  position: fixed; z-index: 95; min-width: 200px; padding: 4px;
+  background: var(--float); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .55);
+}
+.call-menu button {
+  display: block; width: 100%; padding: 8px 10px;
+  border: 0; border-radius: 6px; background: none;
+  color: var(--t1); font: inherit; font-size: 13px; text-align: left;
+  cursor: pointer;
+}
+.call-menu button:hover { background: var(--panel2); color: var(--t0); }
+.call-menu button.danger { color: var(--err); }
 
 /* ================== W29d: spoilers ================== */
 /* Capa opaca que tapa TODA la burbuja (texto, medios y acciones) hasta
@@ -4898,25 +5072,19 @@ body { font-size: calc(15px * var(--fs)); }
   display: flex;
   flex-direction: column;
   transform-origin: 100% 100%;
-  animation: pageflip .25s ease-out;
+  animation: epfadeIn .12s ease-out;
 }
 @keyframes pageflip {
   from { opacity: 0; transform: perspective(700px) rotateY(26deg); }
   to { opacity: 1; transform: none; }
 }
-.pgflip-enter-active, .pgflip-leave-active {
-  transition: transform .2s ease, opacity .2s ease;
+/* W60: cambio de pestaña con un fundido simple, sin "pasar página":
+   el desplazamiento dentro del panel vuelve a ser el normal. */
+@keyframes epfadeIn { from { opacity: 0; } to { opacity: 1; } }
+.epfade-enter-active, .epfade-leave-active {
+  transition: opacity .12s ease;
 }
-.pgflip-enter-from {
-  opacity: 0;
-  transform: perspective(700px) rotateY(24deg);
-  transform-origin: left center;
-}
-.pgflip-leave-to {
-  opacity: 0;
-  transform: perspective(700px) rotateY(-24deg);
-  transform-origin: right center;
-}
+.epfade-enter-from, .epfade-leave-to { opacity: 0; }
 .st-panel .emo-picker {
   flex: 1;
   min-height: 0;
@@ -4924,13 +5092,15 @@ body { font-size: calc(15px * var(--fs)); }
   flex-direction: column;
 }
 .st-panel .emo-picker .ep-body { flex: 1; height: auto; min-height: 0; }
-.st-body {
+/* El panel de stickers reutiliza nombres genéricos: se limita a su
+   contenedor para no alterar las secciones de Ajustes. */
+.st-panel .st-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding-bottom: 4px;
 }
-.st-body .st-grid { max-height: none; }
+.st-panel .st-body .st-grid { max-height: none; }
 
 /* ---- W36a: stickers con Twemoji del sitio ---- */
 .st-e .emo { width: 34px; height: 34px; }
@@ -4938,6 +5108,10 @@ body { font-size: calc(15px * var(--fs)); }
 /* ---- W36k: tiles de GIF con estrella de favorito ---- */
 .st-g-wrap { position: relative; display: inline-block; margin: 0 4px 4px 0; }
 .st-g-wrap .st-g { margin: 0; }
+/* W60: tiles de sticker con estrella de favorito */
+.st-wrap { position: relative; display: inline-block; margin: 0 4px 4px 0; }
+.st-wrap .st-e { margin: 0; }
+.st-wrap:hover .st-fav { opacity: 1; }
 .st-fav {
   position: absolute;
   top: 2px; right: 2px;
@@ -4956,7 +5130,7 @@ body { font-size: calc(15px * var(--fs)); }
 }
 .st-g-wrap:hover .st-fav { opacity: 1; }
 .st-fav.on { opacity: 1; color: #ffd75e; }
-.st-sec {
+.st-panel .st-sec {
   margin: 8px 8px 2px;
   font-size: 11.5px;
   font-weight: 700;
@@ -5178,14 +5352,39 @@ body { font-size: calc(15px * var(--fs)); }
   }
   .app-shell.show-chat .mobile-tabs { display: none; }
 
-  /* W59: avisos y panel de llamada por encima de la barra inferior y
-     del área de gestos de Android; nunca dentro de ella. */
+  /* W59/W60: avisos por encima de la barra inferior. La llamada en
+     móvil ocupa TODA la pantalla; minimizada queda como icono verde
+     por encima de la barra y del área de gestos. */
   .toasts { bottom: calc(76px + var(--sab, 0px)); }
   .callbox {
-    right: 12px;
-    bottom: calc(76px + var(--sab, 0px));
-    max-width: calc(100vw - 24px);
+    top: 0; right: 0; bottom: 0; left: 0;
+    width: auto; max-width: none; height: auto;
   }
+  .callbox.minimized {
+    top: auto; left: auto; right: 14px;
+    bottom: calc(82px + var(--sab, 0px));
+    width: auto; height: auto; max-height: none;
+  }
+  .callbox.incoming, .callbox.calling {
+    top: 0; bottom: 0; height: auto; max-height: none;
+  }
+  .callbox.incoming.minimized, .callbox.calling.minimized {
+    top: auto; left: auto; right: 14px;
+    bottom: calc(82px + var(--sab, 0px));
+    width: auto; height: auto; max-height: none;
+  }
+  .callbox .call-panel {
+    border: 0; border-radius: 0; box-shadow: none;
+  }
+  .callbox .call-head {
+    padding-top: calc(11px + env(safe-area-inset-top, 0px));
+  }
+  .callbox .call-participants { padding: 8px 10px; }
+  .callbox .call-chat { height: 30vh; min-height: 148px; max-height: 260px; }
+  .callbox .call-round { width: 54px; height: 54px; }
+  .callbox .call-round .ic { width: 24px; height: 24px; }
+  .callbox .call-avatar .avatar.av72 { width: 88px; height: 88px; font-size: 32px; }
+  .st-fav { opacity: .8; width: 22px; height: 22px; }
 
   /* Personas con barra inferior: que el final de la lista no quede
      debajo de la barra. */
@@ -5362,4 +5561,464 @@ body { font-size: calc(15px * var(--fs)); }
   html.kb-open .composer { padding-bottom: 8px; }
   html.kb-open .sidebar { padding-bottom: 8px; }
   html.kb-open .auth-wrap { min-height: var(--app-h, 100%); }
+}
+
+/* ============================================================
+   W60: archivados privados, ajustes móviles, visor de descargas,
+   estado fuera del perfil y detalles de la lista de chats.
+   ============================================================ */
+
+/* --- lista de chats: iconos pegados a la hora (a su izquierda) --- */
+.ci-meta {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-left: 8px;
+}
+.ci-meta .ci-icons {
+  margin-left: 0;
+  margin-right: 4px;
+}
+.ci-meta .ci-icons .ic { margin-right: 2px; }
+.ci-meta .ci-time { margin-left: 0; }
+
+/* --- archivados: sección aparte --- */
+.archive-back {
+  display: flex;
+  align-items: center;
+  width: calc(100% - 24px);
+  margin: 2px 12px 6px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--panel2);
+  color: var(--text, var(--t1));
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.archive-back:hover { background: var(--row-hover); color: var(--accent); }
+.archive-back .ic { margin-right: 7px; color: var(--accent); }
+
+/* --- pantalla/modal de desbloqueo de Archivados --- */
+.archive-lock-veil {
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 29;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  /* W60: en PC es un modal sobre la app; la lista archivada queda oculta.
+     En móvil el media query lo convierte en pantalla completa. */
+  background: rgba(0, 0, 0, .58);
+  z-index: 55;
+}
+.al-top { display: none; }
+.archive-lock-card {
+  width: min(390px, 100%);
+  padding: 26px 24px 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.al-ic {
+  width: 78px; height: 78px;
+  margin: 0 auto 16px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-wash, rgba(255,117,31,.14));
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+.al-ic .ic { width: 38px; height: 38px; }
+.archive-lock-card h2 {
+  margin: 0 0 9px;
+  color: var(--t0);
+  font-size: 20px;
+  line-height: 1.25;
+}
+.archive-lock-card p {
+  margin: 0 auto 18px;
+  max-width: 300px;
+  color: var(--t1);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.al-field { position: relative; margin-bottom: 10px; text-align: left; }
+.al-field .input { width: 100%; padding-right: 42px; }
+.al-eye {
+  position: absolute;
+  right: 4px; top: 50%;
+  transform: translateY(-50%);
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 8px;
+  background: none;
+  color: var(--t2);
+  cursor: pointer;
+}
+.al-eye:hover { background: var(--panel2); color: var(--t1); }
+.al-unlock { width: 100%; margin-top: 2px; }
+.al-back {
+  margin-top: 13px;
+  border: 0; background: none;
+  color: var(--t2);
+  font: inherit; font-size: 13px;
+  cursor: pointer;
+}
+.al-back:hover { color: var(--accent); }
+.archive-lock-card .st-err { text-align: left; }
+
+/* --- Ajustes móvil: lista de categorías y subpantalla --- */
+.st-mobile-home {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px 24px;
+}
+.st-cat {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 11px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: var(--t1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.st-cat + .st-cat { margin-top: 2px; }
+.st-cat:hover { background: var(--panel2); }
+.st-cat-ic {
+  width: 40px; height: 40px;
+  flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px;
+  background: var(--accent-wash, rgba(255,117,31,.14));
+  color: var(--accent);
+}
+.st-cat-ic .ic { width: 21px; height: 21px; }
+.st-cat-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 11px;
+}
+.st-cat-col b {
+  color: var(--t0);
+  font-size: 15px;
+  font-weight: 600;
+}
+.st-cat-col span {
+  margin-top: 1px;
+  color: var(--t2);
+  font-size: 12.5px;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.st-cat-chev {
+  flex: none;
+  color: var(--t2);
+  transform: rotate(180deg);
+}
+.st-back { display: none; }
+.st-privacy-state {
+  display: flex;
+  align-items: center;
+  margin: 4px 0 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel2);
+  color: var(--ok, var(--online));
+  font-size: 13px;
+  font-weight: 600;
+}
+.st-privacy-state .ic { flex: none; margin-right: 7px; }
+.archive-new {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.st-ok-line {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+  color: var(--ok, var(--online));
+}
+.st-ok-line .ic { margin-right: 6px; }
+
+/* --- descargas: categorías en modal + visor interno --- */
+button.dl-group {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.dl-group .dl-group-head { pointer-events: none; }
+.dl-gchev { transform: rotate(180deg); }
+.dl-cat-modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+}
+.dl-cat-modal > header { flex: none; }
+.dl-cat-modal .m-head-title { flex: 1; min-width: 0; }
+.dl-cat-modal .m-head-title .ic { margin-right: 8px; color: var(--t2); }
+.dl-cat-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 14px 14px;
+}
+.dl-cat-body .dl-item:first-child { border-top: 0; }
+.dl-viewer-veil {
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .72);
+}
+.dl-viewer {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.dl-viewer > header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dlv-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.dlv-size {
+  flex: none;
+  margin: 0 10px;
+  color: var(--t2);
+  font-size: 12px;
+}
+.dlv-save { flex: none; margin-right: 4px; }
+.dlv-save span { margin-left: 5px; }
+.dlv-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+}
+.dlv-body img,
+.dlv-body video {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+}
+.dlv-body audio {
+  width: min(540px, 90%);
+  margin: 34px 20px;
+}
+.dlv-body iframe {
+  width: 100%;
+  height: calc(100vh - 140px);
+  border: 0;
+  background: #fff;
+}
+.dlv-other {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 24px;
+  color: #ddd;
+  text-align: center;
+}
+.dlv-other .ic { width: 54px; height: 54px; margin-bottom: 14px; color: #aaa; }
+.dlv-other b { margin-bottom: 6px; }
+.dlv-other span { margin-bottom: 18px; font-size: 13px; color: #aaa; }
+
+/* --- estado: capa propia fuera del modal del perfil --- */
+.pf-status-veil {
+  position: fixed;
+  left: 0; right: 0; top: 0; bottom: 0;
+  z-index: 85;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 84px 24px 24px;
+  background: rgba(0, 0, 0, .5);
+}
+.pf-status-veil .pf-status-menu {
+  position: relative;
+  top: auto; right: auto;
+  width: min(340px, 100%);
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+.pf-menu-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pf-menu-title .icon-btn { width: 28px; height: 28px; }
+
+/* --- toasts con icono propio y aspecto menos crudo --- */
+.toast {
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: var(--panel2);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .28), var(--shadow);
+}
+.toast > .ic { flex: none; }
+.toast > span { flex: 1; min-width: 0; line-height: 1.35; }
+.toast-ok > .ic { color: var(--accent); }
+.toast-err > .ic { color: var(--err); }
+.toast-info > .ic { color: var(--t2); }
+
+/* --- ocultar descargas automáticas en escritorio (son de móvil) --- */
+@media (min-width: 761px) {
+  .dl-auto-sec { display: none; }
+}
+
+@media (max-width: 760px) {
+  .archive-back { display: none; }
+  .archive-lock-veil {
+    z-index: 29;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 0 20px calc(76px + var(--sab, 0px));
+    background: var(--bg);
+  }
+  .al-top {
+    display: flex;
+    align-items: center;
+    flex: none;
+    height: 56px;
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    margin: 0 -20px 0;
+    padding: env(safe-area-inset-top, 0px) 16px 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .al-top b {
+    margin-left: 9px;
+    color: var(--t0);
+    font-size: 19px;
+    font-weight: 700;
+  }
+  .al-top .mobile-page-logo { display: block; }
+  .archive-lock-card {
+    width: 100%;
+    margin: auto 0;
+    padding: 24px 4px 18px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+  .archive-lock-card p { max-width: 320px; }
+  .al-ic { width: 84px; height: 84px; }
+
+  /* Ajustes ocupa la pantalla y la barra inferior se oculta (v-if). */
+  .settings-veil { z-index: 40; padding: 0; }
+  .modal.settings {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    padding-bottom: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  .modal.settings > header .icon-btn { display: inline-flex; }
+  .modal.settings .m-tabs { display: none; }
+  .st-cols { flex-direction: column; }
+  .st-back {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 11px 16px 3px;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .st-back .ic { margin-right: 6px; }
+  .st-title { padding-top: 6px; }
+
+  /* El visor multimedia ocupa toda la pantalla en el teléfono. */
+  .dl-viewer-veil { padding: 0; }
+  .dl-viewer {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+  .dl-viewer > header {
+    min-height: 56px;
+    padding-top: env(safe-area-inset-top, 0px);
+    height: calc(56px + env(safe-area-inset-top, 0px));
+  }
+  .dlv-size { display: none; }
+  .dlv-save span { display: none; }
+  .dlv-body img,
+  .dlv-body video { max-height: calc(100vh - 56px); }
+  .dlv-body iframe { height: calc(100vh - 56px); }
+  .dl-cat-modal {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+  .dl-cat-modal > header { padding-top: env(safe-area-inset-top, 0px); }
+
+  /* Menú de estado como hoja inferior, siempre dentro de la pantalla. */
+  .pf-status-veil {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 14px 12px calc(14px + var(--sab, 0px));
+  }
+  .pf-status-veil .pf-status-menu {
+    width: 100%;
+    max-height: 72vh;
+  }
 }

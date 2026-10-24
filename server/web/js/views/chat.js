@@ -3,6 +3,7 @@ import {
   store, toast, toggleTheme, setTheme, setAccent, setWall, setPref, setFont,
   setPrefStr,   /* W40: estilo de emojis (valor libre) */
   setWallImg, setWallDim, setWallBlur, setSideCollapsed, setMicDev,
+  setArchiveLock, checkArchiveLock, clearArchiveLock, hasArchiveLock,
 } from '../store.js';
 import { logout, api, session, saveSession, uploadMedia,
   uploadChatAvatar, ensurePreview } from '../api.js';
@@ -784,6 +785,25 @@ const STICKERS = ['👍', '🔥', '🎉', '❤️', '😂', '🤔', '👻', '�
 const GIF_LIST = ['heart-pulse.gif', 'ball-bounce.gif', 'star-spin.gif',
   'smiley-wink.gif', 'fire.gif', 'sparkle.gif', 'confetti.gif',
   'loader.gif', 'boom-ring.gif', 'clock-spin.gif'];
+
+/* W60: favoritos de stickers. El sticker es un emoji, así que guardar
+   uno recibido (o de la biblioteca) es guardar su carácter. */
+const isStkFav = function (ch) {
+  return !!(ch && (store.stkFavs || []).indexOf(ch) >= 0);
+};
+const toggleStkFav = function (ch) {
+  ch = ch || '';
+  if (!ch) return;
+  const on = isStkFav(ch);
+  if (on) {
+    store.stkFavs = (store.stkFavs || []).filter(function (s) { return s !== ch; });
+  } else {
+    store.stkFavs = [ch].concat(store.stkFavs || []);
+  }
+  try {
+    localStorage.setItem('fm.stkFavs', JSON.stringify(store.stkFavs));
+  } catch (e) {}
+};
 
 /* W36k: favoritos de GIFs — la biblioteca estática (name) y los GIFs
    subidos que viajan en mensajes (media_id). Se cargan una vez al abrir
@@ -2033,6 +2053,15 @@ const MessageRow = {
       const s = store.spoilSeen[store.activeChatId];
       if (s && s[m.id]) delete s[m.id];
     };
+    /* W60: descargar la nota de voz a los datos de la app desde el
+       propio reproductor (antes solo se podía reproducir). */
+    const downloadVoice = function () {
+      const m = props.row.ref.media;
+      if (!m || !m.url) return;
+      const el = aEl.value;
+      const frame = el && el.closest ? el.closest('.mframe') : null;
+      startDownload(m.url, m.name || 'nota-de-voz', frame, m.mime, 'voice');
+    };
 
     return {
       store, emojis, rpEl, rpPos,
@@ -2052,12 +2081,13 @@ const MessageRow = {
       aRate, aRateV,
       /* W36k: ★ favorito del GIF */
       isGifFav, toggleFavGif,
+      isStkFav, toggleStkFav,   /* W60 */
       spoiled, spoilShow, spoilHide,   /* W29d */
       replyName, replyText, groupReactions, myReaction,
       doReply, doReact, mediaUrl, fmtSize, dlFile, dlText, dlSavedSize,
       pickerOpen, togglePicker, openMenu,
       /* W13 */
-      fullReact, toggleFull, wave, aBar, waveOp,
+      fullReact, toggleFull, wave, aBar, waveOp, downloadVoice,
       /* W22 */
       imgBox,
       /* W8 */
@@ -2107,6 +2137,12 @@ const MessageRow = {
             ':title="isGifFav(row.ref) ? t(\'Quitar de favoritos\') : t(\'Agregar a favoritos\')" ' +
             '@click.stop="toggleFavGif(row.ref)">' +
             '<svg class="ic ic-sm"><use :href="isGifFav(row.ref) ? \'#i-star-fill\' : \'#i-star\'"></use></svg>' +
+          '</button>' +
+          /* W60: guardar un sticker recibido en favoritos */
+          '<button v-if="row.ref.kind === \'sticker\'" class="b-act" type="button" ' +
+            ':title="isStkFav(row.ref.body) ? t(\'Quitar de favoritos\') : t(\'Guardar en stickers\')" ' +
+            '@click.stop="toggleStkFav(row.ref.body)">' +
+            '<svg class="ic ic-sm"><use :href="isStkFav(row.ref.body) ? \'#i-star-fill\' : \'#i-star\'"></use></svg>' +
           '</button>' +
           /* W17: ⋯ abre el mismo menú del clic derecho, anclado a la
              burbuja (no tapa el mensaje). */
@@ -2338,6 +2374,8 @@ const MessageRow = {
           /* W37d: velocidad de la nota de voz (1×/1,5×/2×) */
           '<button class="au-rate" type="button" :title="t(\'Velocidad\')" ' +
             '@click="aRate">{{ aRateV }}×</button>' +
+          '<button class="au-rate au-dl" type="button" :title="t(\'Descargar a la app\')" ' +
+            '@click.stop="downloadVoice"><svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</div>' +
         '<div v-else-if="row.ref.kind === \'voice\'" class="b-voice">' +
           '<svg class="ic ic-sm"><use href="#i-mic"></use></svg> {{ t(\'Nota de voz\') }}' +
@@ -2755,17 +2793,38 @@ const SettingsModal = {
     /* W8: "Cuenta" queda como ÚLTIMA pestaña: ahí se administra la cuenta
        (correo, contraseña, sesión y baja) y así el cierre de sesión no queda
        a la vista. W9: `group` abre un rótulo de sección en la nav lateral.
-       W10: "Ajustes de la aplicación" pasa a llamarse "Preferencias". */
+       W10: "Ajustes de la aplicación" pasa a llamarse "Preferencias".
+       W60: en móvil la primera pantalla es una LISTA de categorías; cada
+       una abre su subpantalla con botón atrás. En escritorio se mantiene
+       la nav lateral de siempre. */
     const tabs = [
-      { val: 'apariencia', name: 'Apariencia', group: 'Preferencias' },
-      { val: 'chat', name: 'Chat' },
-      { val: 'descargas', name: 'Descargas' },
-      { val: 'atajos', name: 'Atajos' },
-      { val: 'cuenta', name: 'Cuenta', group: 'Cuenta' },
+      { val: 'apariencia', name: 'Apariencia', group: 'Preferencias', icon: 'i-palette',
+        desc: 'Tema, color, fondo y tamaño de letra' },
+      { val: 'chat', name: 'Chat', icon: 'i-chat',
+        desc: 'Mensajes, micrófono, notificaciones y permisos' },
+      { val: 'privacidad', name: 'Privacidad', icon: 'i-shield',
+        desc: 'Bloqueo con contraseña de Archivados' },
+      { val: 'descargas', name: 'Descargas', icon: 'i-download',
+        desc: 'Descargas automáticas y archivos guardados' },
+      { val: 'atajos', name: 'Atajos', icon: 'i-key',
+        desc: 'Atajos de teclado' },
+      { val: 'cuenta', name: 'Cuenta', group: 'Cuenta', icon: 'i-user',
+        desc: 'Correo, contraseña y sesión' },
     ];
+
+    const settingsMobile = Vue.ref(window.innerWidth <= 760);
+    const settingsHome = Vue.ref(settingsMobile.value);
+    const onSettingsResize = function () {
+      settingsMobile.value = window.innerWidth <= 760;
+      if (!settingsMobile.value) settingsHome.value = false;
+    };
+    window.addEventListener('resize', onSettingsResize);
+    Vue.onUnmounted(function () { window.removeEventListener('resize', onSettingsResize); });
 
     const close = function () { store.settingsOpen = false; };
     const setTab = function (tv) { store.settingsTab = tv; };
+    const openCat = function (tv) { setTab(tv); settingsHome.value = false; };
+    const goSettingsHome = function () { settingsHome.value = true; };
     const pickTheme = function (m) { setTheme(m); };
     const pickAccent = function (c) { setAccent(c); };
     const pickWall = function (v) { setWall(v); };
@@ -3071,6 +3130,18 @@ const SettingsModal = {
       return out;
     });
     const dlToggle = function (id) { dlOpen[id] = !dlOpen[id]; };
+    /* W60: las categorías ya no se expanden dentro de Ajustes (se veía
+       desordenado): cada una abre su propio modal con la lista. */
+    const dlCat = Vue.ref('');
+    const dlCatGroup = Vue.computed(function () {
+      if (!dlCat.value) return null;
+      for (let i = 0; i < dlGroups.value.length; i++) {
+        if (dlGroups.value[i].id === dlCat.value) return dlGroups.value[i];
+      }
+      return null;
+    });
+    const dlOpenCat = function (id) { dlCat.value = id; };
+    const dlCloseCat = function () { dlCat.value = ''; };
     const dlSave = async function (item) {
       dlMsg.value = '';
       dlSaving.value = item.key;
@@ -3123,6 +3194,98 @@ const SettingsModal = {
       dlAuto.value = autoDlPrefs();
       store.dlAutoRev++;
     };
+    /* W60: bloqueo de Archivados — activar, cambiar y quitar. La
+       contraseña actual solo se pide para cambiar o quitar; nunca se
+       guarda en claro. */
+    const archivePw = Vue.ref('');
+    const archiveNew = Vue.ref('');
+    const archiveNew2 = Vue.ref('');
+    const archiveChange = Vue.ref(false);
+    const archiveBusy = Vue.ref(false);
+    const archiveErr = Vue.ref('');
+    const archiveOk = Vue.ref('');
+    const archiveReset = function () {
+      archivePw.value = '';
+      archiveNew.value = '';
+      archiveNew2.value = '';
+      archiveChange.value = false;
+    };
+    const archiveActivate = async function () {
+      archiveErr.value = '';
+      archiveOk.value = '';
+      if (archiveNew.value.length < 4) {
+        archiveErr.value = t('La contraseña debe tener al menos 4 caracteres');
+        return;
+      }
+      if (archiveNew.value !== archiveNew2.value) {
+        archiveErr.value = t('Las contraseñas no coinciden');
+        return;
+      }
+      archiveBusy.value = true;
+      try {
+        await setArchiveLock(archiveNew.value);
+        store.archiveUnlocked = true;
+        archiveOk.value = t('Archivados protegidos con contraseña');
+        archiveReset();
+      } catch (e) {
+        archiveErr.value = (e && e.message === 'short')
+          ? t('La contraseña debe tener al menos 4 caracteres')
+          : t('No se pudo activar la protección');
+      } finally {
+        archiveBusy.value = false;
+      }
+    };
+    const archiveDisable = async function () {
+      archiveErr.value = '';
+      archiveOk.value = '';
+      if (!archivePw.value) {
+        archiveErr.value = t('Escribe la contraseña actual');
+        return;
+      }
+      archiveBusy.value = true;
+      try {
+        if (!(await checkArchiveLock(archivePw.value))) {
+          archiveErr.value = t('Contraseña incorrecta');
+          return;
+        }
+        clearArchiveLock();
+        store.showArchived = false;
+        archiveOk.value = t('Protección desactivada');
+        archiveReset();
+      } catch (e) {
+        archiveErr.value = t('No se pudo quitar la protección');
+      } finally {
+        archiveBusy.value = false;
+      }
+    };
+    const archiveChangePw = async function () {
+      archiveErr.value = '';
+      archiveOk.value = '';
+      if (archiveNew.value.length < 4) {
+        archiveErr.value = t('La contraseña debe tener al menos 4 caracteres');
+        return;
+      }
+      if (archiveNew.value !== archiveNew2.value) {
+        archiveErr.value = t('Las contraseñas no coinciden');
+        return;
+      }
+      archiveBusy.value = true;
+      try {
+        if (!(await checkArchiveLock(archivePw.value))) {
+          archiveErr.value = t('Contraseña incorrecta');
+          return;
+        }
+        await setArchiveLock(archiveNew.value);
+        store.archiveUnlocked = true;
+        archiveOk.value = t('Contraseña actualizada');
+        archiveReset();
+      } catch (e) {
+        archiveErr.value = t('No se pudo cambiar la contraseña');
+      } finally {
+        archiveBusy.value = false;
+      }
+    };
+
     /* W58: resumen de permisos para volver a pedirlos desde Ajustes. */
     const permRows = Vue.computed(function () {
       return PERMISSIONS.map(function (p) {
@@ -3135,7 +3298,6 @@ const SettingsModal = {
     });
     const permReview = async function () {
       await reviewPermissions();
-      toast(t('Permisos actualizados'), 'ok');
     };
     const permRefresh = function () { refreshPermissionStates(); };
     Vue.onMounted(function () {
@@ -3145,7 +3307,9 @@ const SettingsModal = {
     });
 
     return {
-      store, tabs, close, setTab, accents, walls,
+      store, tabs, close, setTab, openCat, goSettingsHome,
+      settingsMobile, settingsHome,
+      accents, walls,
       pickTheme, pickAccent, pickWall, pickFont, pickLang, langs, toggle, setH12,
       setEmo,   /* W40 */
       /* W20: panel de fondo + micrófono */
@@ -3158,7 +3322,12 @@ const SettingsModal = {
       /* W50/W58: descargas persistentes + automáticas */
       dlList, dlTotal, dlBusy, dlMsg, dlSaving, dlSave, dlOpenFile, dlDelete,
       dlClear, dlDate, dlGroups, dlOpen, dlToggle, fmtSize,
+      dlCat, dlCatGroup, dlOpenCat, dlCloseCat,
       dlAuto, dlAutoSet, dlTypes: DL_TYPES,
+      /* W60: contraseña de Archivados */
+      archivePw, archiveNew, archiveNew2, archiveChange,
+      archiveBusy, archiveErr, archiveOk,
+      archiveActivate, archiveDisable, archiveChangePw,
       /* W58: permisos del dispositivo */
       permRows, permReview, permRefresh,
       doLogout: askLogout, doDelete: askDeleteAccount,
@@ -3176,9 +3345,21 @@ const SettingsModal = {
             <svg class="ic"><use href="#i-x"></use></svg>
           </button>
         </header>
+
+        <!-- W60: en móvil, la página principal de Ajustes es una lista de
+             categorías. Cada una abre su subpantalla con botón atrás. -->
+        <div class="st-mobile-home" v-if="settingsMobile && settingsHome">
+          <button class="st-cat" type="button" v-for="tb in tabs" :key="tb.val"
+            @click="openCat(tb.val)">
+            <span class="st-cat-ic"><svg class="ic"><use :href="'#' + tb.icon"></use></svg></span>
+            <span class="st-cat-col"><b>{{ t(tb.name) }}</b><span>{{ t(tb.desc) }}</span></span>
+            <svg class="ic ic-sm st-cat-chev"><use href="#i-back"></use></svg>
+          </button>
+        </div>
+
         <!-- W9: navegación lateral agrupada (estilo Discord); .m-tab y el
              orden se conservan: Cuenta siempre la ÚLTIMA pestaña. -->
-        <div class="st-cols">
+        <div class="st-cols" v-if="!settingsMobile || !settingsHome">
         <div class="m-tabs" role="tablist">
           <template v-for="tb in tabs">
             <div class="st-group" v-if="tb.group" :key="'g-' + tb.val">{{ t(tb.group) }}</div>
@@ -3188,6 +3369,10 @@ const SettingsModal = {
         </div>
 
         <div class="st-body">
+          <button class="st-back" type="button" v-if="settingsMobile" @click="goSettingsHome">
+            <svg class="ic ic-sm"><use href="#i-back"></use></svg>
+            <span>{{ t('Ajustes') }}</span>
+          </button>
           <!-- ============ cuenta ============ -->
           <template v-if="store.settingsTab === 'cuenta'">
             <div class="st-title">{{ t('Cuenta') }}</div>
@@ -3367,10 +3552,71 @@ const SettingsModal = {
             </div>
           </template>
 
+          <!-- ============ privacidad ============ -->
+          <template v-else-if="store.settingsTab === 'privacidad'">
+            <div class="st-title">{{ t('Privacidad') }}</div>
+            <div class="st-sec">
+              <div class="st-h">{{ t('Archivados') }}</div>
+              <p class="st-hint">{{ t('Protege la sección de chats archivados con una contraseña. Se pedirá al entrar y se guarda solo en este dispositivo; no se envía al servidor.') }}</p>
+
+              <template v-if="store.archiveHasLock">
+                <div class="st-privacy-state">
+                  <svg class="ic ic-sm"><use href="#i-lock"></use></svg>
+                  <span>{{ t('Archivados protegidos con contraseña') }}</span>
+                </div>
+                <div class="field">
+                  <label>{{ t('Contraseña actual') }}</label>
+                  <input class="input" type="password" v-model="archivePw"
+                    autocomplete="current-password" :placeholder="t('Para cambiar o quitar la protección')">
+                </div>
+                <div class="st-btns st-btns-left">
+                  <button class="btn btn-ghost btn-sm" type="button"
+                    @click="archiveChange = !archiveChange">{{ archiveChange ? t('Cancelar cambio') : t('Cambiar contraseña') }}</button>
+                  <button class="btn btn-ghost btn-sm" type="button"
+                    :disabled="archiveBusy || !archivePw" @click="archiveDisable">{{ t('Quitar protección') }}</button>
+                </div>
+                <div class="archive-new" v-if="archiveChange">
+                  <div class="field">
+                    <label>{{ t('Nueva contraseña') }}</label>
+                    <input class="input" type="password" v-model="archiveNew" autocomplete="new-password">
+                  </div>
+                  <div class="field">
+                    <label>{{ t('Repite la nueva contraseña') }}</label>
+                    <input class="input" type="password" v-model="archiveNew2" autocomplete="new-password">
+                  </div>
+                  <button class="btn btn-sm" type="button" :disabled="archiveBusy" @click="archiveChangePw">
+                    {{ archiveBusy ? t('Guardando…') : t('Guardar nueva contraseña') }}</button>
+                </div>
+              </template>
+
+              <template v-else>
+                <div class="field">
+                  <label>{{ t('Contraseña') }}</label>
+                  <input class="input" type="password" v-model="archiveNew"
+                    autocomplete="new-password" :placeholder="t('Mínimo 4 caracteres')">
+                </div>
+                <div class="field">
+                  <label>{{ t('Repite la contraseña') }}</label>
+                  <input class="input" type="password" v-model="archiveNew2"
+                    autocomplete="new-password">
+                </div>
+                <button class="btn btn-sm" type="button" :disabled="archiveBusy" @click="archiveActivate">
+                  {{ archiveBusy ? t('Guardando…') : t('Activar protección') }}</button>
+              </template>
+
+              <div class="form-err st-err" v-if="archiveErr" role="alert">
+                <svg class="ic ic-sm"><use href="#i-alert"></use></svg><span>{{ archiveErr }}</span>
+              </div>
+              <div class="st-ok st-ok-line" v-if="archiveOk">
+                <svg class="ic ic-sm"><use href="#i-check"></use></svg><span>{{ archiveOk }}</span>
+              </div>
+            </div>
+          </template>
+
           <!-- ============ descargas (W50/W58) ============ -->
           <template v-else-if="store.settingsTab === 'descargas'">
             <div class="st-title">{{ t('Descargas') }}</div>
-            <div class="st-sec">
+            <div class="st-sec dl-auto-sec">
               <div class="st-h">{{ t('Descargas automáticas') }}</div>
               <p class="st-hint">{{ t('Wi-Fi: activado por defecto; los archivos se descargan solos a los datos de la app. Datos móviles: desactivado por defecto para no gastar tu plan. Nada se copia a Descargas hasta que pulses “Guardar en el dispositivo”.') }}</p>
               <div class="dl-auto-row" v-for="tp in dlTypes" :key="tp.id">
@@ -3393,31 +3639,16 @@ const SettingsModal = {
               <div class="dl-empty" v-if="dlBusy">{{ t('Cargando…') }}</div>
               <div class="dl-empty" v-else-if="!dlList.length">{{ t('No hay descargas guardadas.') }}</div>
               <div class="dl-groups" v-else>
-                <div class="dl-group" v-for="g in dlGroups" :key="g.id">
-                  <button class="dl-group-head" type="button" @click="dlToggle(g.id)">
+                <button class="dl-group" type="button" v-for="g in dlGroups" :key="g.id"
+                  @click="dlOpenCat(g.id)">
+                  <span class="dl-group-head">
                     <svg class="ic ic-sm"><use :href="'#' + g.icon"></use></svg>
                     <b>{{ t(g.label) }}</b>
                     <span class="dl-gcount">({{ g.count }})</span>
                     <span class="dl-gsize">{{ fmtSize(g.size) }}</span>
-                    <svg class="ic ic-sm dl-gchev" :class="{ open: dlOpen[g.id] }"><use href="#i-chevron-down"></use></svg>
-                  </button>
-                  <div class="dl-group-body" v-if="dlOpen[g.id]">
-                    <div class="dl-item" v-for="d in g.items" :key="d.key">
-                      <div class="dl-info">
-                        <b>{{ d.name }}</b>
-                        <span>{{ fmtSize(d.size) }}<template v-if="d.auto"> · {{ t('Automática') }}</template><template v-if="dlDate(d)"> · {{ dlDate(d) }}</template></span>
-                      </div>
-                      <button class="btn btn-ghost btn-sm" type="button"
-                        @click="dlOpenFile(d)">{{ t('Abrir') }}</button>
-                      <button class="btn btn-ghost btn-sm" type="button"
-                        :disabled="dlSaving === d.key" @click="dlSave(d)">
-                        {{ dlSaving === d.key ? t('Guardando…') : t('Guardar en el dispositivo') }}</button>
-                      <button class="icon-btn" type="button" :title="t('Eliminar')" @click="dlDelete(d)">
-                        <svg class="ic"><use href="#i-trash"></use></svg>
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                    <svg class="ic ic-sm dl-gchev"><use href="#i-back"></use></svg>
+                  </span>
+                </button>
               </div>
               <div class="form-err st-err" v-if="dlMsg" role="alert">
                 <svg class="ic ic-sm"><use href="#i-alert"></use></svg><span>{{ dlMsg }}</span>
@@ -3520,6 +3751,183 @@ const SettingsModal = {
           </div>
         </div>
       </div>
+
+      <!-- W60: cada categoría de descargas se abre en su propio modal;
+           nada de listas expandibles dentro de Ajustes. -->
+      <div class="modal-veil" v-if="dlCat && dlCatGroup" @click.self="dlCloseCat">
+        <div class="modal dl-cat-modal" role="dialog" :aria-label="t(dlCatGroup.label)">
+          <header>
+            <span class="m-head-title">
+              <svg class="ic"><use :href="'#' + dlCatGroup.icon"></use></svg>
+              <b>{{ t(dlCatGroup.label) }}</b>
+            </span>
+            <span class="dl-gsize">{{ fmtSize(dlCatGroup.size) }}</span>
+            <button class="icon-btn" type="button" :title="t('Cerrar')" @click="dlCloseCat">
+              <svg class="ic"><use href="#i-x"></use></svg>
+            </button>
+          </header>
+          <div class="m-body dl-cat-body">
+            <div class="dl-item" v-for="d in dlCatGroup.items" :key="d.key">
+              <div class="dl-info">
+                <b>{{ d.name }}</b>
+                <span>{{ fmtSize(d.size) }}<template v-if="d.auto"> · {{ t('Automática') }}</template><template v-if="dlDate(d)"> · {{ dlDate(d) }}</template></span>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button"
+                @click="dlOpenFile(d)">{{ t('Abrir') }}</button>
+              <button class="btn btn-ghost btn-sm" type="button"
+                :disabled="dlSaving === d.key" @click="dlSave(d)">
+                {{ dlSaving === d.key ? t('Guardando…') : t('Guardar') }}</button>
+              <button class="icon-btn" type="button" :title="t('Eliminar')" @click="dlDelete(d)">
+                <svg class="ic"><use href="#i-trash"></use></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`,
+};
+
+/* ------------------------------------------------ ArchiveLockModal (W60) */
+
+const ArchiveLockModal = {
+  setup: function () {
+    const pw = Vue.ref('');
+    const show = Vue.ref(false);
+    const busy = Vue.ref(false);
+    const inputEl = Vue.ref(null);
+    const err = Vue.computed(function () { return store.archiveLockErr; });
+    const close = function () {
+      store.archiveLockPrompt = false;
+      store.showArchived = false;
+      store.archiveLockErr = '';
+      pw.value = '';
+      show.value = false;
+    };
+    const unlock = async function () {
+      if (busy.value) return;
+      if (!pw.value) { store.archiveLockErr = t('Escribe la contraseña'); return; }
+      busy.value = true;
+      store.archiveLockErr = '';
+      try {
+        const ok = await checkArchiveLock(pw.value);
+        if (!ok) {
+          store.archiveLockErr = t('Contraseña incorrecta');
+          pw.value = '';
+          if (inputEl.value) inputEl.value.focus();
+          return;
+        }
+        store.archiveUnlocked = true;
+        store.archiveLockPrompt = false;
+        store.showArchived = true;
+        store.archiveLockErr = '';
+        pw.value = '';
+      } catch (e) {
+        store.archiveLockErr = t('No se pudo comprobar la contraseña');
+      } finally {
+        busy.value = false;
+      }
+    };
+    Vue.onMounted(function () {
+      setTimeout(function () { if (inputEl.value) inputEl.value.focus(); }, 80);
+    });
+    return { store, pw, show, busy, inputEl, err, close, unlock };
+  },
+  template: `
+    <div class="archive-lock-veil" role="dialog" aria-modal="true" :aria-label="t('Archivados bloqueados')"
+      @click.self="close">
+      <div class="al-top">
+        <svg class="mobile-page-logo" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
+        <b>{{ t('Archivados') }}</b>
+      </div>
+      <div class="archive-lock-card">
+        <div class="al-ic"><svg class="ic"><use href="#i-lock"></use></svg></div>
+        <h2>{{ t('Archivados bloqueados') }}</h2>
+        <p>{{ t('La sección de archivados está bloqueada, por favor ingresa la contraseña.') }}</p>
+        <div class="al-field">
+          <input ref="inputEl" class="input" :type="show ? 'text' : 'password'"
+            v-model="pw" autocomplete="current-password" :placeholder="t('Contraseña')"
+            @keydown.enter.prevent="unlock">
+          <button class="al-eye" type="button" :title="show ? t('Ocultar') : t('Mostrar')"
+            @click="show = !show">
+            <svg class="ic ic-sm"><use :href="show ? '#i-eye-off' : '#i-eye'"></use></svg>
+          </button>
+        </div>
+        <div class="form-err st-err" v-if="err" role="alert">
+          <svg class="ic ic-sm"><use href="#i-alert"></use></svg><span>{{ t(err) }}</span>
+        </div>
+        <button class="btn btn-full al-unlock" type="button" :disabled="busy || !pw" @click="unlock">
+          {{ busy ? t('Comprobando…') : t('Desbloquear') }}
+        </button>
+        <button class="al-back" type="button" @click="close">{{ t('Volver a Chats') }}</button>
+      </div>
+    </div>`,
+};
+
+/* ------------------------------------------------ DownloadViewer (W60) */
+
+const DownloadViewer = {
+  setup: function () {
+    const saved = Vue.ref(false);
+    const saving = Vue.ref(false);
+    const close = function () {
+      const v = store.dlViewer;
+      if (v && v.url && v.url.indexOf('blob:') === 0) {
+        try { URL.revokeObjectURL(v.url); } catch (e) {}
+      }
+      store.dlViewer = null;
+    };
+    const onKey = function (e) {
+      if (e.key === 'Escape') close();
+    };
+    Vue.onMounted(function () { document.addEventListener('keydown', onKey); });
+    Vue.onUnmounted(function () { document.removeEventListener('keydown', onKey); });
+    const save = async function () {
+      const v = store.dlViewer;
+      if (!v || !v.key) return;
+      saving.value = true;
+      saved.value = false;
+      try {
+        const r = await saveDownloadToDevice(v.key, v.name, v.mime);
+        saved.value = !!(r && r.ok);
+      } finally {
+        saving.value = false;
+      }
+    };
+    return { store, close, save, saved, saving, fmtSize };
+  },
+  template: `
+    <div class="dl-viewer-veil" @click.self="close" role="dialog" :aria-label="store.dlViewer.name">
+      <div class="dl-viewer" v-if="store.dlViewer">
+        <header>
+          <span class="dlv-title" :title="store.dlViewer.name">{{ store.dlViewer.name }}</span>
+          <span class="dlv-size">{{ fmtSize(store.dlViewer.size) }}</span>
+          <button class="btn btn-ghost btn-sm dlv-save" type="button"
+            :disabled="saving" @click="save">
+            <svg class="ic ic-sm"><use :href="saved ? '#i-check' : '#i-download'"></use></svg>
+            <span>{{ saved ? t('Guardado') : (saving ? t('Guardando…') : t('Guardar')) }}</span>
+          </button>
+          <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
+            <svg class="ic"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="dlv-body">
+          <img v-if="store.dlViewer.kind === 'image'" :src="store.dlViewer.url"
+            :alt="store.dlViewer.name">
+          <video v-else-if="store.dlViewer.kind === 'video'" :src="store.dlViewer.url"
+            controls autoplay playsinline></video>
+          <audio v-else-if="store.dlViewer.kind === 'audio'" :src="store.dlViewer.url"
+            controls autoplay></audio>
+          <iframe v-else-if="store.dlViewer.mime === 'application/pdf'"
+            :src="store.dlViewer.url" :title="store.dlViewer.name"></iframe>
+          <div v-else class="dlv-other">
+            <svg class="ic"><use href="#i-file"></use></svg>
+            <b>{{ store.dlViewer.name }}</b>
+            <span>{{ t('Este tipo de archivo no se puede previsualizar aquí.') }}</span>
+            <button class="btn" type="button" :disabled="saving" @click="save">
+              {{ saving ? t('Guardando…') : t('Guardar en el dispositivo') }}</button>
+          </div>
+        </div>
+      </div>
     </div>`,
 };
 
@@ -3571,7 +3979,6 @@ const MeProfileModal = {
           saveSession();
         }
         menuOpen.value = false;
-        toast(t('Estado actualizado'), 'ok');
       } catch (e) {
         statusErr.value = (e && e.detail) || t('No se pudo actualizar el estado');
       } finally {
@@ -3588,14 +3995,6 @@ const MeProfileModal = {
       statusDraft.value = '';
       saveStatus(myPreset.value, '');
     };
-    const onDocClick = function (e) {
-      if (!menuOpen.value) return;
-      const el = e.target;
-      if (el && el.closest && el.closest('.pf-status-wrap')) return;
-      menuOpen.value = false;
-    };
-    Vue.onMounted(function () { document.addEventListener('click', onDocClick); });
-    Vue.onUnmounted(function () { document.removeEventListener('click', onDocClick); });
     return {
       store, close, edit, myStatus, myPreset, presets: STATUS_PRESETS,
       menuOpen, statusDraft, statusBusy, statusErr,
@@ -3607,10 +4006,6 @@ const MeProfileModal = {
     <div class="modal-veil" @click.self="close">
       <div class="modal meprof" role="dialog" :aria-label="t('Tu perfil')">
         <header>{{ t('Tu perfil') }}
-          <button class="icon-btn mp-edit-open" type="button" :title="t('Editar perfil')"
-            @click="edit">
-            <svg class="ic"><use href="#i-pencil"></use></svg>
-          </button>
           <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
             <svg class="ic"><use href="#i-x"></use></svg>
           </button>
@@ -3643,32 +4038,6 @@ const MeProfileModal = {
                   <span class="pf-quote-text">{{ myStatus }}</span>
                   <svg class="ic ic-sm pf-quote-chev" :class="{ open: menuOpen }"><use href="#i-chevron-down"></use></svg>
                 </button>
-                <div class="pf-status-menu" v-if="menuOpen" @click.stop>
-                  <div class="pf-menu-title">{{ t('Estado') }}</div>
-                  <label class="pf-menu-label" for="pf-status-input">{{ t('Mensaje personalizado') }}</label>
-                  <input id="pf-status-input" class="input pf-status-input" type="text"
-                    v-model="statusDraft" maxlength="80" :placeholder="t('¿Qué estás haciendo?')"
-                    @keydown.enter.prevent="saveCustom">
-                  <div class="pf-menu-meta">
-                    <span>{{ statusDraft.length }}/80</span>
-                    <button class="pf-link" type="button" v-if="statusDraft"
-                      @click="clearCustom" :disabled="statusBusy">{{ t('Quitar mensaje') }}</button>
-                  </div>
-                  <div class="pf-menu-presets">
-                    <button class="pf-preset" type="button" v-for="p in presets" :key="p.val"
-                      :class="{ on: myPreset === p.val }" :disabled="statusBusy"
-                      @click="choosePreset(p)">
-                      <span class="sdot" :class="p.dot"></span>
-                      <span>{{ t(p.label) }}</span>
-                      <svg class="ic ic-sm pf-preset-check" v-if="myPreset === p.val"><use href="#i-check"></use></svg>
-                    </button>
-                  </div>
-                  <div class="pf-menu-error" v-if="statusErr" role="alert">{{ statusErr }}</div>
-                  <button class="btn btn-full pf-menu-save" type="button"
-                    :disabled="statusBusy" @click="saveCustom">
-                    {{ statusBusy ? t('Guardando…') : t('Guardar mensaje') }}</button>
-                  <p class="pf-menu-hint">{{ t('No molestar silencia los avisos; Invisible te deja conectado sin aparecer en línea.') }}</p>
-                </div>
               </div>
             </div>
             <div class="pf-bio-wrap" v-if="store.user.bio">
@@ -3682,6 +4051,43 @@ const MeProfileModal = {
         <div class="m-foot st-btns">
           <button class="btn btn-full" type="button" @click="edit">
             <svg class="ic ic-sm"><use href="#i-pencil"></use></svg>{{ t('Editar perfil') }}</button>
+        </div>
+      </div>
+
+      <!-- W60: el menú de estado vive FUERA del modal de perfil, en su
+           propia capa fija: nunca se sale de la pantalla ni queda
+           recortado por el scroll del perfil. -->
+      <div class="pf-status-veil" v-if="menuOpen" @click.self="menuOpen = false">
+        <div class="pf-status-menu" role="dialog" :aria-label="t('Estado')" @click.stop>
+          <div class="pf-menu-title">
+            <span>{{ t('Estado') }}</span>
+            <button class="icon-btn" type="button" :title="t('Cerrar')" @click="menuOpen = false">
+              <svg class="ic"><use href="#i-x"></use></svg>
+            </button>
+          </div>
+          <label class="pf-menu-label" for="pf-status-input">{{ t('Mensaje personalizado') }}</label>
+          <input id="pf-status-input" class="input pf-status-input" type="text"
+            v-model="statusDraft" maxlength="80" :placeholder="t('¿Qué estás haciendo?')"
+            @keydown.enter.prevent="saveCustom">
+          <div class="pf-menu-meta">
+            <span>{{ statusDraft.length }}/80</span>
+            <button class="pf-link" type="button" v-if="statusDraft"
+              @click="clearCustom" :disabled="statusBusy">{{ t('Quitar mensaje') }}</button>
+          </div>
+          <div class="pf-menu-presets">
+            <button class="pf-preset" type="button" v-for="p in presets" :key="p.val"
+              :class="{ on: myPreset === p.val }" :disabled="statusBusy"
+              @click="choosePreset(p)">
+              <span class="sdot" :class="p.dot"></span>
+              <span>{{ t(p.label) }}</span>
+              <svg class="ic ic-sm pf-preset-check" v-if="myPreset === p.val"><use href="#i-check"></use></svg>
+            </button>
+          </div>
+          <div class="pf-menu-error" v-if="statusErr" role="alert">{{ statusErr }}</div>
+          <button class="btn btn-full pf-menu-save" type="button"
+            :disabled="statusBusy" @click="saveCustom">
+            {{ statusBusy ? t('Guardando…') : t('Guardar mensaje') }}</button>
+          <p class="pf-menu-hint">{{ t('No molestar silencia los avisos; Invisible te deja conectado sin aparecer en línea.') }}</p>
         </div>
       </div>
     </div>`,
@@ -3713,83 +4119,9 @@ const MeProfileEditModal = {
     });
     const busy = Vue.ref(false);
     const err = Vue.ref('');
-    /* W59: cambio de @usuario con contraseña y espera de 12 horas.
-       El servidor es la autoridad; el reloj local solo muestra el aviso
-       y desactiva el botón. */
-    const UNAME_WAIT = 12 * 60 * 60;
-    const unameOpen = Vue.ref(false);
-    const unameNew = Vue.ref(u.username || '');
-    const unamePw = Vue.ref('');
-    const unameErr = Vue.ref('');
-    const unameBusy = Vue.ref(false);
-    const unameEl = Vue.ref(null);
-    const unameClock = Vue.ref(Date.now());
-    const unameChangedAt = Vue.computed(function () {
-      return Number(store.user && store.user.username_changed_at) || 0;
-    });
-    const unameLocked = Vue.computed(function () {
-      return unameClock.value < unameChangedAt.value * 1000 + UNAME_WAIT * 1000;
-    });
-    const unameLockText = Vue.computed(function () {
-      const secs = Math.max(0,
-        unameChangedAt.value + UNAME_WAIT - Math.floor(unameClock.value / 1000));
-      let h = Math.floor(secs / 3600);
-      let m = Math.ceil((secs % 3600) / 60);
-      if (m >= 60) { h += 1; m = 0; }
-      return t('Podrás cambiarlo en {h} h {m} min.', { h: h, m: m });
-    });
-    let unameTimer = null;
-    Vue.onMounted(function () {
-      unameTimer = setInterval(function () { unameClock.value = Date.now(); }, 30000);
-    });
-    const toggleUname = function () {
-      if (unameLocked.value) return;
-      unameOpen.value = !unameOpen.value;
-      unameErr.value = '';
-      unamePw.value = '';
-      if (unameOpen.value) {
-        unameNew.value = (store.user && store.user.username) || '';
-        Vue.nextTick(function () {
-          if (unameEl.value && unameEl.value.scrollIntoView) {
-            unameEl.value.scrollIntoView({ block: 'nearest' });
-          }
-        });
-      }
-    };
-    const changeUsername = async function () {
-      unameErr.value = '';
-      const val = String(unameNew.value || '').trim().toLowerCase();
-      if (!/^[a-z0-9][a-z0-9_.]{2,19}$/.test(val)) {
-        unameErr.value = t('Usuario: 3-20 caracteres, letras/números/punto/guion bajo, empieza alfanumérico');
-        return;
-      }
-      if (store.user && val === store.user.username) {
-        unameErr.value = t('Ese ya es tu usuario actual');
-        return;
-      }
-      if (!unamePw.value) {
-        unameErr.value = t('Escribe tu contraseña actual');
-        return;
-      }
-      unameBusy.value = true;
-      try {
-        const r = await api('PUT', '/api/auth/username',
-          { username: val, password: unamePw.value }, { retry401: true });
-        if (r.user) {
-          store.user = Object.assign({}, store.user, r.user);
-          session.user = store.user;
-          saveSession();
-        }
-        unamePw.value = '';
-        unameOpen.value = false;
-        unameNew.value = val;
-        toast(t('Usuario actualizado') + ': @' + val, 'ok');
-      } catch (e) {
-        unameErr.value = (e && e.detail) || t('No se pudo cambiar el usuario');
-      } finally {
-        unameBusy.value = false;
-      }
-    };
+    /* W60: el cambio de @usuario vive en un modal APARTE. Aquí solo
+       queda el acceso; no se mezcla con nombre, foto, estado y bio. */
+    const openUname = function () { store.unameOpen = true; };
     /* W27: al elegir foto se abre el editor (encuadre + rotación); el
        archivo y el preview viejos NO cambian hasta APLICAR. */
     const edSrc = Vue.ref('');
@@ -3881,7 +4213,6 @@ const MeProfileEditModal = {
       if (preview.value) URL.revokeObjectURL(preview.value);
       if (edSrc.value) URL.revokeObjectURL(edSrc.value);
       if (bannerPreview.value) URL.revokeObjectURL(bannerPreview.value);
-      if (unameTimer) { clearInterval(unameTimer); unameTimer = null; }
     });
 
     /* Cancelar (o guardar) vuelve a la ficha "Tu perfil". */
@@ -3933,9 +4264,7 @@ const MeProfileEditModal = {
       store, name, bio, statusText, preset, preview, hasPhoto, avatarGone,
       bannerPreview, hasBanner, bannerGone, pickBanner, removeBanner,
       busy, err, pick, removeAvatar, close, save,
-      /* W59: usuario + enfriamiento de 12 h */
-      unameOpen, unameNew, unamePw, unameErr, unameBusy, unameEl,
-      unameLocked, unameLockText, toggleUname, changeUsername,
+      openUname,   /* W60: modal aparte para el @usuario */
       /* W27: editor de foto (encuadre + rotación); W27b: recuerda el
          encuadre de la sesión */
       edSrc, edInitial, startEdit, onEdConfirm, onEdCancel,
@@ -4008,46 +4337,17 @@ const MeProfileEditModal = {
               <label>{{ t('Nombre') }}</label>
               <input class="input" v-model.trim="name" maxlength="50" :placeholder="t('Tu nombre')">
             </div>
-            <!-- W59: el @usuario se cambia aparte, con advertencia y
-                 contraseña. El botón Guardar de abajo NO lo toca. -->
+            <!-- W60: el @usuario se cambia en un modal APARTE, con
+                 advertencia y contraseña. El botón Guardar NO lo toca. -->
             <div class="field uname-field">
               <label>{{ t('Usuario') }}</label>
               <div class="uname-current">
                 <span class="uname-at">@</span>
                 <b>{{ store.user && store.user.username }}</b>
-                <button class="btn btn-ghost btn-sm" type="button" @click="toggleUname"
-                  :disabled="unameLocked">{{ unameOpen ? t('Cancelar') : t('Cambiar usuario') }}</button>
+                <button class="btn btn-ghost btn-sm" type="button" @click="openUname">
+                  {{ t('Cambiar usuario') }}</button>
               </div>
               <p class="st-hint">{{ t('Sirve para iniciar sesión y para que te mencionen con @.') }}</p>
-              <p class="st-hint uname-wait" v-if="unameLocked">
-                <svg class="ic ic-sm"><use href="#i-clock"></use></svg>
-                <span>{{ unameLockText }}</span>
-              </p>
-              <div class="uname-edit" v-if="unameOpen" ref="unameEl">
-                <div class="uname-warn">
-                  <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
-                  <span>{{ t('Solo puedes cambiarlo una vez cada 12 horas. Las menciones con @ a tu usuario anterior dejarán de funcionar.') }}</span>
-                </div>
-                <div class="field">
-                  <label>{{ t('Nuevo usuario') }}</label>
-                  <input class="input" v-model.trim="unameNew" maxlength="20"
-                    autocomplete="username" spellcheck="false">
-                </div>
-                <p class="st-hint">{{ t('3-20 caracteres: minúsculas, números, punto y guion bajo; empieza con letra o número.') }}</p>
-                <div class="field">
-                  <label>{{ t('Contraseña actual') }}</label>
-                  <input class="input" type="password" v-model="unamePw"
-                    autocomplete="current-password" :placeholder="t('Para confirmar el cambio')">
-                </div>
-                <div class="form-err st-err" v-if="unameErr" role="alert">
-                  <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
-                  <span>{{ unameErr }}</span>
-                </div>
-                <button class="btn btn-full" type="button" @click="changeUsername"
-                  :disabled="unameBusy || !unameNew || !unamePw">
-                  {{ unameBusy ? t('Cambiando…') : t('Confirmar cambio de usuario') }}
-                </button>
-              </div>
             </div>
             <div class="field">
               <label>{{ t('Estado') }}</label>
@@ -4071,6 +4371,155 @@ const MeProfileEditModal = {
           <button class="btn btn-ghost" type="button" @click="close" :disabled="busy">{{ t('Cancelar') }}</button>
           <button class="btn" type="button" @click="save" :disabled="busy">
             {{ busy ? t('Guardando…') : t('Guardar') }}</button>
+        </div>
+      </div>
+    </div>`,
+};
+
+/* ------------------------------------------------ UsernameModal (W60) */
+
+/* El @usuario se cambia en un modal propio: el perfil (nombre, foto,
+   estado, bio) se guarda aparte y el cambio de usuario exige contraseña
+   y espera 12 horas. */
+const UsernameModal = {
+  setup: function () {
+    const UNAME_WAIT = 12 * 60 * 60;
+    const name = Vue.ref((store.user && store.user.username) || '');
+    const pw = Vue.ref('');
+    const err = Vue.ref('');
+    const busy = Vue.ref(false);
+    const nameEl = Vue.ref(null);
+    const clock = Vue.ref(Date.now());
+    let timer = null;
+
+    const changedAt = Vue.computed(function () {
+      return Number(store.user && store.user.username_changed_at) || 0;
+    });
+    const locked = Vue.computed(function () {
+      return clock.value < changedAt.value * 1000 + UNAME_WAIT * 1000;
+    });
+    const lockText = Vue.computed(function () {
+      const secs = Math.max(0,
+        changedAt.value + UNAME_WAIT - Math.floor(clock.value / 1000));
+      let h = Math.floor(secs / 3600);
+      let m = Math.ceil((secs % 3600) / 60);
+      if (m >= 60) { h += 1; m = 0; }
+      return t('Podrás cambiarlo en {h} h {m} min.', { h: h, m: m });
+    });
+    const canSave = Vue.computed(function () {
+      return !locked.value && !!name.value.trim() && !!pw.value;
+    });
+
+    const close = function () {
+      if (busy.value) return;
+      store.unameOpen = false;
+      pw.value = '';
+      err.value = '';
+    };
+
+    const submit = async function () {
+      if (locked.value) return;
+      err.value = '';
+      const val = String(name.value || '').trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_.]{2,19}$/.test(val)) {
+        err.value = t('Usuario: 3-20 caracteres, letras/números/punto/guion bajo, empieza alfanumérico');
+        return;
+      }
+      if (store.user && val === store.user.username) {
+        err.value = t('Ese ya es tu usuario actual');
+        return;
+      }
+      if (!pw.value) {
+        err.value = t('Escribe tu contraseña actual');
+        return;
+      }
+      busy.value = true;
+      try {
+        const r = await api('PUT', '/api/auth/username',
+          { username: val, password: pw.value }, { retry401: true });
+        if (r.user) {
+          store.user = Object.assign({}, store.user, r.user);
+          session.user = store.user;
+          saveSession();
+        }
+        store.unameOpen = false;
+        pw.value = '';
+        toast(t('Usuario actualizado') + ': @' + val, 'ok');
+      } catch (e) {
+        err.value = (e && e.detail) || t('No se pudo cambiar el usuario');
+      } finally {
+        busy.value = false;
+      }
+    };
+
+    Vue.onMounted(function () {
+      timer = setInterval(function () { clock.value = Date.now(); }, 30000);
+      Vue.nextTick(function () {
+        if (!locked.value && nameEl.value) nameEl.value.focus();
+      });
+    });
+    Vue.onUnmounted(function () {
+      if (timer) clearInterval(timer);
+    });
+
+    return {
+      store, t, name, pw, err, busy, nameEl, locked, lockText, canSave,
+      close, submit,
+    };
+  },
+  template: `
+    <div class="modal-veil" @click.self="close">
+      <div class="modal confirm uname-modal" role="dialog" aria-modal="true"
+        :aria-label="t('Cambiar nombre de usuario')">
+        <header>
+          <span>{{ t('Cambiar nombre de usuario') }}</span>
+          <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
+            <svg class="ic"><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="cf-body">
+          <p class="cf-text">{{ t('Tu @usuario sirve para iniciar sesión y para que te mencionen. Se puede cambiar una vez cada 12 horas.') }}</p>
+
+          <div class="uname-current uname-current-lg">
+            <span class="uname-at">@</span>
+            <b>{{ store.user && store.user.username }}</b>
+          </div>
+
+          <div class="uname-wait" v-if="locked">
+            <svg class="ic ic-sm"><use href="#i-clock"></use></svg>
+            <span>{{ lockText }}</span>
+          </div>
+
+          <template v-if="!locked">
+            <div class="uname-warn">
+              <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
+              <span>{{ t('Solo puedes cambiarlo una vez cada 12 horas. Las menciones con @ a tu usuario anterior dejarán de funcionar.') }}</span>
+            </div>
+            <div class="field">
+              <label>{{ t('Nuevo usuario') }}</label>
+              <input class="input" ref="nameEl" v-model.trim="name" maxlength="20"
+                autocomplete="username" spellcheck="false"
+                :placeholder="t('3-20 caracteres, empieza con letra o número')">
+              <p class="st-hint">{{ t('Minúsculas, números, punto y guion bajo; empieza con letra o número.') }}</p>
+            </div>
+            <div class="field">
+              <label>{{ t('Contraseña actual') }}</label>
+              <input class="input" type="password" v-model="pw"
+                autocomplete="current-password" :placeholder="t('Para confirmar el cambio')"
+                @keydown.enter.prevent="submit">
+            </div>
+            <div class="form-err st-err" v-if="err" role="alert">
+              <svg class="ic ic-sm"><use href="#i-alert"></use></svg>
+              <span>{{ err }}</span>
+            </div>
+          </template>
+        </div>
+        <div class="m-foot st-btns">
+          <button class="btn btn-ghost" type="button" :disabled="busy" @click="close">
+            {{ t('Cancelar') }}</button>
+          <button class="btn" type="button" v-if="!locked" :disabled="busy || !canSave"
+            @click="submit">
+            {{ busy ? t('Cambiando…') : t('Cambiar usuario') }}</button>
         </div>
       </div>
     </div>`,
@@ -4220,21 +4669,69 @@ const ReadsBox = {
     </div>`,
 };
 
-/* ------------------------------------------------------- CallBox (W28h)
-
-   Panel de llamada: entrante (Contestar/Rechazar) o en curso (video
-   remoto + PIP local + silencio/cámara/colgar + cronómetro). Los
-   MediaStream viven en call.js (fuera del store: Vue los envolvería en
-   proxies y los métodos nativos se rompen) y se enganchan a los
-   <video> en cada render; los cambios de estado reactivos provocan el
-   updated que los pinta. */
+/* W60: banner difuminado PREPROCESADO. Se reduce la portada a 48x27 en
+   un canvas y se cachea como data URL; el CSS solo escala esa imagen
+   diminuta y le aplica un blur barato (nada de backdrop-filter). */
+const callBlurCache = {};
+function callBlurBanner(url) {
+  if (!url) return Promise.resolve('');
+  if (callBlurCache[url] !== undefined) {
+    return Promise.resolve(callBlurCache[url]);
+  }
+  return new Promise(function (resolve) {
+    let done = false;
+    const finish = function (v) {
+      if (done) return;
+      done = true;
+      callBlurCache[url] = v;
+      resolve(v);
+    };
+    const img = new Image();
+    img.onload = function () {
+      try {
+        const c = document.createElement('canvas');
+        c.width = 48;
+        c.height = 27;
+        const ctx = c.getContext('2d');
+        const sw = img.naturalWidth || img.width || 1;
+        const sh = img.naturalHeight || img.height || 1;
+        const scale = Math.max(48 / sw, 27 / sh);
+        const dw = sw * scale;
+        const dh = sh * scale;
+        ctx.drawImage(img, (48 - dw) / 2, (27 - dh) / 2, dw, dh);
+        finish(c.toDataURL('image/jpeg', 0.55));
+      } catch (e) {
+        finish('');
+      }
+    };
+    img.onerror = function () { finish(''); };
+    img.src = mediaUrl(url);
+  });
+}
 
 const CallBox = {
   setup: function () {
     const elapsed = Vue.ref('00:00');
     const remoteEl = Vue.ref(null);
     const pipEl = Vue.ref(null);
+    const minimized = Vue.ref(false);
+    const callText = Vue.ref('');
+    const chatListEl = Vue.ref(null);
+    const peerBg = Vue.ref('');
+    const myBg = Vue.ref('');
+    const peerSpeak = Vue.ref(false);
+    const mySpeak = Vue.ref(false);
+    const remoteMuted = Vue.ref(false);
+    const menu = Vue.ref(null);
     let timer = null;
+    let speakTimer = null;
+    let audioCtx = null;
+    let anLocal = null;
+    let anRemote = null;
+    let lastLocal = null;
+    let lastRemote = null;
+    let peerBanner = null;
+    let myBanner = null;
 
     const fmt = function (ms) {
       const s = Math.max(0, Math.floor(ms / 1000));
@@ -4246,41 +4743,37 @@ const CallBox = {
       const c = store.call;
       elapsed.value = (c && c.startedAt) ? fmt(Date.now() - c.startedAt) : '00:00';
     };
-    const attach = function () {
-      const st = getRemoteStream();
-      if (remoteEl.value && st && remoteEl.value.srcObject !== st) {
-        remoteEl.value.srcObject = st;
-        try {
-          const p = remoteEl.value.play();
-          if (p && typeof p.catch === 'function') p.catch(function () {});
-        } catch (e) {}
-      }
-      const st2 = getLocalStream();
-      if (pipEl.value && st2 && pipEl.value.srcObject !== st2) {
-        pipEl.value.srcObject = st2;
-        try {
-          const p2 = pipEl.value.play();
-          if (p2 && typeof p2.catch === 'function') p2.catch(function () {});
-        } catch (e) {}
-      }
-    };
-    Vue.onMounted(function () {
-      retick();
-      timer = setInterval(retick, 1000);
-      attach();
-    });
-    Vue.onUpdated(attach);
-    Vue.onUnmounted(function () { if (timer) clearInterval(timer); });
 
+    const peer = function () { return store.call ? store.call.peer : null; };
     const peerName = function () {
-      const c = store.call;
-      if (!c || !c.peer) return '';
-      return c.peer.display_name || c.peer.username || '';
+      const p = peer();
+      if (!p) return '';
+      return p.display_name || p.username || '';
     };
-    const peerIni = function () { return peerName().charAt(0).toUpperCase(); };
+    const peerIni = function () { return (peerName() || '?').charAt(0).toUpperCase(); };
+    const peerAvatar = function () {
+      const p = peer();
+      return p && p.avatar_url ? mediaUrl(p.avatar_url) : '';
+    };
+    const myAvatar = function () {
+      return store.user && store.user.avatar_url ? mediaUrl(store.user.avatar_url) : '';
+    };
+    const myIni = function () {
+      const u = store.user || {};
+      return String(u.display_name || u.username || '?').charAt(0).toUpperCase();
+    };
+    const isIncoming = function () {
+      return !!(store.call && store.call.state === 'incoming');
+    };
     const inCall = function () {
       const c = store.call;
       return !!c && (c.state === 'connecting' || c.state === 'active');
+    };
+    const hasVideo = function () {
+      return !!(store.call && store.call.remoteVideo);
+    };
+    const selfCamOn = function () {
+      return !!(store.call && store.call.hasCam && !store.call.camOff);
     };
     const stateLine = function () {
       const c = store.call;
@@ -4288,49 +4781,341 @@ const CallBox = {
       if (c.state === 'incoming') return t('Llamada entrante');
       if (c.state === 'outgoing') return t('Llamando…');
       if (c.state === 'connecting') return t('Conectando…');
-      return elapsed.value;   // activa: cronómetro
+      return elapsed.value;
     };
+    const bgStyle = function (data) {
+      return data ? { backgroundImage: 'url(' + data + ')' } : {};
+    };
+
+    const makeBgs = function () {
+      const p = peer();
+      const b = p && p.banner_url ? p.banner_url : '';
+      if (b !== peerBanner) {
+        peerBanner = b;
+        peerBg.value = '';
+        callBlurBanner(b).then(function (u) { peerBg.value = u; });
+      }
+      const mb = store.user && store.user.banner_url ? store.user.banner_url : '';
+      if (mb !== myBanner) {
+        myBanner = mb;
+        myBg.value = '';
+        callBlurBanner(mb).then(function (u) { myBg.value = u; });
+      }
+    };
+
+    const scrollChat = function (force) {
+      const el = chatListEl.value;
+      if (!el) return;
+      if (force || el.scrollHeight - el.scrollTop - el.clientHeight < 64) {
+        el.scrollTop = el.scrollHeight;
+      }
+    };
+
+    /* W60: aro verde al hablar. Se analiza la forma de onda del micrófono
+       local y del flujo remoto SIN conectarlos a la salida (no hay eco). */
+    const bindAudio = function (local, remote) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!audioCtx) {
+        try { audioCtx = new AC(); } catch (e) { return; }
+      }
+      if (audioCtx.state === 'suspended') {
+        try {
+          const pr = audioCtx.resume();
+          if (pr && pr.catch) pr.catch(function () {});
+        } catch (e) {}
+      }
+      const wire = function (stream, side) {
+        if (!stream || !stream.getAudioTracks || !stream.getAudioTracks().length) return;
+        const prev = side === 'local' ? lastLocal : lastRemote;
+        if (prev === stream) return;
+        try {
+          const src = audioCtx.createMediaStreamSource(stream);
+          const an = audioCtx.createAnalyser();
+          an.fftSize = 256;
+          an.smoothingTimeConstant = 0.65;
+          src.connect(an);
+          if (side === 'local') {
+            anLocal = an;
+            lastLocal = stream;
+          } else {
+            anRemote = an;
+            lastRemote = stream;
+          }
+        } catch (e) {}
+      };
+      wire(local, 'local');
+      wire(remote, 'remote');
+    };
+
+    const levelOf = function (an) {
+      if (!an) return 0;
+      try {
+        const arr = new Uint8Array(an.fftSize);
+        an.getByteTimeDomainData(arr);
+        let peak = 0;
+        for (let i = 0; i < arr.length; i++) {
+          const v = Math.abs(arr[i] - 128);
+          if (v > peak) peak = v;
+        }
+        return peak;
+      } catch (e) { return 0; }
+    };
+    const pollSpeaking = function () {
+      bindAudio(getLocalStream(), getRemoteStream());
+      const c = store.call;
+      mySpeak.value = levelOf(anLocal) > 7 && !(c && c.muted);
+      peerSpeak.value = levelOf(anRemote) > 7 && !remoteMuted.value;
+    };
+
+    const attach = function () {
+      const st = getRemoteStream();
+      const st2 = getLocalStream();
+      if (remoteEl.value) {
+        if (st && remoteEl.value.srcObject !== st) {
+          remoteEl.value.srcObject = st;
+          try {
+            const p = remoteEl.value.play();
+            if (p && typeof p.catch === 'function') p.catch(function () {});
+          } catch (e) {}
+        }
+        remoteEl.value.muted = remoteMuted.value;
+      }
+      if (pipEl.value) {
+        if (st2 && pipEl.value.srcObject !== st2) {
+          pipEl.value.srcObject = st2;
+          try {
+            const p2 = pipEl.value.play();
+            if (p2 && typeof p2.catch === 'function') p2.catch(function () {});
+          } catch (e) {}
+        }
+        pipEl.value.muted = true;
+      }
+      bindAudio(st2, st);
+      scrollChat(false);
+    };
+
+    const callMessages = Vue.computed(function () {
+      const c = store.call;
+      if (!c) return [];
+      const all = store.msgs[c.chatId] || [];
+      const out = [];
+      const meId = store.user ? store.user.id : 0;
+      for (let i = 0; i < all.length; i++) {
+        const m = all[i];
+        if (m.kind === 'system') continue;
+        if (m.e2e && m._plain == null) continue;
+        let txt = '';
+        if (m.kind === 'image') txt = t('Imagen');
+        else if (m.kind === 'voice') txt = t('Nota de voz');
+        else if (m.kind === 'file') {
+          txt = m.media && /^video\//.test(m.media.mime || '') ? t('Video') : t('Archivo');
+        } else if (m.kind === 'gif') txt = t('GIF');
+        else txt = (m._plain != null ? m._plain : (m.body || '')) || '';
+        if (!txt) continue;
+        const mine = !!(m.sender && meId && m.sender.id === meId);
+        const nm = m.sender
+          ? (m.sender.display_name || m.sender.username || '')
+          : (mine && store.user ? (store.user.display_name || store.user.username) : '');
+        out.push({
+          id: m.id,
+          key: 'cm' + m.id,
+          txt: txt,
+          mine: mine,
+          name: nm,
+          time: m.created_at ? fmtTime(new Date(m.created_at * 1000)) : '',
+        });
+      }
+      return out.slice(-40);
+    });
+
+    const sendChat = function () {
+      const c = store.call;
+      const text = callText.value.trim();
+      if (!c || !text) return;
+      callText.value = '';
+      sendText(c.chatId, text).catch(function () {
+        toast(t('No se pudo enviar el mensaje'), 'err');
+      });
+      Vue.nextTick(function () { scrollChat(true); });
+    };
+
+    const closeMenu = function () { menu.value = null; };
+    const openMenu = function (ev, who) {
+      const w = 210;
+      const h = 190;
+      const x = Math.max(8, Math.min(ev.clientX, (window.innerWidth || 360) - w - 8));
+      const y = Math.max(8, Math.min(ev.clientY, (window.innerHeight || 640) - h - 8));
+      menu.value = { x: x, y: y, who: who };
+    };
+    const menuThen = function (fn) {
+      menu.value = null;
+      if (typeof fn === 'function') fn();
+    };
+    const viewPeer = function () {
+      const p = peer();
+      menu.value = null;
+      if (p && p.username) openProfile(p.username);
+    };
+    const toggleRemoteMute = function () {
+      menu.value = null;
+      remoteMuted.value = !remoteMuted.value;
+      if (remoteEl.value) remoteEl.value.muted = remoteMuted.value;
+      if (remoteMuted.value) peerSpeak.value = false;
+    };
+
+    const minimize = function () { minimized.value = true; };
+    const restore = function () { minimized.value = false; };
+
+    Vue.onMounted(function () {
+      retick();
+      timer = setInterval(retick, 1000);
+      speakTimer = setInterval(pollSpeaking, 250);
+      setTimeout(attach, 0);
+      makeBgs();
+      document.addEventListener('click', closeMenu);
+      document.addEventListener('keydown', closeMenu);
+    });
+    Vue.onUpdated(function () {
+      attach();
+      makeBgs();
+    });
+    Vue.onUnmounted(function () {
+      if (timer) clearInterval(timer);
+      if (speakTimer) clearInterval(speakTimer);
+      document.removeEventListener('click', closeMenu);
+      document.removeEventListener('keydown', closeMenu);
+      if (audioCtx) {
+        try { audioCtx.close(); } catch (e) {}
+      }
+    });
+    Vue.watch(inCall, function (v) {
+      if (v) Vue.nextTick(function () { scrollChat(true); });
+    });
+
     return {
-      store, t, remoteEl, pipEl, peerName, peerIni, inCall, stateLine,
+      store, t, remoteEl, pipEl, elapsed, minimized, callText, chatListEl,
+      peerBg, myBg, peerSpeak, mySpeak, remoteMuted, menu,
+      peerName, peerIni, peerAvatar, myAvatar, myIni,
+      isIncoming, inCall, hasVideo, selfCamOn, stateLine, bgStyle,
+      callMessages, sendChat, scrollChat,
+      openMenu, menuThen, viewPeer, toggleRemoteMute,
+      minimize, restore,
       accept: acceptCall, reject: rejectCall, hangup: hangupCall,
       mute: toggleMute, cam: toggleCam,
     };
   },
   template:
-    '<div class="callbox" :class="{ incoming: store.call.state === \'incoming\' }"' +
-      ' role="dialog" :aria-label="t(\'Llamada entrante\')">' +
-      '<div class="call-head">' +
-        '<span class="avatar av36"><span>{{ peerIni() }}</span></span>' +
-        '<span class="call-col">' +
-          '<b>{{ peerName() }}</b>' +
-          '<span class="call-state">{{ stateLine() }}</span>' +
-        '</span>' +
+    '<div class="callbox" :class="{ incoming: isIncoming(), calling: !inCall() && !isIncoming(), active: inCall(), minimized: minimized }"' +
+      ' role="dialog" :aria-label="t(\'Llamada\')">' +
+      '<button class="call-fab" type="button" v-if="minimized" @click.stop="restore"' +
+        ' :title="t(\'Volver a la llamada\')">' +
+        '<span class="call-fab-ic"><svg class="ic"><use href="#i-phone"></use></svg></span>' +
+        '<span class="call-fab-t">{{ elapsed }}</span>' +
+      '</button>' +
+      '<div class="call-panel" v-show="!minimized">' +
+        '<header class="call-head">' +
+          '<span class="call-col">' +
+            '<b>{{ peerName() || t(\'Llamada\') }}</b>' +
+            '<span class="call-state">{{ stateLine() }}</span>' +
+          '</span>' +
+          '<button class="icon-btn call-min" type="button" v-if="!isIncoming()"' +
+            ' @click.stop="minimize" :title="t(\'Minimizar\')">' +
+            '<svg class="ic"><use href="#i-chevron-down"></use></svg>' +
+          '</button>' +
+        '</header>' +
+        '<div class="call-participants" :class="{ solo: isIncoming() }">' +
+          '<div class="call-tile peer" :class="{ speaking: peerSpeak, video: hasVideo() }"' +
+            ' @contextmenu.prevent.stop="openMenu($event, \'peer\')">' +
+            '<div class="call-tile-bg" :style="bgStyle(peerBg)"></div>' +
+            '<video class="call-remote" ref="remoteEl" autoplay playsinline' +
+              ' v-show="hasVideo()"></video>' +
+            '<div class="call-avatar" v-if="!hasVideo()">' +
+              '<span class="avatar av72" :class="{ \'has-photo\': !!peerAvatar() }">' +
+                '<img v-if="peerAvatar()" :src="peerAvatar()" alt="">' +
+                '<span v-else>{{ peerIni() }}</span>' +
+              '</span>' +
+            '</div>' +
+            '<span class="call-tile-foot">' +
+              '<span class="call-tile-name">{{ peerName() }}</span>' +
+            '</span>' +
+          '</div>' +
+          '<div class="call-tile self" v-if="!isIncoming()" :class="{ speaking: mySpeak, video: selfCamOn() }"' +
+            ' @contextmenu.prevent.stop="openMenu($event, \'self\')">' +
+            '<div class="call-tile-bg" :style="bgStyle(myBg)"></div>' +
+            '<video class="call-pip" ref="pipEl" autoplay muted playsinline' +
+              ' v-show="selfCamOn()"></video>' +
+            '<div class="call-avatar" v-if="!selfCamOn()">' +
+              '<span class="avatar av72" :class="{ \'has-photo\': !!myAvatar() }">' +
+                '<img v-if="myAvatar()" :src="myAvatar()" alt="">' +
+                '<span v-else>{{ myIni() }}</span>' +
+              '</span>' +
+            '</div>' +
+            '<span class="call-tile-foot">' +
+              '<span class="call-tile-name">{{ t(\'Tú\') }}</span>' +
+              '<svg class="ic ic-sm" v-if="store.call.muted" :title="t(\'Silenciado\')">' +
+                '<use href="#i-mic-off"></use></svg>' +
+            '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="call-controls">' +
+          '<template v-if="isIncoming()">' +
+            '<button type="button" class="call-round accept call-accept" @click="accept"' +
+              ' :title="t(\'Contestar\')" :aria-label="t(\'Contestar\')">' +
+              '<svg class="ic"><use href="#i-phone"></use></svg></button>' +
+            '<button type="button" class="call-round reject call-reject" @click="reject"' +
+              ' :title="t(\'Rechazar\')" :aria-label="t(\'Rechazar\')">' +
+              '<svg class="ic"><use href="#i-phone-down"></use></svg></button>' +
+          '</template>' +
+          '<template v-else>' +
+            '<button type="button" class="call-round" v-if="inCall()"' +
+              ' :class="{ off: store.call.muted }" @click="mute"' +
+              ' :title="store.call.muted ? t(\'Activar el micrófono\') : t(\'Silenciar\')"' +
+              ' :aria-label="store.call.muted ? t(\'Activar el micrófono\') : t(\'Silenciar\')">' +
+              '<svg class="ic"><use :href="store.call.muted ? \'#i-mic-off\' : \'#i-mic\'"></use></svg></button>' +
+            '<button type="button" class="call-round" v-if="inCall() && store.call.hasCam"' +
+              ' :class="{ off: store.call.camOff }" @click="cam"' +
+              ' :title="store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\')"' +
+              ' :aria-label="store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\')">' +
+              '<svg class="ic"><use :href="store.call.camOff ? \'#i-video-off\' : \'#i-video\'"></use></svg></button>' +
+            '<button type="button" class="call-round hang call-hang" @click="hangup"' +
+              ' :title="t(\'Colgar\')" :aria-label="t(\'Colgar\')">' +
+              '<svg class="ic"><use href="#i-phone-down"></use></svg></button>' +
+          '</template>' +
+        '</div>' +
+        '<div class="call-chat" v-if="inCall()">' +
+          '<div class="call-chat-hd">{{ t(\'Chat de la llamada\') }}</div>' +
+          '<div class="call-chat-list" ref="chatListEl">' +
+            '<div class="call-msg" :class="{ mine: m.mine }" v-for="m in callMessages" :key="m.key">' +
+              '<span class="call-msg-name" v-if="!m.mine">{{ m.name }}</span>' +
+              '<span class="call-msg-txt">{{ m.txt }}</span>' +
+              '<span class="call-msg-time">{{ m.time }}</span>' +
+            '</div>' +
+            '<div class="call-chat-empty" v-if="!callMessages.length">' +
+              '{{ t(\'No hay mensajes todavía.\') }}</div>' +
+          '</div>' +
+          '<form class="call-chat-form" @submit.prevent="sendChat">' +
+            '<input class="call-chat-in" v-model="callText" maxlength="2000"' +
+              ' :placeholder="t(\'Escribe un mensaje…\')" :aria-label="t(\'Mensaje\')">' +
+            '<button class="icon-btn call-send" type="submit" :disabled="!callText.trim()"' +
+              ' :title="t(\'Enviar\')" :aria-label="t(\'Enviar\')">' +
+              '<svg class="ic"><use href="#i-send"></use></svg></button>' +
+          '</form>' +
+        '</div>' +
       '</div>' +
-      /* video remoto: solo cuando ya llegó pista (ontrack) */
-      '<video class="call-remote" ref="remoteEl" autoplay playsinline' +
-        ' v-if="store.call.video && store.call.remote"></video>' +
-      /* PIP local (muted: nunca la retroalimentación del propio micrófono) */
-      '<video class="call-pip" ref="pipEl" autoplay muted playsinline' +
-        ' v-if="store.call.video"></video>' +
-      '<div class="call-ctl">' +
-        /* entrante: Contestar / Rechazar */
-        '<button type="button" class="btn call-accept" v-if="store.call.state === \'incoming\'" ' +
-          '@click="accept">{{ t(\'Contestar\') }}</button>' +
-        '<button type="button" class="btn call-reject" v-if="store.call.state === \'incoming\'" ' +
-          '@click="reject">{{ t(\'Rechazar\') }}</button>' +
-        /* en curso: silencio / cámara / colgar */
-        '<button type="button" class="icon-btn" v-if="inCall()" ' +
-          ':title="store.call.muted ? t(\'Activar el micrófono\') : t(\'Silenciar\')" @click="mute">' +
-          '<svg class="ic"><use :href="store.call.muted ? \'#i-mic-off\' : \'#i-mic\'"></use></svg>' +
-        '</button>' +
-        '<button type="button" class="icon-btn" v-if="inCall() && store.call.video" ' +
-          ':title="store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\')" @click="cam">' +
-          '<svg class="ic"><use :href="store.call.camOff ? \'#i-video-off\' : \'#i-video\'"></use></svg>' +
-        '</button>' +
-        '<button type="button" class="icon-btn call-hang" v-if="store.call.state !== \'incoming\'" ' +
-          ':title="t(\'Colgar\')" @click="hangup">' +
-          '<svg class="ic"><use href="#i-phone-down"></use></svg>' +
-        '</button>' +
+      '<div class="call-menu" v-if="menu" :style="{ left: menu.x + \'px\', top: menu.y + \'px\' }"' +
+        ' @click.stop>' +
+        '<button type="button" v-if="menu.who === \'peer\'" @click="viewPeer">' +
+          '{{ t(\'Ver perfil\') }}</button>' +
+        '<button type="button" v-if="menu.who === \'peer\'" @click="toggleRemoteMute">' +
+          '{{ remoteMuted ? t(\'Escuchar de nuevo\') : t(\'Silenciar para mí\') }}</button>' +
+        '<button type="button" v-if="menu.who === \'self\'" @click="menuThen(mute)">' +
+          '{{ store.call.muted ? t(\'Activar el micrófono\') : t(\'Silenciar\') }}</button>' +
+        '<button type="button" v-if="menu.who === \'self\' && store.call.hasCam"' +
+          ' @click="menuThen(cam)">' +
+          '{{ store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\') }}</button>' +
+        '<button type="button" class="danger" @click="menuThen(hangup)">' +
+          '{{ t(\'Colgar\') }}</button>' +
       '</div>' +
     '</div>',
 };
@@ -5518,7 +6303,7 @@ const PeoplePanel = {
 /* ------------------------------------------------------- ChatShell */
 
 export const ChatShell = {
-  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, ConfirmBox, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
+  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, UsernameModal, ArchiveLockModal, DownloadViewer, ConfirmBox, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
   setup: function () {
     const scroller = Vue.ref(null);
     const input = Vue.ref(null);
@@ -6910,15 +7695,39 @@ export const ChatShell = {
       const p = store.people;
       return (p && p.received) ? p.received.length : 0;
     });
+    const leaveArchiveLock = function () {
+      store.archiveLockPrompt = false;
+      store.archiveLockErr = '';
+    };
     const toggleArchived = function () {
-      store.showArchived = !store.showArchived;
+      /* W60: la sección es privada. Si está bloqueada, primero se abre
+         la pantalla/modal de desbloqueo; la lista queda detrás. */
+      if (store.archiveLockPrompt) {
+        leaveArchiveLock();
+        store.showArchived = false;
+        return;
+      }
+      if (store.showArchived) {
+        store.showArchived = false;
+        store.search = '';
+        return;
+      }
       store.peopleMobile = false;
       store.search = '';
       if (isNarrow.value && store.activeChatId) closeChat();
+      /* W60: si está bloqueada, la lista NO se revela detrás del modal
+         de escritorio. Al desbloquear (o si no hay clave) se muestra. */
+      const locked = store.archiveHasLock && !store.archiveUnlocked;
+      store.showArchived = !locked;
+      if (locked) {
+        store.archiveLockErr = '';
+        store.archiveLockPrompt = true;
+      }
     };
     const goPeople = function () {
       store.settingsOpen = false;
       store.showArchived = false;
+      leaveArchiveLock();
       store.peopleTab = 'active';
       if (isNarrow.value) {
         if (store.activeChatId) closeChat();
@@ -6936,6 +7745,7 @@ export const ChatShell = {
       store.settingsOpen = false;
       store.peopleMobile = false;
       store.showArchived = false;
+      leaveArchiveLock();
       if (store.activeChatId) closeChat();
     };
 
@@ -7242,6 +8052,14 @@ export const ChatShell = {
         label: 'Copiar enlace al mensaje', icon: 'i-link',
         fn: function () { copyText(msgLink(m)); toast('Enlace copiado'); },
       });
+      /* W60: guardar/quitar un sticker recibido */
+      if (m.kind === 'sticker' && m.body) {
+        items.push(isStkFav(m.body)
+          ? { label: 'Quitar de favoritos', icon: 'i-star-fill',
+              fn: function () { toggleStkFav(m.body); } }
+          : { label: 'Guardar en stickers', icon: 'i-star',
+              fn: function () { toggleStkFav(m.body); } });
+      }
       /* W28c: fijar el mensaje en la info del chat */
       items.push(m.pinned
         ? { label: 'Desfijar mensaje', icon: 'i-pin-off',
@@ -7565,18 +8383,21 @@ export const ChatShell = {
         }
         if (e.key === 'Escape') { clearAc(); return; }
       }
-      if (e.key !== 'Enter') return;
+      if (e.key !== 'Enter' || e.isComposing) return;
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         send();
         return;
       }
       if (e.shiftKey) return;            // salto de línea
-      if (store.prefs.enter) {           // encendido: Enter envía
+      /* W60: en el móvil el teclado (Gboard) muestra una tecla de enviar
+         y Enter envía; en escritorio manda la preferencia del usuario. */
+      const touchKb = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || '');
+      if (store.prefs.enter || touchKb) {
         e.preventDefault();
         send();
       }
-      // apagado: Enter hace salto de línea; envía el botón o Ctrl+Enter
+      // apagado en escritorio: Enter salta de línea; envía con el botón
     };
 
     /* Esc cierra de arriba hacia abajo lo que esté encima (atajo documentado). */
@@ -7595,6 +8416,7 @@ export const ChatShell = {
       if (fwdFor.value) { fwdFor.value = null; return; }        // W13
       if (searchOpen.value) { toggleSearch(); return; }         // W13
       if (store.sasOpen) { store.sasOpen = false; return; }     // W39
+      if (store.unameOpen) { store.unameOpen = false; return; }  // W60
       if (store.meProfileOpen) { store.meProfileOpen = false; return; }
       if (store.pwOpen) { store.pwOpen = false; return; }       // W8
       if (store.emOpen) { store.emOpen = false; return; }       // W8
@@ -7671,6 +8493,7 @@ export const ChatShell = {
       emoFile, emoSrc,
       /* W36k */
       onGifFav, onFavDel, favGifSrc, isLibGifFav, toggleLibGif,
+      isStkFav, toggleStkFav,
       stkList: STICKERS, gifList: GIF_LIST,
       /* W29h: enviar manteniendo presionado 3 s = spoiler */
       holdOn, holdDown, holdUp, clickSend,
@@ -7700,7 +8523,7 @@ export const ChatShell = {
         '<header class="side-head">' +
           '<svg class="side-logo side-logo-word" viewBox="0 0 500 200" role="img" aria-label="Foxinix"><use href="#i-logo-word"></use></svg>' +
           '<svg class="side-logo-mark" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>' +
-          '<span class="side-title">{{ t(\'Chats\') }}</span>' +
+          '<span class="side-title">{{ store.showArchived ? t(\'Archivados\') : t(\'Chats\') }}</span>' +
           '<span class="ws-dot" v-if="store.ws !== \'on\'" :title="wsLabel"></span>' +
           '<button class="icon-btn side-new" type="button" :title="t(\'Nuevo chat\')" @click="startNewChat">' +
             '<svg class="ic"><use href="#i-plus"></use></svg>' +
@@ -7725,27 +8548,31 @@ export const ChatShell = {
         '<div class="side-search">' +
           '<div class="search-pill">' +
             '<svg class="ic ic-sm"><use href="#i-search"></use></svg>' +
-            '<input v-model="store.search" :placeholder="t(\'Buscar chats y grupos\')" :aria-label="t(\'Buscar chats y grupos\')">' +
+            '<input v-model="store.search" :placeholder="store.showArchived ? t(\'Buscar archivados\') : t(\'Buscar chats y grupos\')" :aria-label="store.showArchived ? t(\'Buscar archivados\') : t(\'Buscar chats y grupos\')">' +
           '</div>' +
         '</div>' +
         /* W27c: opción "Personas" en el panel de chats, arriba de todos
            los usuarios: vuelve a la pantalla principal (centro en
            escritorio; a pantalla completa en móvil) */
-        '<button class="side-people" type="button" :class="{ on: peopleActive }" ' +
-          ':title="t(\'Personas\')" @click="goPeople">' +
+        '<button class="side-people" type="button" v-if="!store.showArchived" ' +
+          ':class="{ on: peopleActive }" :title="t(\'Personas\')" @click="goPeople">' +
           '<svg class="ic ic-sm"><use href="#i-users"></use></svg>' +
           '<span>{{ t(\'Personas\') }}</span>' +
           /* W29a: globo rojo con las solicitudes recibidas (tope 9+) */
           '<i class="side-badge" v-if="reqCount > 0">' +
             '{{ reqCount > 9 ? \'9+\' : reqCount }}</i>' +
         '</button>' +
-        '<button class="side-people side-archive" type="button" :class="{ on: store.showArchived }" ' +
-          ':title="store.showArchived ? t(\'Volver a los chats\') : t(\'Archivados\')" ' +
-          '@click="toggleArchived">' +
+        '<button class="side-people side-archive" type="button" v-if="!store.showArchived" ' +
+          ':title="t(\'Archivados\')" @click="toggleArchived">' +
           '<svg class="ic ic-sm"><use href="#i-archive"></use></svg>' +
-          '<span>{{ store.showArchived ? t(\'Volver a los chats\') : t(\'Archivados\') }}</span>' +
-          '<i class="side-badge" v-if="!store.showArchived && archivedCount > 0">' +
-            '{{ archivedCount > 9 ? \'9+\' : archivedCount }}</i>' +
+          '<span>{{ t(\'Archivados\') }}</span>' +
+        '</button>' +
+        /* W60: en escritorio los archivados son una sección aparte: el
+           buscador de arriba es solo para ellos y aquí se vuelve a Chats.
+           En móvil manda la barra inferior (este botón se oculta). */
+        '<button class="archive-back" type="button" v-if="store.showArchived" @click="toggleArchived">' +
+          '<svg class="ic ic-sm"><use href="#i-back"></use></svg>' +
+          '<span>{{ t(\'Volver a Chats\') }}</span>' +
         '</button>' +
         '<div class="chat-list">' +
           '<button class="chat-item" type="button" v-for="c in filteredChats" :key="c.id" ' +
@@ -7760,12 +8587,17 @@ export const ChatShell = {
             '</span>' +
             '<span class="ci-main">' +
               '<span class="ci-top"><span class="ci-name">{{ titleOf(c) }}</span>' +
-              /* W13: fijado / silenciado */
-              '<span class="ci-icons" v-if="c.pinned || c.muted">' +
-                '<svg class="ic ic-sm" v-if="c.pinned" :title="t(\'Fijado\')"><use href="#i-pin"></use></svg>' +
-                '<svg class="ic ic-sm" v-if="c.muted" :title="t(\'Silenciado\')"><use href="#i-bell-off"></use></svg>' +
-              '</span>' +
-              '<span class="ci-time">{{ listTime(c) }}</span></span>' +
+              /* W60: fijado / silenciado pegados a la hora, a su izquierda. */
+              '<span class="ci-meta">' +
+                '<span class="ci-icons" v-if="c.pinned || c.muted || (store.call && store.call.chatId === c.id)">' +
+                  '<svg class="ic ic-sm ci-call" v-if="store.call && store.call.chatId === c.id"' +
+                    ' :title="store.call.state === \'incoming\' ? t(\'Llamada entrante\') : t(\'En llamada\')">' +
+                    '<use href="#i-phone"></use></svg>' +
+                  '<svg class="ic ic-sm" v-if="c.pinned" :title="t(\'Fijado\')"><use href="#i-pin"></use></svg>' +
+                  '<svg class="ic ic-sm" v-if="c.muted" :title="t(\'Silenciado\')"><use href="#i-bell-off"></use></svg>' +
+                '</span>' +
+                '<span class="ci-time">{{ listTime(c) }}</span>' +
+              '</span></span>' +
               '<span class="ci-bot">' +
                 /* W29c: pelotita de "escribiendo…" en la lista de chats */
                 '<span class="ci-typing" v-if="chatTyping(c)" ' +
@@ -7959,6 +8791,7 @@ export const ChatShell = {
                 'accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.xls,.xlsx" @change="onAttach">' +
             '</label>' +
             '<textarea class="composer-input" ref="input" rows="1" v-model="draft" ' +
+              'inputmode="text" enterkeyhint="send" autocomplete="off" ' +
               ':placeholder="t(\'Mensaje\')" @input="onInput" @click="updAc" ' +
               '@focus="keepComposerVisible" ' +
               '@keydown="onComposerKey" @keydown.esc="cancelReply"></textarea>' +
@@ -7998,17 +8831,39 @@ export const ChatShell = {
                 '<button class="ep-tab" :class="{ on: pickTab === \'gif\' }" ' +
                   'type="button" @click="setPickTab(\'gif\')">{{ t(\'GIFs\') }}</button>' +
               '</div>' +
-              '<transition name="pgflip" mode="out-in">' +
+              '<transition name="epfade" mode="out-in">' +
               '<emoji-picker v-if="pickTab === \'emo\'" key="emo" :embed="true" ' +
                 '@pick="insertEmoji">' +
               '</emoji-picker>' +
-              /* W36a: stickers con los emojis del sitio (Twemoji), no
-                 los nativos del sistema */
-              '<div class="st-grid" v-else-if="pickTab === \'st\'" key="st">' +
-                '<button class="st-e" type="button" v-for="s in stkList" :key="s" ' +
-                  '@click="onSticker(s)" :title="s">' +
-                  '<img v-if="emoFile(s)" class="emo" :src="emoSrc(s)" :alt="s">' +
-                  '<span v-else>{{ s }}</span></button>' +
+              /* W36a/W60: stickers con los emojis del sitio (Twemoji),
+                 no los nativos; los favoritos van primero y cada tile
+                 tiene su estrella para guardarlo. */
+              '<div class="st-body" v-else-if="pickTab === \'st\'" key="st">' +
+                '<template v-if="store.stkFavs.length">' +
+                  '<div class="st-sec">{{ t(\'Favoritos\') }}</div>' +
+                  '<div class="st-grid">' +
+                    '<span class="st-wrap" v-for="s in store.stkFavs" :key="\'fav-\' + s">' +
+                      '<button class="st-e" type="button" @click="onSticker(s)" :title="s">' +
+                        '<img v-if="emoFile(s)" class="emo" :src="emoSrc(s)" :alt="s">' +
+                        '<span v-else>{{ s }}</span></button>' +
+                      '<button class="st-fav on" type="button" ' +
+                        ':title="t(\'Quitar de favoritos\')" @click.stop="toggleStkFav(s)">' +
+                        '<svg class="ic ic-sm"><use href="#i-star-fill"></use></svg></button>' +
+                    '</span>' +
+                  '</div>' +
+                '</template>' +
+                '<div class="st-sec">{{ t(\'Todos los stickers\') }}</div>' +
+                '<div class="st-grid">' +
+                  '<span class="st-wrap" v-for="s in stkList" :key="s">' +
+                    '<button class="st-e" type="button" @click="onSticker(s)" :title="s">' +
+                      '<img v-if="emoFile(s)" class="emo" :src="emoSrc(s)" :alt="s">' +
+                      '<span v-else>{{ s }}</span></button>' +
+                    '<button class="st-fav" :class="{ on: isStkFav(s) }" type="button" ' +
+                      ':title="isStkFav(s) ? t(\'Quitar de favoritos\') : t(\'Guardar en stickers\')" ' +
+                      '@click.stop="toggleStkFav(s)">' +
+                      '<svg class="ic ic-sm"><use :href="isStkFav(s) ? \'#i-star-fill\' : \'#i-star\'"></use></svg></button>' +
+                  '</span>' +
+                '</div>' +
               '</div>' +
               '<div class="st-body" v-else-if="pickTab === \'gif\'" key="gif">' +
                 '<div class="st-sec" v-if="store.gifFavs.length">{{ t(\'Favoritos\') }}</div>' +
@@ -8102,9 +8957,10 @@ export const ChatShell = {
          la vista: dentro de una conversación manda el chat a pantalla
          completa (se vuelve con la flecha). */
       '<nav class="mobile-tabs" v-if="!store.activeChatId && !store.wallPanelOpen && ' +
-        '!store.meProfileOpen && !store.newChatOpen && !store.profile" ' +
+        '!store.meProfileOpen && !store.newChatOpen && !store.profile && ' +
+        '!store.settingsOpen" ' +
         ':aria-label="t(\'Navegación principal\')">' +
-        '<button class="mt-btn" type="button" :class="{ on: !store.peopleMobile && !store.settingsOpen }" ' +
+        '<button class="mt-btn" type="button" :class="{ on: !store.peopleMobile && !store.settingsOpen && !store.showArchived && !store.archiveLockPrompt }" ' +
           '@click="mobileChats">' +
           '<svg class="ic"><use href="#i-chat"></use></svg>' +
           '<span class="mt-label">{{ t(\'Chats\') }}</span>' +
@@ -8121,7 +8977,6 @@ export const ChatShell = {
           '@click="toggleArchived">' +
           '<span class="mt-ic-wrap">' +
             '<svg class="ic"><use href="#i-archive"></use></svg>' +
-            '<i class="mt-badge" v-if="archivedCount > 0">{{ archivedCount > 9 ? \'9+\' : archivedCount }}</i>' +
           '</span>' +
           '<span class="mt-label">{{ t(\'Archivados\') }}</span>' +
         '</button>' +
@@ -8149,6 +9004,13 @@ export const ChatShell = {
       '<transition name="veil">' +
       '<me-profile-edit-modal v-if="store.meEditOpen"></me-profile-edit-modal>' +
       '</transition>' +
+      '<transition name="veil">' +
+      '<username-modal v-if="store.unameOpen"></username-modal>' +
+      '</transition>' +
+      '<transition name="veil">' +
+      '<archive-lock-modal v-if="store.archiveLockPrompt"></archive-lock-modal>' +
+      '</transition>' +
+      '<download-viewer v-if="store.dlViewer"></download-viewer>' +
       '<transition name="veil">' +
       '<confirm-box v-if="store.confirmBox"></confirm-box>' +
       '</transition>' +

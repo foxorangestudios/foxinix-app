@@ -220,15 +220,16 @@ def main():
       const ub = em.querySelector('.uname-current .btn');
       out.unameBtn = !!ub;
       if (ub) ub.click();
-      const panel = await wait('.uname-edit', 4000);
+      const panel = await wait('.uname-modal', 4000);
       if (panel) {
-        await sleep(400);
+        await sleep(300);
         const warn = panel.querySelector('.uname-warn');
         out.warn = warn ? warn.textContent.replace(/\\s+/g,' ').trim() : '';
-        const confirm = panel.querySelector('.btn-full');
-        const bodyRect = em.querySelector('.mp-body').getBoundingClientRect();
-        out.confirmVisible = confirm.getBoundingClientRect().bottom <= bodyRect.bottom + 0.5;
-        out.scrollTop = em.querySelector('.mp-body').scrollTop;
+        const confirm = panel.querySelector('.m-foot .btn:not(.btn-ghost)');
+        const pr = panel.getBoundingClientRect();
+        out.confirmVisible = !!confirm &&
+          confirm.getBoundingClientRect().bottom <= pr.bottom + 0.5;
+        out.separate = !em.querySelector('.uname-edit');
       }
       return JSON.stringify(out);
     })()"""
@@ -245,8 +246,8 @@ def main():
     step("editor: avatar sobre portada y foto transparente",
          d.get("editOverlap", 0) >= 24 and d.get("editImgBg") == "rgba(0, 0, 0, 0)" and
          "has-photo" in (d.get("editImgClass") or ""), d)
-    step("editor: aviso de 12 h y confirmación visible",
-         "12 horas" in (d.get("warn") or "") and d.get("confirmVisible"), d)
+    step("editor: cambio de usuario en modal aparte con aviso y confirmación",
+         "12 horas" in (d.get("warn") or "") and d.get("confirmVisible") and d.get("separate"), d)
 
     # ---------------- cambio de @usuario ----------------
     new_name = ("w59" + tag)[:18]
@@ -261,13 +262,13 @@ def main():
       const em = await wait('.modal.meprof.mp-edit', 8000);
       const openBtn = em.querySelector('.uname-current .btn');
       openBtn.click();
-      const panel = await wait('.uname-edit', 4000);
+      const panel = await wait('.uname-modal', 4000);
       if (!panel) return 'FAIL panel';
       await sleep(300);
       const name = panel.querySelectorAll('input')[0];
       const pw = panel.querySelectorAll('input')[1];
-      const confirm = panel.querySelector('.btn-full');
-      const err = () => (panel.querySelector('.st-err') || {}).textContent || '';
+      const confirm = panel.querySelector('.m-foot .btn:not(.btn-ghost)');
+      const err = () => (panel.querySelector('.form-err') || {}).textContent || '';
       const out = {warn: !!panel.querySelector('.uname-warn')};
       setVal(name, 'A!'); setVal(pw, 'foxpass12345'); await sleep(80); confirm.click(); await sleep(250);
       out.invalid = err();
@@ -281,10 +282,11 @@ def main():
       t0=Date.now(); while(Date.now()-t0<10000 && (__fm.store.user||{}).username !== '{NEW}') await sleep(150);
       out.newName = (__fm.store.user||{}).username;
       out.changedAt = (__fm.store.user||{}).username_changed_at;
-      out.closed = !document.querySelector('.uname-edit');
-      const open2 = document.querySelector('.uname-current .btn');
-      out.btnDisabled = open2 ? open2.disabled : null;
-      out.waitText = ((em.querySelector('.uname-wait')||{}).textContent || '').replace(/\\s+/g,' ').trim();
+      out.closed = !document.querySelector('.uname-modal');
+      const open2 = em.querySelector('.uname-current .btn');
+      if (open2) { open2.click(); await sleep(250); }
+      out.lockedModal = !!document.querySelector('.uname-modal .uname-wait');
+      out.waitText = ((document.querySelector('.uname-modal .uname-wait')||{}).textContent || '').replace(/\\s+/g,' ').trim();
       let sess = null; try { sess = JSON.parse(localStorage.getItem('fm.session')); } catch(e) {}
       out.sessionName = sess && sess.user ? sess.user.username : '';
       return JSON.stringify(out);
@@ -298,8 +300,8 @@ def main():
     step("usuario: cambio correcto y sesión actualizada",
          d.get("newName") == new_name and d.get("sessionName") == new_name and
          (d.get("changedAt") or 0) > 0, d)
-    step("usuario: enfriamiento mostrado y botón desactivado",
-         d.get("btnDisabled") and "Podrás cambiarlo" in (d.get("waitText") or ""), d)
+    step("usuario: enfriamiento mostrado en el modal",
+         d.get("lockedModal") and "Podrás cambiarlo" in (d.get("waitText") or ""), d)
     st, me = ct.http("GET", a.base + "/api/users/me", token=A["access"])
     step("usuario: /users/me persiste username_changed_at",
          st == 200 and (me.get("user") or {}).get("username") == new_name and
@@ -316,11 +318,13 @@ def main():
       if (edBtn) edBtn.click();
       const em = await wait('.modal.meprof.mp-edit', 8000);
       const btn = em ? em.querySelector('.uname-current .btn') : null;
+      if (btn) { btn.click(); }
+      const um = await wait('.uname-modal', 5000);
       return JSON.stringify({
         user: (__fm.store.user||{}).username,
         changedAt: (__fm.store.user||{}).username_changed_at,
-        btnDisabled: btn ? btn.disabled : null,
-        waitText: em ? ((em.querySelector('.uname-wait')||{}).textContent||'').replace(/\\s+/g,' ').trim() : ''
+        lockedModal: !!(um && um.querySelector('.uname-wait')),
+        waitText: um ? ((um.querySelector('.uname-wait')||{}).textContent||'').replace(/\\s+/g,' ').trim() : ''
       });
     })()"""
     ok, res, log = shot(a.base + "/?v=w59-reload", SHOTS / "w59-4-recarga.png",
@@ -328,7 +332,7 @@ def main():
     d = jparse(res)
     step("usuario: el enfriamiento sobrevive a recargar",
          d.get("user") == new_name and (d.get("changedAt") or 0) > 0 and
-         d.get("btnDisabled") and "Podrás cambiarlo" in (d.get("waitText") or ""), d)
+         d.get("lockedModal") and "Podrás cambiarlo" in (d.get("waitText") or ""), d)
 
     # ---------------- perfil ajeno: modal y panel derecho ----------------
     js_peer = """(async () => {
@@ -596,9 +600,10 @@ def main():
     ih = d.get("ih") or 844
     step("móvil: los botones de la barra inferior quedan sobre la navegación",
          ok and d.get("btns") and all(b["bottom"] <= ih - 34 for b in d["btns"]), d)
-    step("móvil: avisos y llamada no cruzan el área de navegación",
+    step("móvil: avisos sobre la navegación y llamada a pantalla completa",
          (d.get("toasts") or {}).get("bottom", ih) <= ih - 34 and
-         (d.get("callbox") or {}).get("bottom", ih) <= ih - 34, d)
+         (d.get("callbox") or {}).get("top") == 0 and
+         (d.get("callbox") or {}).get("bottom") == ih, d)
 
     # ---------------- tema Android ----------------
     js_theme = """(async () => {

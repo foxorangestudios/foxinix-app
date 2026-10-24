@@ -51,7 +51,7 @@ const Root = {
     <transition-group name="pop" tag="div" class="toasts">
       <div v-for="tw in store.toasts" :key="tw.id" class="toast"
            :class="'toast-' + tw.kind" role="status">
-        <svg class="ic ic-sm"><use :href="tw.kind === 'err' ? '#i-alert' : '#i-check'"></use></svg>
+        <svg class="ic ic-sm"><use :href="tw.kind === 'err' ? '#i-alert' : (tw.kind === 'ok' ? '#i-check' : '#i-info')"></use></svg>
         <span>{{ t(tw.msg) }}</span>
       </div>
     </transition-group>`,

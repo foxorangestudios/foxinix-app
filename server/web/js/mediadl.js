@@ -429,6 +429,21 @@ function startDl(el, url) {
     setDlCls(frame, 'dl-done');
     return;
   }
+  /* W60: una nota de voz o un audio NUNCA deben esperar a que termine
+     la descarga completa para sonar. Se reproduce por streaming con la
+     URL firmada (y el formato compatible elegido arriba) mientras el
+     caché se llena en segundo plano. Antes, si la descarga fallaba a
+     los 3 s, el reproductor se quedaba sin fuente y solo aparecía el
+     botón de reintento. */
+  if (el.tagName === 'AUDIO') {
+    if (!el.currentSrc && !el.src) {
+      el.src = url;
+      try { el.load(); } catch (e) {}
+    }
+    setDlCls(frame, 'dl-done');
+    cacheMedia(url);
+    return;
+  }
   if (el.tagName === 'IMG') {
     const th = thumbOf(url);
     if (th) { el.classList.add('dl-blur'); el.src = th; }

@@ -167,7 +167,15 @@ export function currentNetwork() {
 
 export function shouldAutoDownload(type) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
-  return autoDlEnabled(type, currentNetwork());
+  const net = currentNetwork();
+  if (net) return autoDlEnabled(type, net);
+  /* W60: el límite Wi-Fi/datos es cosa del CELULAR. Si el navegador no
+     puede decir la red (Firefox de escritorio, por ejemplo), en PC se
+     usa el ajuste de Wi-Fi; en un móvil sin puente nativo no se asume
+     nada para no gastar el plan de datos. */
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  if (/android|iphone|ipad|ipod|mobile/i.test(ua)) return false;
+  return autoDlEnabled(type, 'wifi');
 }
 
 /* Firma antigua conservada para las webs cacheadas de W57. Las descargas
@@ -429,25 +437,28 @@ export async function clearDownloads() {
 }
 
 /* Abre una descarga ya guardada en los datos de la app (nunca baja ni
-   crea una copia pública). Devuelve true si pudo abrirla. */
+   crea una copia pública). Devuelve true si pudo abrirla.
+
+   W60: NO abre pestañas ni ventanas. En la app móvil eso descolocaba la
+   interfaz (la WebView se quedaba en blanco al volver). El archivo se
+   muestra en el visor interno (store.dlViewer) y se revoca el objectURL
+   al cerrarlo. */
 export async function openAppDownload(urlOrKey) {
   const blob = await getDownloadBlob(urlOrKey);
   if (!blob) return false;
+  const meta = await downloadMeta(urlOrKey);
+  const mime = blob.type || (meta && meta.mime) || '';
+  const name = (meta && meta.name) || 'archivo';
+  const kind = (meta && meta.kind) || dlCategory('', mime, name);
   const url = URL.createObjectURL(blob);
-  let win = null;
-  try {
-    win = window.open(url, '_blank');
-  } catch (e) { win = null; }
-  if (!win) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
-  setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  store.dlViewer = {
+    url: url,
+    name: name,
+    mime: mime,
+    size: blob.size,
+    kind: kind,
+    key: downloadKey(urlOrKey),
+  };
   return true;
 }
 

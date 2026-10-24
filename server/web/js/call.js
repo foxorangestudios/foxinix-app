@@ -156,10 +156,24 @@ function newPC(chatId, video) {
     });
   };
   pc.ontrack = function (ev) {
-    remoteStream = ev.streams && ev.streams.length ? ev.streams[0] : null;
-    /* toque reactivo: el <video> remoto se pinta y CallBox engancha el
-       stream en su onUpdated */
-    if (store.call) store.call.remote = true;
+    /* W60: un solo MediaStream con TODAS las pistas. Antes se guardaba
+       ev.streams[0] y, en algunos navegadores, audio y video llegaban
+       en flujos distintos: el panel podía quedarse solo con el video y
+       no sonaba la llamada de voz. */
+    if (!remoteStream) {
+      const MS = window.MediaStream || window.webkitMediaStream;
+      remoteStream = MS ? new MS() : null;
+    }
+    if (remoteStream && ev.track) {
+      let dup = false;
+      const trs = remoteStream.getTracks();
+      for (let i = 0; i < trs.length; i++) if (trs[i].id === ev.track.id) dup = true;
+      if (!dup) remoteStream.addTrack(ev.track);
+    }
+    if (store.call) {
+      store.call.remote = true;
+      if (ev.track && ev.track.kind === 'video') store.call.remoteVideo = true;
+    }
   };
   const onState = function () {
     if (!pc || !store.call || store.call.chatId !== chatId) return;
@@ -197,16 +211,26 @@ function gotIce(cand) {
 
 /* -------------------------------------------------------- acciones */
 
+/* W60: la cámara NUNCA es obligatoria. Se intenta audio+video; si la
+   cámara falta/está denegada, la llamada sigue solo con micrófono (que
+   sí es imprescindible y se puede silenciar). */
+function acquireMedia(wantVideo) {
+  return navigator.mediaDevices.getUserMedia({
+    audio: true, video: !!wantVideo,
+  }).catch(function (err) {
+    if (!wantVideo) throw err;
+    return navigator.mediaDevices.getUserMedia({
+      audio: true, video: false,
+    });
+  });
+}
+
 export async function startCall(chat, video) {
   if (store.call) { toast(t('Ya hay una llamada en curso')); return; }
   /* W58: si el usuario saltó el permiso al arrancar, se vuelve a pedir
      justo al usar la función; sin permiso no se inicia la llamada. */
   if (!(await ensurePermission('mic'))) {
     toast(t('Permiso de micrófono necesario para llamar'), 'err');
-    return;
-  }
-  if (video && !(await ensurePermission('camera'))) {
-    toast(t('Permiso de cámara necesario para videollamada'), 'err');
     return;
   }
   if (store.call) { toast(t('Ya hay una llamada en curso')); return; }
@@ -221,7 +245,7 @@ export async function startCall(chat, video) {
   if (starting) { toast(t('Ya hay una llamada en curso')); return; }
   starting = true;
   const gen = ++callGen;
-  navigator.mediaDevices.getUserMedia({ audio: true, video: !!video })
+  acquireMedia(video)
     .then(function (stream) {
       if (gen !== callGen || !store.hasSession) {
         starting = false;
@@ -230,13 +254,20 @@ export async function startCall(chat, video) {
       }
       starting = false;
       localStream = stream;
+      const hasCam = stream.getVideoTracks().length > 0;
       store.call = {
         chatId: chat.id, peerId: peer ? peer.id : 0, peer: peer,
-        state: 'outgoing', video: !!video, muted: false, camOff: false,
-        startedAt: 0, remote: false,
+        state: 'outgoing',
+        /* video = la llamada puede mostrar/recibir video. Si el usuario
+           pidió cámara y no la hay, la llamada sigue siendo de voz. */
+        video: !!video && hasCam,
+        hasCam: hasCam,
+        muted: false, camOff: !hasCam,
+        remote: false, remoteVideo: false, remoteMuted: false,
+        startedAt: 0,
       };
       armCallTimer(CONNECT_TIMEOUT + 15000, 'timeout');
-      newPC(chat.id, video);
+      newPC(chat.id, !!video);
       stream.getTracks().forEach(function (tr) { pc.addTrack(tr, stream); });
       return pc.createOffer();
     })
@@ -248,7 +279,7 @@ export async function startCall(chat, video) {
       if (gen !== callGen || !store.call || !pc) return;
       const sent = sendFn({
         type: 'call_offer', chat_id: store.call.chatId,
-        video: !!video, sdp: pc.localDescription.sdp,
+        video: !!store.call.video, sdp: pc.localDescription.sdp,
       });
       if (!sent) { endCall(null); toast(t('Sin conexión')); }
     })
@@ -267,17 +298,15 @@ export async function acceptCall() {
     toast(t('Permiso de micrófono necesario para llamar'), 'err');
     return;
   }
-  if (ev.video && !(await ensurePermission('camera'))) {
-    toast(t('Permiso de cámara necesario para videollamada'), 'err');
-    return;
-  }
   if (!store.call || store.call.state !== 'incoming' || !pendingOffer) return;
   if (pendingOffer !== ev || starting) return;
   stopRing();
   stopCallTimer();
   starting = true;
   const gen = ++callGen;
-  navigator.mediaDevices.getUserMedia({ audio: true, video: !!ev.video })
+  /* W60: contestar una videollamada sin cámara también es válido: el
+     micrófono es obligatorio, la cámara no. */
+  acquireMedia(!!ev.video)
     .then(function (stream) {
       if (gen !== callGen || !store.call || store.call.state !== 'incoming'
           || !pendingOffer || pendingOffer !== ev || !store.hasSession) {
@@ -287,7 +316,13 @@ export async function acceptCall() {
       }
       starting = false;
       localStream = stream;
+      const hasCam = stream.getVideoTracks().length > 0;
       store.call.state = 'connecting';
+      store.call.hasCam = hasCam;
+      store.call.camOff = !hasCam;
+      store.call.video = !!(ev.video || hasCam);
+      store.call.remote = false;
+      store.call.remoteVideo = false;
       armCallTimer(CONNECT_TIMEOUT, 'timeout');
       newPC(ev.chat_id, !!ev.video);
       stream.getTracks().forEach(function (tr) { pc.addTrack(tr, stream); });
@@ -379,7 +414,8 @@ export function handleCallEvent(ev) {
       peerId: ev.from ? ev.from.id : 0,
       peer: ev.from || null,
       state: 'incoming', video: !!ev.video,
-      muted: false, camOff: false, startedAt: 0, remote: false,
+      hasCam: false, muted: false, camOff: true, startedAt: 0,
+      remote: false, remoteVideo: false, remoteMuted: false,
     };
     startRing();
     armCallTimer(RING_TIMEOUT, 'missed');
