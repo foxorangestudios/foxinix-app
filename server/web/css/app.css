@@ -773,12 +773,19 @@ html.native-bg *::after {
   border: 2.5px solid var(--st-ring);
   background-origin: border-box;
 }
-/* W60: Ausente = la luna ocupa TODO el círculo de estado (antes era
-   una luna de 8 px dentro de un disco del color del tema y se veía
-   diminuta). El disco entero se recorta con la silueta de la luna. */
+/* W61 fix: Ausente conserva la luna grande, pero dentro del disco de
+   estado como en Discord. El ::after es el círculo de fondo; el ::before
+   dibuja la luna sobre él ocupando todo el badge (no una luna pequeña). */
 .av-wrap.on.st-busy::after {
+  background: var(--st-ring);
+}
+.av-wrap.on.st-busy::before {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  right: -2px; bottom: -2px;
+  width: 14px; height: 14px;
   background: var(--st-busy);
-  border-color: transparent;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
   -webkit-mask-position: center;
@@ -788,7 +795,6 @@ html.native-bg *::after {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
-.av-wrap.on.st-busy::before { content: none; }
 /* W57: No molestar = rojo lleno con barra gruesa del color del tema.
    Sin aro transparente: el borde también es del color del tema. */
 .av-wrap.on.st-dnd::after {
@@ -831,8 +837,8 @@ html.native-bg *::after {
 .profile-panel .pf-avwrap.on.st-busy::before,
 .meprof .pf-avwrap.on.st-busy::before,
 .pmodal .pf-avwrap.on.st-busy::before {
-  right: 3px; bottom: 3px;
-  width: 12px; height: 12px;
+  right: -2px; bottom: -2px;
+  width: 22px; height: 22px;
 }
 .avatar {
   width: 48px; height: 48px;
@@ -3103,8 +3109,8 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
   .sdot.sd-busy::before {
     content: '';
     position: absolute;
-    left: 2px; top: 2px;
-    width: 6px; height: 6px;
+    left: -2px; top: -2px;
+    width: 14px; height: 14px;
     background: var(--st-busy);
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fff' d='M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z'/%3E%3C/svg%3E");
