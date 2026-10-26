@@ -86,6 +86,28 @@
   --st-slash: #1e1f22;
 }
 
+/* W65: oscuro puro (OLED). `dark` sigue siendo el intermedio de siempre:
+   los valores guardados no cambian, sólo su nombre visible. */
+[data-theme="black"] {
+  --bg: #000000;
+  --panel: #080808;
+  --panel2: #191919;
+  --header: #000000;
+  --border: #262626;
+  --t0: #ffffff;
+  --t1: #e7e7e7;
+  --t2: #9a9a9a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .75);
+  --float: #111111;
+  --chat-bg: #000000;
+  --bubble-you: #141414;
+  --bubble-me: var(--accent-d);
+  --bubble-me-fg: #ffffff;
+  --sel: #333333;
+  --row-hover: rgba(255, 255, 255, .075);
+  --st-ring: #000000;
+}
+
 * { box-sizing: border-box; }
 
 html, body { height: 100%; margin: 0; }
@@ -98,6 +120,29 @@ body {
   font-size: 15px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+}
+
+/* W65: la interfaz no se selecciona como si fuera una página (en Android
+   el long-press abría el menú de selección y "robaba" el primer toque).
+   El contenido de los mensajes y los campos de escritura sí se pueden
+   seleccionar/copiar. */
+body * {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea, select, [contenteditable="true"],
+.msgs .msg, .msgs .msg * {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+/* `manipulation` elimina el retardo/doble-toque de Android en controles
+   sin impedir el scroll ni el zoom de pellizco. */
+button, a, input, textarea, select, label, [role="button"] {
+  touch-action: manipulation;
 }
 
 [v-cloak] { display: none !important; }
@@ -239,8 +284,8 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 
 /* W38: pantalla de arranque compartida (boot-screen.js): icono de la
-   app, sello de cifrado, barra de progreso (scaleX, sólo transform)
-   y el texto de la fase real. Todo centrado en el medio. */
+   app, barra de progreso (scaleX, sólo transform) y el texto de la
+   fase real. Todo centrado en el medio. */
 .bp-screen {
   display: flex;
   flex-direction: column;
@@ -250,16 +295,8 @@ textarea.input { resize: vertical; min-height: 74px; }
 }
 .bp-logo {
   width: 72px; height: 72px;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
-.bp-e2e {
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  margin-bottom: 20px;
-}
-.bp-e2e > * + * { margin-left: 8px; }
-.bp-e2e .ic { color: var(--accent); }
 .bp-bar {
   width: 220px; max-width: 70vw;
   height: 6px;
@@ -660,6 +697,36 @@ input[type="range"].wp-range::-moz-range-thumb {
 .icon-btn:hover { background: var(--panel2); color: var(--t1); }
 /* W7: botón encendido (ej.: panel de info abierto) */
 .icon-btn.on { color: var(--accent); background: var(--panel2); }
+/* W64: sala de grupo abierta — llamada verde con número de personas. */
+.icon-btn.call-live {
+  position: relative;
+  color: var(--online);
+  background: rgba(35, 165, 90, .14);
+}
+.icon-btn.call-live:hover {
+  color: #fff;
+  background: var(--online);
+}
+.call-live .call-count {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--online);
+  color: #fff;
+  font-size: 9.5px;
+  line-height: 16px;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+}
+.icon-btn.call-live:hover .call-count {
+  background: #fff;
+  color: var(--online);
+}
 
 .ws-dot {
   width: 8px; height: 8px;
@@ -1216,7 +1283,8 @@ audio.b-audio { display: none; }
   height: 26px;
   margin: 0 10px;
   cursor: pointer;
-  overflow: hidden;
+  overflow: visible;
+  touch-action: pan-y;
 }
 .wave i {
   flex: 1;
@@ -1228,6 +1296,21 @@ audio.b-audio { display: none; }
   transition: opacity .1s linear;   /* W16: borde de onda continuo */
 }
 .wave i.on { opacity: .95; }
+/* W63: círculo arrastrable sobre la barra de progreso de la nota de voz. */
+.wave-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+  width: 10px; height: 10px;
+  background: var(--accent, #ff751f);
+  border: 2px solid var(--panel, #23272e);
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 2;
+  pointer-events: auto;
+}
+.wave-thumb:active { width: 14px; height: 14px; }
 .au-time {
   font-size: 11.5px;
   color: var(--t2);
@@ -1578,18 +1661,6 @@ audio.b-audio { display: none; }
   text-overflow: ellipsis;
 }
 .reply-bar .icon-btn { flex: none; }
-/* W30d: tira de aviso de cifrado pendiente en el composer */
-.e2e-pend-bar {
-  display: flex;
-  align-items: center;
-  font-size: 12.5px;
-  color: var(--t2);
-  background: var(--accent-wash);
-  border-radius: 8px;
-  padding: 6px 10px;
-}
-.e2e-pend-bar .ic { color: var(--accent); flex: none; margin-right: 7px; }
-.e2e-pend-bar span { min-width: 0; }
 .comp-mic { flex: none; }
 
 /* ---------- grabación de nota de voz ---------- */
@@ -1725,16 +1796,21 @@ audio.b-audio { display: none; }
 .ep-tabs {
   display: flex;
   justify-content: space-between;
-  padding: 0 8px 6px;
+  padding: 0 6px 6px;
   border-bottom: 1px solid var(--border);
 }
 .ep-tab {
+  flex: 1;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: none;
   font-size: 16px;
   line-height: 1;
-  padding: 5px;
-  border-radius: 6px;
+  padding: 8px 5px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background .12s;
 }
@@ -1745,22 +1821,22 @@ audio.b-audio { display: none; }
 .emo-picker .ep-body { display: flex; height: 258px; }
 .ep-cats {
   flex: none;
-  width: 36px;
-  padding: 4px 1px;
+  width: 42px;
+  padding: 4px 2px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 .ep-cat {
   display: block;
-  width: 32px;
-  height: 30px;
-  margin: 1px 0;
+  width: 38px;
+  height: 38px;
+  margin: 2px 0;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   background: none;
   font-size: 17px;
-  line-height: 30px;
+  line-height: 38px;
   text-align: center;
   cursor: pointer;
   transition: background .12s;
@@ -1787,9 +1863,10 @@ audio.b-audio { display: none; }
 }
 .ep-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
 }
 .ep-e {
+  min-height: 38px;
   border: 0;
   background: none;
   display: flex;
@@ -1797,17 +1874,20 @@ audio.b-audio { display: none; }
   justify-content: center;
   font-size: 20px;
   line-height: 1;
-  padding: 5px;
+  padding: 6px;
   margin: 1px;                 /* W5: nada de gap (el linter lo vetaría) */
-  border-radius: 6px;
+  border-radius: 7px;
   cursor: pointer;
   transition: transform .1s, background .12s;
 }
 .ep-e:hover { background: var(--panel2); transform: scale(1.18); }
 /* W29b: emojis Twemoji inline (svg escalable; el alt trae el Unicode) */
 .emo { width: 1.35em; height: 1.35em; vertical-align: -0.35em; display: inline-block; }
-.emo-picker .ep-e .emo { width: 22px; height: 22px; }
-.emo-picker .ep-cat .emo { width: 19px; height: 19px; vertical-align: -4px; }
+/* W65: si una imagen de emoji falla, se deja el hueco antes que pintar
+   el glyph del sistema mezclado con Noto/Twemoji. */
+.emo.emo-broken { visibility: hidden; }
+.emo-picker .ep-e .emo { width: 24px; height: 24px; }
+.emo-picker .ep-cat .emo { width: 22px; height: 22px; vertical-align: -4px; }
 .bubble.sticker .b-text .emo, .bubble.emo-big .b-text .emo {
   width: 52px; height: 52px; vertical-align: -0.3em;
 }
@@ -2108,32 +2188,33 @@ audio.b-audio { display: none; }
 .bubble.sticker .b-text, .bubble.emo-big .b-text {
   font-size: 42px; line-height: 1.2;
 }
-/* W42: la hora y las palomitas de los contenidos GRANDES (un solo
-   emoji, GIF, sticker) van en una fila SEPARADA debajo del contenido,
-   en pastillita (referencia: WhatsApp) — nunca encima. Recibido: la
-   pastillita queda abajo a la izquierda; enviada: abajo a la
-   derecha. z-index 5 → sigue visible sobre el tapado spoiler (4). */
+/* W42/W62: la hora y las palomitas de los contenidos GRANDES (un solo
+   emoji, GIF, sticker) van debajo del contenido. W65: sobre el fondo
+   transparente del mensaje llevan una pastilla oscura legible (en el
+   tema claro el texto blanco a secas desaparecía). Recibido: izquierda;
+   enviado: derecha. z-index 5 → visible sobre el spoiler (4). */
 .bubble.emo-big { position: relative; }
 .bubble.emo-big .b-meta,
 .bubble.gif .b-meta,
 .bubble.sticker .b-meta {
   position: static;
   width: max-content;
-  margin: 6px 0 0;
-  padding: 2px 8px;
+  margin: 4px 0 0;
+  padding: 3px 7px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, .55);
+  background: rgba(0, 0, 0, .52);
   color: #fff;
-  font-size: 11px;
+  font-size: 10.5px;
+  text-shadow: none;
   z-index: 5;
 }
 .msg.mine .bubble.emo-big .b-meta,
 .msg.mine .bubble.gif .b-meta,
 .msg.mine .bubble.sticker .b-meta {
-  margin: 6px 0 0 auto;
+  margin: 4px 0 0 auto;
 }
 .bubble.emo-big .b-meta .tick, .bubble.gif .b-meta .tick,
-.bubble.sticker .b-meta .tick { color: #fff; }
+.bubble.sticker .b-meta .tick { color: rgba(255, 255, 255, .86); }
 .bubble.emo-big .b-meta .b-time, .bubble.gif .b-meta .b-time,
 .bubble.sticker .b-meta .b-time { color: #fff; }
 
@@ -2353,6 +2434,42 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
   transition: border-color .12s, color .12s;
 }
 .ap-opt.on { border-color: var(--accent); color: var(--t1); font-weight: 600; }
+
+/* W65: selector de tema por muestras de color (sin nombres visibles). */
+.ap-themes { display: flex; padding: 4px 16px 10px; }
+.ap-theme {
+  position: relative;
+  width: 88px;
+  height: 58px;
+  margin-right: 10px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  transition: transform .1s, border-color .12s;
+}
+.ap-theme:hover { transform: scale(1.03); }
+.ap-theme.on { border-color: var(--accent); }
+.ap-theme-art { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: block; }
+.ap-theme-side { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; display: block; }
+.ap-theme-bubble { position: absolute; top: 13px; right: 8px; width: 38px; height: 14px; border-radius: 7px 7px 3px 7px; display: block; }
+.ap-theme-accent { position: absolute; right: 8px; bottom: 10px; width: 22px; height: 8px; border-radius: 4px; display: block; opacity: .95; }
+.ap-theme-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.ap-theme-check .ic { width: 12px; height: 12px; }
 
 .ap-swatches { display: flex; flex-wrap: wrap; padding: 4px 16px 6px; }
 .ap-sw {
@@ -2650,16 +2767,59 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 }
 .modal.meprof { width: min(430px, 100%); }
 .modal.confirm { width: min(400px, 100%); }
+.modal.req-sent { width: min(380px, 100%); }
+.reqsent-veil { z-index: 45; }
+.req-sent-body { padding: 18px 22px 4px; text-align: center; }
+.req-sent-check {
+  width: 66px;
+  height: 66px;
+  margin: 0 auto 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-wash, rgba(255, 117, 31, .16));
+  color: var(--accent);
+}
+.req-sent-check .ic { width: 36px; height: 36px; }
+.req-sent-lead {
+  margin: 0 0 8px;
+  color: var(--t0);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.req-sent-wait {
+  margin: 0;
+  color: var(--t2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.req-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.req-sent-foot { padding: 14px 22px 20px; }
+.req-sent-foot .btn { width: 100%; }
 .modal.settings,
 .modal.meprof,
-.modal.confirm {
+.modal.confirm,
+.modal.req-sent {
   max-height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
 }
 .modal.settings > header,
 .modal.meprof > header,
-.modal.confirm > header { flex: none; }
+.modal.confirm > header,
+.modal.req-sent > header { flex: none; }
 
 /* la nav y el cuerpo comparten la columna scrollable */
 .st-cols {
@@ -2770,6 +2930,16 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 }
 .st-col b { font-size: 14px; font-weight: 600; }
 .st-col span { font-size: 12.5px; line-height: 1.45; color: var(--t2); }
+/* W63: tonos de mensaje y llamada. Sin gap (FF78): márgenes. */
+.tone-pick { display: flex; align-items: center; flex: 1; min-width: 0; }
+.tone-pick .tone-select { flex: 1; min-width: 110px; margin-right: 8px; font-size: 13px; padding: 5px 8px; }
+.tone-play { padding: 4px 10px; font-size: 12px; flex: none; white-space: nowrap; }
+.tone-upload { display: flex; align-items: center; }
+.tone-upload > * + * { margin-left: 8px; }
+.tone-up { display: inline-flex; align-items: center; }
+.tone-up > * + * { margin-left: 6px; }
+.tone-note a { color: var(--accent, #ff751f); text-decoration: underline; }
+.tone-note a:focus { outline: 2px solid var(--accent, #ff751f); outline-offset: 2px; }
 /* W50: lista de descargas guardadas */
 /* W57: filas de descarga automática (tipo + Wi-Fi + datos) */
 .dl-auto-row {
@@ -3336,6 +3506,23 @@ body { font-size: calc(15px * var(--fs)); }
 .ctx-ic { flex: none; margin-right: 8px; color: var(--t2); }
 .ctx-item:hover .ctx-ic { color: var(--t1); }
 .ctx-item.danger .ctx-ic { color: var(--err); }
+/* W64: píldora de aforo en "Entrar en la llamada - 👤 N". */
+.ctx-label { flex: 1; min-width: 0; }
+.ctx-sep { flex: none; margin: 0 7px 0 5px; color: var(--t2); }
+.ctx-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  margin-left: 12px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 999px;
+  background: rgba(35, 165, 90, .14);
+  color: var(--online);
+  font-size: 12px;
+  line-height: 16px;
+}
+.ctx-pill .ic { margin-right: 3px; color: var(--online); }
+.ctx-pill b { font-weight: 700; }
 .ctx-item + .ctx-item { margin-top: 1px; }
 .ctx-item:hover { background: var(--panel2); }
 .ctx-item.danger { color: var(--err); }
@@ -3780,6 +3967,17 @@ body { font-size: calc(15px * var(--fs)); }
 }
 .ci-icons .ic { margin-right: 4px; }
 .ci-icons .ci-call { color: var(--online); }
+/* W64: llamada de grupo abierta en la lista de chats. */
+.ci-icons .ci-call-live {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  color: var(--online);
+  font-size: 9.5px;
+  line-height: 1;
+}
+.ci-icons .ci-call-live .ic { margin-right: 1px; }
+.ci-icons .ci-call-live b { font-weight: 700; }
 .badge.muted { opacity: .55; }
 
 /* W37b: buscar en el chat como MODAL (antes era un panel lateral).
@@ -4057,20 +4255,24 @@ body { font-size: calc(15px * var(--fs)); }
 .pf-idrow {
   display: flex;
   align-items: flex-start;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   position: relative;
   z-index: 2;
   padding: 0 2px;
 }
 .pf-avwrap { margin-top: -48px; margin-left: 2px; flex: none; position: relative; z-index: 3; }
-.pf-idcol {
-  flex: 1 1 120px;
-  min-width: 0;
-  padding: 12px 0 0 14px;
+/* W62: el nombre y el @usuario van DEBAJO del avatar (como Discord).
+   El hueco a la derecha del avatar queda para el estado, ancho y legible. */
+.pf-idbelow {
+  padding: 7px 2px 0 4px;
   text-align: left;
 }
-.pf-idcol .pp-name { margin-top: 0; }
-.pf-idcol .pp-user { margin-top: 1px; }
+.pf-idbelow .pp-name {
+  margin-top: 0;
+  font-size: 24px;
+  line-height: 1.18;
+}
+.pf-idbelow .pp-user { margin-top: 3px; }
 .pf-quote {
   position: relative;
   flex: 1 1 132px;
@@ -4079,29 +4281,22 @@ body { font-size: calc(15px * var(--fs)); }
   padding: 9px 12px 8px;
   background: var(--panel2);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   color: var(--t1);
   font-size: 13px;
   line-height: 1.4;
   text-align: left;
 }
 .pf-quote::before,
-.pf-quote::after {
-  content: '“';
-  position: absolute;
-  color: var(--accent);
-  font: 700 26px/1 Georgia, serif;
-  opacity: .9;
-}
-.pf-quote::before { left: 4px; top: -13px; }
-.pf-quote::after { content: '”'; right: 4px; bottom: -16px; }
+.pf-quote::after { content: none; }
 .pf-quote-text { display: block; overflow-wrap: anywhere; }
 .pf-quote-static { cursor: default; }
 .pf-status-wrap {
   position: relative;
   flex: 1 1 150px;
-  max-width: 190px;
-  margin: 8px 0 0 8px;
+  max-width: none;
+  min-width: 0;
+  margin: 14px 0 0 12px;
 }
 .pf-status-wrap .pf-quote {
   display: flex;
@@ -4117,9 +4312,12 @@ body { font-size: calc(15px * var(--fs)); }
 .pf-status-btn .pf-quote-text {
   flex: 1;
   min-width: 0;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .pf-quote-chev { flex: none; margin-left: 4px; color: var(--t2); transition: transform .14s; }
 .pf-quote-chev.open { transform: rotate(180deg); }
@@ -4209,13 +4407,17 @@ body { font-size: calc(15px * var(--fs)); }
 .profile-panel .pf-avwrap { margin-top: -36px; }
 .profile-panel .avatar.pp-av { width: 72px; height: 72px; font-size: 26px; }
 .profile-panel .avatar.pp-av .fox { width: 48px; height: 48px; }
-.profile-panel .pf-idcol { padding-top: 8px; }
+.profile-panel .pf-idbelow { padding-top: 4px; }
+.profile-panel .pf-idbelow .pp-name { font-size: 19px; }
 .profile-panel .pf-quote {
-  flex-basis: 100%;
+  flex-basis: auto;
   max-width: none;
-  margin: 9px 0 0;
+  margin: 0;
 }
-.profile-panel .pf-status-wrap { max-width: none; }
+.profile-panel .pf-status-wrap {
+  max-width: none;
+  margin: 10px 0 0 10px;
+}
 
 /* Editor de portada */
 .pf-edit-banner { position: relative; margin: 2px 0 12px; }
@@ -4256,7 +4458,7 @@ body { font-size: calc(15px * var(--fs)); }
   margin-top: 2px; font-size: 12px; color: var(--t2);
 }
 .pf-pos-row label { margin-right: 8px; white-space: nowrap; }
-.pf-pos-range { flex: 1; min-width: 110px; margin-right: 8px; accent-color: var(--accent); }
+.pf-pos-range { flex: 1; min-width: 110px; margin-right: 8px; }
 .pf-pos-val { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 .pf-bio-count { margin-top: 3px; text-align: right; font-size: 11px; color: var(--t3); }
 .pf-bio-more {
@@ -4556,6 +4758,38 @@ body { font-size: calc(15px * var(--fs)); }
   top: auto; bottom: 24px; height: 500px;
   max-height: calc(100vh - 48px);
 }
+/* W62: grupo y ventana de llamada ampliada. */
+.callbox.full {
+  top: 0; right: 0; bottom: 0; left: 0;
+  width: auto; height: auto; max-width: none; max-height: none;
+  z-index: 90;
+}
+.callbox.full .call-panel {
+  border: 0; border-radius: 0; box-shadow: none;
+}
+.callbox.full .call-head { cursor: default; }
+.callbox.dragging .call-head { cursor: grabbing; }
+.call-head { cursor: grab; touch-action: none; }
+.call-full {
+  flex: 0 0 auto; width: 32px; height: 32px; margin-left: 8px;
+  background: var(--panel2);
+}
+.call-screen.on { background: var(--accent); color: #fff; }
+.call-participants.group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(105px, 1fr);
+  grid-gap: 8px;   /* grid-gap sí existe en FF78; gap flex no */
+}
+.call-participants.group > * + * { margin-top: 0; }
+.call-participants.group.solo { grid-template-columns: minmax(0, 1fr); }
+.call-participants.group .call-tile { min-height: 105px; }
+.call-peer-video {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+  width: 100%; height: 100%; z-index: 1;
+  background: #000; object-fit: cover;
+}
+
 .call-panel {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
   background: var(--float); border: 1px solid var(--border);
@@ -4725,24 +4959,36 @@ body { font-size: calc(15px * var(--fs)); }
   box-shadow: 0 12px 30px rgba(0, 0, 0, .55);
 }
 .call-menu button {
-  display: block; width: 100%; padding: 8px 10px;
+  display: flex; align-items: center; width: 100%; padding: 8px 10px;
   border: 0; border-radius: 6px; background: none;
   color: var(--t1); font: inherit; font-size: 13px; text-align: left;
   cursor: pointer;
 }
+.call-menu button .ic { flex: none; margin-right: 8px; color: var(--t2); }
 .call-menu button:hover { background: var(--panel2); color: var(--t0); }
+.call-menu button:hover .ic { color: var(--t0); }
 .call-menu button.danger { color: var(--err); }
 
-/* ================== W29d: spoilers ================== */
-/* Capa opaca que tapa TODA la burbuja (texto, medios y acciones) hasta
-   que se toca. Sin backdrop-filter (FF78): fondo sólido translúcido. */
+/* ================== W29d/W62: spoilers ================== */
+/* Fondo difuminado con la propia imagen/GIF/sticker. Se pinta sólo
+   cuando el spoiler es multimedia; el texto conserva la capa oscura. */
+.b-spoil-bg {
+  position: absolute;
+  left: -8px; right: -8px; top: -8px; bottom: -8px;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  border-radius: inherit;
+  filter: blur(16px);
+  transform: scale(1.06);
+  pointer-events: none;
+}
 .b-spoil-ov {
   position: absolute;
   left: 0; right: 0; top: 0; bottom: 0;
   z-index: 4;
   display: flex;
-  flex-direction: row;   /* W29j: "[ojo] Texto" en UNA línea: en dos
-                            líneas el texto caía sobre la hora */
+  flex-direction: row;   /* W29j: "[ojo] Texto" en UNA línea */
   align-items: flex-start;   /* W29k: rótulo ARRIBA, nunca sobre .b-meta */
   justify-content: center;
   border: 0;
@@ -4756,21 +5002,41 @@ body { font-size: calc(15px * var(--fs)); }
   text-align: center;
   cursor: pointer;
 }
+.b-spoil-pill {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .b-spoil-ov .ic { width: 20px; height: 20px; }
-.b-spoil-ov span {
+.b-spoil-pill > span {
   margin-left: 4px;    /* sin gap: FF78 */
   margin-top: 2px;     /* centrado a ojo contra el icono de 20 px */
-  white-space: nowrap; /* W29k: SIEMPRE una línea (dos tapaban la hora) */
+  white-space: nowrap; /* W29k: SIEMPRE una línea */
+}
+/* W62: spoiler con imagen de fondo: velo suave + botón central. */
+.b-spoil-ov.has-bg {
+  align-items: center;
+  padding: 0;
+  background: rgba(0, 0, 0, .20);
+}
+.b-spoil-ov.has-bg .b-spoil-pill {
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: rgba(16, 17, 21, .84);
+  border: 1px solid rgba(255, 255, 255, .18);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .45);
 }
 /* W29k: burbuja corta que quepa "[ojo] Mostrar Spoiler" sin cortar */
 .bubble.is-spoiled { min-width: 160px; }
 .b-spoil-ov:active { background: rgba(0, 0, 0, .84); }
+.b-spoil-ov.has-bg:active { background: rgba(0, 0, 0, .28); }
 /* Mientras la capa tapa, el contenido NO se pinta (aunque sea con
    opacidad reducida: sobre burbujas naranjas el texto asomaba).
    W29h: la hora y las palomitas (.b-meta) NO se tapan: quedan
    pintadas ENCIMA de la capa, en un color claro fijo para que se
-   lean sobre la capa oscura en cualquier tema. */
-.bubble.is-spoiled > *:not(.b-spoil-ov):not(.b-meta) { visibility: hidden; }
+   lean sobre la capa oscura en cualquier tema. W62: el fondo
+   difuminado tampoco se oculta. */
+.bubble.is-spoiled > *:not(.b-spoil-ov):not(.b-spoil-bg):not(.b-meta) { visibility: hidden; }
 .bubble.is-spoiled .b-meta {
   position: relative;
   z-index: 5;
@@ -4811,51 +5077,6 @@ body { font-size: calc(15px * var(--fs)); }
 .h12-select { width: 96px; flex: none; }
 /* W40: desplegable del estilo de emojis (Nativo/Google/Twemoji) */
 .emo-select { width: 168px; flex: none; }
-
-/* ============ W29f: cifrado E2E en el panel de info ============ */
-.pp-e2e {
-  flex: none;
-  border-top: 1px solid var(--border);
-  padding: 10px 16px 14px;
-}
-.pp-e2e-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-/* W39: `.pp-e2e-txt` (título + estado) ya no existe: el panel solo
-   queda la nota centrada de la sección siguiente. */
-/* W30d: aviso de cifrado pendiente (el par aún no publica su clave) */
-.pp-e2e-pend {
-  display: flex;
-  align-items: center;
-  margin-top: 8px;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  color: var(--t2);
-  background: var(--accent-wash);
-  border-radius: 8px;
-}
-.pp-e2e-pend .ic { color: var(--accent); flex: none; margin-right: 6px; }
-.pp-e2e-pend span { min-width: 0; }
-/* W39: el panel ya no muestra estado ni botones — solo la nota
-   centrada "Cifrado de extremo a extremo" con la llave a la izquierda. */
-.pp-e2e-center { justify-content: center; color: var(--t2); }
-.pp-e2e-center .ic { color: var(--accent); margin-right: 6px; flex: none; }
-.pp-e2e-center b { font-size: 13px; font-weight: 600; }
-
-/* W39: modal del código de verificación E2E — números bien grandes y
-   centrados para poder compararlos de un vistazo con el contacto. */
-.sas-body { padding: 20px 22px 24px; text-align: center; }
-.sas-ic { color: var(--accent); width: 26px; height: 26px; }
-.sas-code {
-  font-size: 30px;
-  font-weight: 700;
-  letter-spacing: 5px;
-  color: var(--t0);
-  margin: 14px 0 10px;
-}
-.sas-hint { font-size: 13px; line-height: 1.45; color: var(--t2); }
 
 /* ============================ W36: lote de optimización y detalle ============================ */
 
@@ -5435,6 +5656,13 @@ body { font-size: calc(15px * var(--fs)); }
     top: 0; right: 0; bottom: 0; left: 0;
     width: auto; max-width: none; height: auto;
   }
+  /* Si la ventana se arrastró en escritorio y luego se reduce a móvil,
+     los estilos inline no deben dejar el panel fuera de pantalla. */
+  .callbox:not(.minimized) {
+    top: 0 !important; right: 0 !important;
+    bottom: 0 !important; left: 0 !important;
+    width: auto !important; height: auto !important;
+  }
   .callbox.minimized {
     top: auto; left: auto; right: 14px;
     bottom: calc(82px + var(--sab, 0px));
@@ -5598,12 +5826,11 @@ body { font-size: calc(15px * var(--fs)); }
 /* W58: perfil y menú de estado en pantallas chicas */
 @media (max-width: 760px) {
   .pf-view .pf-idrow { padding-left: 0; padding-right: 0; }
-  .pf-view .pf-idcol { flex-basis: calc(100% - 122px); padding-top: 10px; }
   .pf-status-wrap,
   .pf-view .pf-status-wrap {
-    flex-basis: 100%;
+    flex-basis: auto;
     max-width: none;
-    margin: 8px 0 0;
+    margin: 12px 0 0 10px;
   }
   .pf-status-wrap .pf-quote { width: 100%; }
   .pf-status-menu {
@@ -5974,12 +6201,12 @@ button.dl-group .dl-group-head { pointer-events: none; }
 
 /* --- toasts con icono propio y aspecto menos crudo --- */
 .toast {
-  gap: 9px;
   padding: 11px 14px;
   border-radius: 14px;
   background: var(--panel2);
   box-shadow: 0 10px 28px rgba(0, 0, 0, .28), var(--shadow);
 }
+.toast > * + * { margin-left: 9px; }
 .toast > .ic { flex: none; }
 .toast > span { flex: 1; min-width: 0; line-height: 1.35; }
 .toast-ok > .ic { color: var(--accent); }
@@ -6031,8 +6258,10 @@ button.dl-group .dl-group-head { pointer-events: none; }
   .archive-lock-card p { max-width: 320px; }
   .al-ic { width: 84px; height: 84px; }
 
-  /* Ajustes ocupa la pantalla y la barra inferior se oculta (v-if). */
-  .settings-veil { z-index: 40; padding: 0; }
+  /* W62: Ajustes ocupa la pantalla. En la portada de categorías la
+     barra inferior sigue visible (z-index 30 > 29); al entrar a una
+     categoría, ChatApp la oculta y el botón atrás vuelve a la portada. */
+  .settings-veil { z-index: 29; padding: 0; }
   .modal.settings {
     width: 100%;
     height: 100%;
@@ -6040,6 +6269,10 @@ button.dl-group .dl-group-head { pointer-events: none; }
     padding-bottom: 0;
     border: 0;
     border-radius: 0;
+  }
+  .modal.settings.is-home {
+    padding-bottom: 58px;
+    padding-bottom: calc(58px + var(--sab, 0px));
   }
   .modal.settings > header .icon-btn { display: inline-flex; }
   .modal.settings .m-tabs { display: none; }
@@ -6098,4 +6331,103 @@ button.dl-group .dl-group-head { pointer-events: none; }
     width: 100%;
     max-height: 72vh;
   }
+}
+
+/* ============================================================
+   W65: toques táctiles, hitboxes y ajustes sin desbordes.
+   ============================================================ */
+
+/* Pulsación estilo Android/Google: el control responde al primer toque,
+   incluso cuando el navegador cree que hay :hover. */
+@media (hover: none), (pointer: coarse) {
+  .btn:not(:disabled):active,
+  .icon-btn:not(:disabled):active,
+  .send-btn:not(:disabled):active,
+  .ap-opt:active,
+  .ap-theme:active,
+  .m-tab:active,
+  .ep-tab:active,
+  .ep-cat:active,
+  .ep-e:active,
+  .st-cat:active,
+  .chat-item:active,
+  .res-item:active,
+  .ctx-item:active,
+  .mi-row:active,
+  .ppl-tab:active,
+  .mt-btn:active {
+    transform: scale(.97);
+    filter: brightness(.9);
+  }
+  .chat-item:active,
+  .res-item:active,
+  .ctx-item:active,
+  .mi-row:active,
+  .ppl-tab:active,
+  .m-tab:active,
+  .ep-e:active,
+  .ep-cat:active,
+  .st-cat:active {
+    background: var(--panel2);
+  }
+  /* Los efectos hover que escalan/iluminan no deben quedarse pegados
+     después del primer toque. */
+  .ep-e:hover,
+  .ep-cat:hover,
+  .ap-sw:hover,
+  .ap-theme:hover { transform: none; }
+  .ep-e:hover { background: transparent; }
+}
+
+@media (max-width: 760px) {
+  /* Hitboxes del selector de emojis: categorías y pestañas grandes. */
+  .ep-cats { width: 50px; padding: 4px 3px; }
+  .ep-cat {
+    width: 44px;
+    height: 44px;
+    line-height: 44px;
+    margin: 2px 0;
+    font-size: 19px;
+  }
+  .emo-picker .ep-cat .emo { width: 24px; height: 24px; }
+  .ep-tabs { padding: 0 4px 6px; }
+  .ep-tab { min-height: 46px; font-size: 15px; padding: 10px 4px; }
+  .ep-e { min-height: 44px; padding: 8px; }
+  .emo-picker .ep-e .emo { width: 26px; height: 26px; }
+  .emo-picker .ep-body { height: 282px; }
+
+  /* La barra inferior y las filas también se tocan cómodas. */
+  .mt-btn { min-height: 46px; }
+  .st-cat { min-height: 64px; padding: 10px; }
+  .m-tab { min-height: 44px; }
+  .mi-row { min-height: 46px; }
+  .icon-btn { min-width: 40px; min-height: 40px; }
+
+  /* Ajustes: nada se sale a lo ancho. Las filas con controles anchos
+     (tonos, permisos, descargas) bajan de línea en vez de desbordar. */
+  .modal.settings .st-body { overflow-x: hidden; }
+  .modal.settings .st-row { flex-wrap: wrap; min-width: 0; }
+  .modal.settings .st-col { flex: 1 1 auto; min-width: 0; }
+  .modal.settings .st-row > .st-col { padding-right: 8px; }
+  .modal.settings .tone-pick,
+  .modal.settings .tone-upload {
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-top: 6px;
+  }
+  .modal.settings .tone-select { min-width: 0; }
+  .modal.settings .tone-upload { flex-wrap: wrap; }
+  .modal.settings .tone-upload > * + * { margin-left: 0; margin-top: 6px; }
+  .modal.settings .input { max-width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .modal.settings .st-row > .st-col { flex-basis: 100%; padding-right: 0; }
+  .modal.settings .st-row > .tgl,
+  .modal.settings .st-row > .input,
+  .modal.settings .st-row > .btn,
+  .modal.settings .st-row > .st-ok,
+  .modal.settings .st-row > .perm-state { margin-top: 7px; }
+  .modal.settings .tone-play { flex: none; }
+  .modal.settings .tone-select { flex: 1 1 auto; }
 }

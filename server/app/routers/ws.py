@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -19,12 +20,273 @@ _PROTO = "foxinix"    # W14: el token viaja como subprotocolo (no en la URL:
                       # los tokens no deben aparecer en los logs de acceso)
 _MSG_LIMIT = 40       # W14: mensajes por ventana para frenar floods
 _MSG_WINDOW = 10.0
+# W63: la señalización WebRTC de una malla de 4 usa muchos mensajes en
+# ráfaga (una oferta + respuesta + ICE por cada par). Va en un cubo aparte
+# para que una videollamada normal no se confunda con un flood de chat.
+_CALL_MSG_LIMIT = 400
 
 # W28h: señalización de llamadas WebRTC 1:1. El server solo relaya al otro
 # miembro del DM (valida membresía y bloqueo); ni ve ni guarda media.
-_CALL_TYPES = ("call_offer", "call_answer", "call_ice", "call_hangup")
+# W64: en grupos la sala es un "drop-in": call_start crea una sala con
+# quien la abre (aunque esté solo) y call_state comparte su presencia.
+_CALL_TYPES = ("call_offer", "call_answer", "call_ice", "call_hangup",
+               "call_invite", "call_start", "call_join")
 _CALL_MAX = 32768     # tope del mensaje crudo (un SDP ronda ~8 KB)
 _SDP_MAX = 20000
+_CALL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+_CALL_ROOM_MAX = 4    # malla de hasta 4 personas (incluido quien inicia)
+# call_id -> {chat_id, call_id, members:set[int], host:int, video:bool,
+#             created:float}. Efímero: si el servidor reinicia, las salas
+# en curso terminan. La sala vive mientras quede al menos un miembro.
+_CALL_ROOMS: dict[str, dict[str, Any]] = {}
+
+
+async def _call_error(ws: WebSocket, chat_id: int, call_id: str,
+                      detail: str) -> None:
+    await ws.send_text(json.dumps({
+        "type": "call_error", "chat_id": chat_id,
+        "call_id": call_id, "detail": detail,
+    }, ensure_ascii=False))
+
+
+def _group_member_ids(chat_id: int, exclude: int) -> list[int]:
+    rows = db.rows(
+        "SELECT user_id FROM chat_members"
+        " WHERE chat_id = ? AND user_id != ? AND COALESCE(hidden_at, 0) = 0",
+        (chat_id, exclude),
+    )
+    return [int(r["user_id"]) for r in rows]
+
+
+def _call_state_payload(room: dict[str, Any]) -> dict[str, Any]:
+    """Presencia pública de una sala de grupo (sin datos de media)."""
+    return {
+        "type": "call_state",
+        "chat_id": int(room["chat_id"]),
+        "call_id": str(room.get("call_id") or ""),
+        "group": True,
+        "count": len(room["members"]),
+        "video": bool(room.get("video")),
+        "host": int(room.get("host") or 0),
+    }
+
+
+def _active_room(chat_id: int) -> dict[str, Any] | None:
+    for room in _CALL_ROOMS.values():
+        if room["chat_id"] == chat_id:
+            return room
+    return None
+
+
+async def _broadcast_call_state(chat_id: int, room: dict[str, Any] | None) -> None:
+    """Avisa a todos los miembros del grupo de la sala activa (o de que ya
+    no hay ninguna). Se envía a todos los sockets online del usuario."""
+    if room is not None and room["members"]:
+        out = _call_state_payload(room)
+    else:
+        out = {
+            "type": "call_state", "chat_id": chat_id, "call_id": "",
+            "group": True, "count": 0, "video": False, "host": 0,
+        }
+    for mid in _group_member_ids(chat_id, 0):
+        await hub.send_user(mid, out)
+
+
+async def _send_active_calls(ws: WebSocket, uid: int) -> None:
+    """Al abrir la WS se recuperan las salas ya activas de sus grupos.
+
+    Las salas viven en memoria y no se guardan en la base de datos: si el
+    servidor reinicia, las llamadas en curso también terminan. Un miembro
+    que entra después ve el botón verde gracias a este empujón inicial.
+    """
+    for room in list(_CALL_ROOMS.values()):
+        if not room["members"]:
+            continue
+        mine = db.one(
+            "SELECT hidden_at FROM chat_members"
+            " WHERE chat_id = ? AND user_id = ?",
+            (room["chat_id"], uid),
+        )
+        if not mine or mine.get("hidden_at"):
+            continue
+        try:
+            await ws.send_text(json.dumps(
+                _call_state_payload(room), ensure_ascii=False))
+        except Exception:
+            return
+
+
+async def _drop_user_calls(uid: int) -> None:
+    """Al cerrar la última WS, sacar al usuario de sus salas y avisar.
+
+    Una sala drop-in NO pertenece a quien la abrió: si el anfitrión se va
+    y quedan más personas, la sala sigue viva. Solo desaparece cuando se
+    va el último participante.
+    """
+    for call_id, room in list(_CALL_ROOMS.items()):
+        if uid not in room["members"]:
+            continue
+        out = {
+            "type": "call_hangup", "call_id": call_id,
+            "chat_id": room["chat_id"], "group": True,
+            "reason": "disconnected", "from": {"id": uid},
+        }
+        room["members"].discard(uid)
+        for mid in list(room["members"]):
+            await hub.send_user(mid, out)
+        if not room["members"]:
+            _CALL_ROOMS.pop(call_id, None)
+        await _broadcast_call_state(room["chat_id"], room if room["members"] else None)
+
+
+async def _handle_group_call(ws: WebSocket, uid: int, user: dict[str, Any],
+                             mtype: str, msg: dict[str, Any]) -> None:
+    """Señalización de una llamada de grupo (malla WebRTC de hasta 4).
+
+    W64: no hay invitaciones ni tono. call_start crea una sala drop-in
+    (aunque solo esté quien la abre) y call_state difunde cuánta gente hay.
+    Cada persona que entra manda call_join; los que ya estaban dentro le
+    envían una oferta dirigida. Las respuestas e ICE también llevan `to`,
+    así cada PeerConnection tiene su par.
+    """
+    try:
+        cid = int(msg.get("chat_id", 0))
+    except (TypeError, ValueError):
+        return
+    call_id = str(msg.get("call_id") or "")
+    if not cid or not _CALL_ID_RE.match(call_id):
+        return
+    chat = db.one("SELECT type FROM chats WHERE id = ?", (cid,))
+    if not chat or chat["type"] != "group":
+        if mtype in ("call_start", "call_invite", "call_join"):
+            await _call_error(ws, cid, call_id, "Llamada de grupo no válida")
+        return
+    mine = db.one(
+        "SELECT hidden_at FROM chat_members WHERE chat_id = ? AND user_id = ?",
+        (cid, uid),
+    )
+    if not mine:
+        return
+    room = _CALL_ROOMS.get(call_id)
+    fresh = db.one("SELECT * FROM users WHERE id = ?", (uid,)) or user
+    sender = _peer_user(fresh)
+
+    # W64: call_invite se acepta como alias de call_start para que una
+    # pestaña con la web vieja en caché no vuelva a hacer sonar a nadie.
+    if mtype in ("call_start", "call_invite"):
+        if mine.get("hidden_at"):
+            return
+        if room is not None:
+            if room["chat_id"] == cid and uid in room["members"]:
+                await hub.send_user(uid, _call_state_payload(room))
+            else:
+                await _call_error(ws, cid, call_id,
+                                  "Ya hay una llamada en curso en este grupo")
+            return
+        for r in _CALL_ROOMS.values():
+            if r["chat_id"] == cid:
+                await _call_error(ws, cid, call_id,
+                                  "Ya hay una llamada en curso en este grupo")
+                return
+        room = {
+            "chat_id": cid, "call_id": call_id, "members": {uid},
+            "host": uid, "video": bool(msg.get("video")),
+            "created": time.time(),
+        }
+        _CALL_ROOMS[call_id] = room
+        # Nadie recibe una llamada: solo se publica la presencia de la
+        # sala para que cada miembro decida entrar cuando quiera.
+        await _broadcast_call_state(cid, room)
+        return
+
+    if mtype == "call_join":
+        if room is None or room["chat_id"] != cid:
+            # Puede haber otra sala (con otro call_id) en este mismo
+            # grupo; no se debe borrar su presencia por una petición
+            # vieja. Se reenvía la sala que sí existe.
+            await _broadcast_call_state(cid, _active_room(cid))
+            await hub.send_user(uid, {
+                "type": "call_hangup", "call_id": call_id, "chat_id": cid,
+                "group": True, "reason": "ended",
+            })
+            return
+        if mine.get("hidden_at"):
+            return
+        if uid in room["members"]:
+            await hub.send_user(uid, _call_state_payload(room))
+            return
+        if len(room["members"]) >= _CALL_ROOM_MAX:
+            await _call_error(ws, cid, call_id, "La llamada está llena")
+            return
+        room["members"].add(uid)
+        await _broadcast_call_state(cid, room)
+        out = {
+            "type": "call_join", "call_id": call_id, "chat_id": cid,
+            "from": sender, "group": True,
+        }
+        for mid in list(room["members"]):
+            if mid != uid:
+                await hub.send_user(mid, out)
+        return
+
+    if room is None or room["chat_id"] != cid:
+        return
+
+    if mtype in ("call_offer", "call_answer", "call_ice"):
+        try:
+            to = int(msg.get("to", 0))
+        except (TypeError, ValueError):
+            return
+        if uid not in room["members"] or to not in room["members"] or to == uid:
+            return
+        out = {
+            "type": mtype, "call_id": call_id, "chat_id": cid,
+            "from": sender, "to": to, "group": True,
+        }
+        if mtype in ("call_offer", "call_answer"):
+            sdp = str(msg.get("sdp") or "")
+            if not sdp or len(sdp) > _SDP_MAX:
+                return
+            out["sdp"] = sdp
+            if mtype == "call_offer":
+                out["video"] = bool(msg.get("video"))
+        else:
+            cand = msg.get("candidate")
+            out["candidate"] = cand if isinstance(cand, dict) else None
+        await hub.send_user(to, out)
+        return
+
+    if mtype == "call_hangup":
+        try:
+            to = int(msg.get("to", 0))
+        except (TypeError, ValueError):
+            to = 0
+        reason = msg.get("reason")
+        if to:
+            if to not in room["members"]:
+                return
+            await hub.send_user(to, {
+                "type": "call_hangup", "call_id": call_id, "chat_id": cid,
+                "from": sender, "to": to, "group": True,
+                "targeted": True,
+                "reason": str(reason)[:48] if isinstance(reason, str) else None,
+            })
+            return
+        if uid not in room["members"]:
+            return
+        room["members"].discard(uid)
+        out = {
+            "type": "call_hangup", "call_id": call_id, "chat_id": cid,
+            "from": sender, "group": True,
+            "reason": str(reason)[:48] if isinstance(reason, str) else None,
+        }
+        for mid in list(room["members"]):
+            await hub.send_user(mid, out)
+        if not room["members"]:
+            _CALL_ROOMS.pop(call_id, None)
+        # La sala puede seguir con las demás personas: solo se actualiza
+        # el contador. El anfitrión no tiene privilegios para cerrarla.
+        await _broadcast_call_state(cid, room if room["members"] else None)
 
 
 def _blocked_any(a: int, b: int) -> bool:
@@ -71,9 +333,14 @@ async def ws_endpoint(ws: WebSocket) -> None:
     token_exp = int(payload.get("exp") or 0)
     offered = [p.strip() for p in ws.headers.get("sec-websocket-protocol", "").split(",") if p.strip()]
     await hub.connect(uid, ws, subprotocol=_PROTO if _PROTO in offered else None)
+    # W64: quien abre la app (o reconecta) ve las salas de grupo que ya
+    # están activas, aunque la llamada se haya creado antes.
+    await _send_active_calls(ws, uid)
     auth.touch_last_seen(uid, force=True)   # presencia exacta al conectar (fuerza escritura)
     window_start = time.monotonic()
     count = 0
+    call_window_start = window_start
+    call_count = 0
     try:
         while True:
             raw = await ws.receive_text()
@@ -91,23 +358,34 @@ async def ws_endpoint(ws: WebSocket) -> None:
             if not fresh or fresh["token_version"] != payload.get("tv"):
                 await ws.close(code=4401, reason="sesión revocada")
                 return
-            count += 1
-            if count > _MSG_LIMIT:
-                # W14: ráfaga de mensajes en la WS → cortar (1008 policy).
-                now = time.monotonic()
-                if now - window_start < _MSG_WINDOW:
-                    log.warning("flood de ws: user=%s", uid)
-                    await ws.close(code=1008, reason="demasiados mensajes")
-                    return
-                window_start = now
-                count = 0
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
-                continue
+                msg = None
+            mtype = msg.get("type") if isinstance(msg, dict) else None
+            now = time.monotonic()
+            if mtype in _CALL_TYPES:
+                # W63: cubo separado y más amplio para la señalización.
+                if now - call_window_start >= _MSG_WINDOW:
+                    call_window_start = now
+                    call_count = 0
+                call_count += 1
+                if call_count > _CALL_MSG_LIMIT:
+                    log.warning("flood de señalización: user=%s", uid)
+                    await ws.close(code=1008, reason="demasiados mensajes")
+                    return
+            else:
+                count += 1
+                if count > _MSG_LIMIT:
+                    # W14: ráfaga de mensajes en la WS → cortar (1008 policy).
+                    if now - window_start < _MSG_WINDOW:
+                        log.warning("flood de ws: user=%s", uid)
+                        await ws.close(code=1008, reason="demasiados mensajes")
+                        return
+                    window_start = now
+                    count = 0
             if not isinstance(msg, dict):
                 continue
-            mtype = msg.get("type")
             if mtype == "ping":
                 await ws.send_text(json.dumps({"type": "pong"}))
             elif mtype == "seen":
@@ -140,8 +418,12 @@ async def ws_endpoint(ws: WebSocket) -> None:
                         exclude=uid,
                     )
             elif mtype in _CALL_TYPES:
-                # W28h: oferta/respuesta/ICE/colgar de una llamada 1:1.
+                # W28h/W62: señalización 1:1 y malla de grupos.
                 if len(raw) > _CALL_MAX:
+                    continue
+                if (mtype in ("call_start", "call_invite", "call_join")
+                        or bool(msg.get("group"))):
+                    await _handle_group_call(ws, uid, user, mtype, msg)
                     continue
                 try:
                     cid = int(msg.get("chat_id", 0))
@@ -223,3 +505,5 @@ async def ws_endpoint(ws: WebSocket) -> None:
         log.exception("error en ws de usuario %s", uid)
     finally:
         await hub.disconnect(uid, ws)
+        if not hub.is_online(uid):
+            await _drop_user_calls(uid)

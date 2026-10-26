@@ -8,12 +8,12 @@ import {
 import { logout, api, session, saveSession, uploadMedia,
   uploadChatAvatar, ensurePreview } from '../api.js';
 import { t, setLang, LANGS } from '../i18n.js';
+/* W63: catálogo y reproducción de tonos de mensaje/llamada. */
+import { MESSAGE_TONES, CALL_TONES, customTone, toneSrc } from '../tones.js';
 /* W28h: llamadas de voz/video 1:1 (WebRTC) */
-import { startCall, acceptCall, rejectCall, hangupCall,
-  toggleMute, toggleCam, getLocalStream, getRemoteStream } from '../call.js';
-/* W29f/W31c: cifrado de extremo a extremo por chat (DM) — siempre
-   activo: ya no hay switch ni activación manual. */
-import { chatKey as e2eChatKey } from '../e2e.js';
+import { startCall, joinGroupCall, acceptCall, rejectCall, hangupCall,
+  toggleMute, toggleCam, getLocalStream, getLocalPreviewStream,
+  getRemoteStream, getPeerStream, shareScreen, stopScreenShare } from '../call.js';
 import {
   listDownloads, saveDownloadToDevice, deleteDownload, clearDownloads,
   openAppDownload,
@@ -63,9 +63,9 @@ import {
 } from '../mediadl.js';
 import { emojiCats, emojiCat, emojiRecent, emojiSearch, emojiPush,
   emojiCode, shortcodesToEmoji, emojiCodesPrefix,
-  emoFile, emoSrc, splitEmojis, isEmojiBurst,
+  emoFile, emoSrc, emoStyle, emoAnySrc, splitEmojis, isEmojiBurst,
   reactBump, reactRank } from '../emoji.js';
-import { startWS, stopWS } from '../realtime.js';
+import { startWS, stopWS, applyProfileFields } from '../realtime.js';
 import { AvatarEditor } from './avatar-editor.js';
 
 /* ------------------------------------------------------- fechas/horas */
@@ -211,15 +211,22 @@ async function openProfile(username) {
     store.profile = null;
     return;
   }
-  store.profile = { loading: true, user: null, error: '' };
+  store.profile = { loading: true, user: null, error: '', username: username };
   try {
     const r = await api('GET', '/api/users/' + encodeURIComponent(username),
       undefined, { retry401: true });
-    store.profile = { loading: false, user: r.user, error: '' };
+    /* W63: si un evento de perfil llegó mientras cargaba, la respuesta
+       del GET puede ser más vieja: el evento manda. */
+    const live = store.profile && store.profile.username === username
+      ? store.profile.liveUser : null;
+    if (live && r.user && live.id === r.user.id) {
+      applyProfileFields(r.user, live);
+    }
+    store.profile = { loading: false, user: r.user, error: '', username: username };
   } catch (e) {
     store.profile = {
-      loading: false, user: null,
-      error: (e && e.detail) || 'No se pudo cargar el perfil',
+      loading: false, user: null, error: (e && e.detail) || 'No se pudo cargar el perfil',
+      username: username,
     };
   }
 }
@@ -480,20 +487,6 @@ function chatMenu(e, c, key) {
       label: 'Ver perfil', icon: 'i-user',
       fn: function () { openChat(c.id); openProfile(c.title.username); },
     });
-    /* W37b: el código de verificación E2E vive escondido aquí (antes
-       ocupaba el panel de info y sobraba — la app verifica sola).
-       W39: se muestra en un MODAL (antes un toast que se perdía). */
-    if (store.e2e && store.e2e[c.id]) {
-      items.push({
-        label: 'Ver código de verificación',
-        icon: 'i-shield',
-        fn: function () {
-          const sas = store.e2eSas ? store.e2eSas[c.id] : '';
-          if (sas) { store.sasFor = c.id; store.sasOpen = true; }
-          else toast(t('El código estará disponible al abrir el chat'), 'info');
-        },
-      });
-    }
   }
   /* W13: fijar / silenciar (ajustes personales, por chat) */
   items.push({
@@ -881,12 +874,27 @@ const toggleStickerAsset = function (m) {
     toast((e && e.detail) || t('No se pudo guardar el favorito'), 'err');
   });
 };
-const isGifFav = function (m) {
+/* W62: un GIF puede estar guardado por media_id (subido) o por nombre
+   (biblioteca). El mensaje de un GIF de biblioteca se sube con el mismo
+   nombre de archivo, así que la estrella también debe reconocerlo. */
+const gifFavFor = function (m) {
   ensureGifFavs();
-  const fid = m && m.media ? m.media.id : 0;
+  const md = m && m.media;
+  const fid = md ? md.id : 0;
+  const fname = md && md.name ? String(md.name).toLowerCase() : '';
   const fs = store.gifFavs || [];
-  for (let i = 0; i < fs.length; i++) if (fs[i].media_id === fid) return true;
-  return false;
+  for (let i = 0; i < fs.length; i++) {
+    if (fid && fs[i].media_id === fid) return fs[i];
+  }
+  if (fname) {
+    for (let j = 0; j < fs.length; j++) {
+      if (fs[j].name && String(fs[j].name).toLowerCase() === fname) return fs[j];
+    }
+  }
+  return null;
+};
+const isGifFav = function (m) {
+  return !!gifFavFor(m);
 };
 const isLibGifFav = function (name) {
   ensureGifFavs();
@@ -895,20 +903,29 @@ const isLibGifFav = function (name) {
   return false;
 };
 const toggleFavGif = function (m) {
-  const fid = m && m.media ? m.media.id : 0;
+  const md = m && m.media;
+  const fid = md ? md.id : 0;
   if (!fid) return;
-  const on = isGifFav(m);
-  api(on ? 'DELETE' : 'POST', '/api/gifs/favorites', { media_id: fid })
-    .then(function () {
-      if (on) {
-        store.gifFavs = store.gifFavs.filter(function (f) {
-          return f.media_id !== fid;
-        });
-      } else {
-        store.gifFavs.unshift({ media_id: fid, name: '', url: m.media.url });
-      }
-    })
-    .catch(function () { toast('No se pudo guardar el favorito', 'err'); });
+  const fname = md && md.name ? String(md.name).toLowerCase() : '';
+  const matches = (store.gifFavs || []).filter(function (f) {
+    if (fid && f.media_id === fid) return true;
+    return !!(fname && f.name && String(f.name).toLowerCase() === fname);
+  });
+  const reqs = matches.length
+    ? matches.map(function (f) {
+        return api('DELETE', '/api/gifs/favorites',
+          f.media_id ? { media_id: f.media_id } : { name: f.name });
+      })
+    : [api('POST', '/api/gifs/favorites', { media_id: fid })];
+  Promise.all(reqs).then(function () {
+    if (matches.length) {
+      store.gifFavs = (store.gifFavs || []).filter(function (f) {
+        return matches.indexOf(f) < 0;
+      });
+    } else {
+      store.gifFavs.unshift({ media_id: fid, name: '', url: md.url });
+    }
+  }).catch(function () { toast('No se pudo guardar el favorito', 'err'); });
 };
 const toggleLibGif = function (name) {
   const on = isLibGifFav(name);
@@ -935,16 +952,24 @@ const EmojiPicker = {
     const q = Vue.ref('');
     const tab = Vue.ref('recientes');
     const cats = emojiCats();
+    /* W65: si el estilo elegido es Noto/Twemoji, la grilla sólo muestra
+       emojis con imagen de ESE set. Antes los que faltaban caían a la
+       fuente del sistema y el panel quedaba mezclado (o "entrecortado").
+       Es preferible un hueco/una lista más corta a mezclar estilos. */
+    const usable = function (items) {
+      if (emoStyle() === 'system') return items;
+      return items.filter(function (ch) { return !!emoFile(ch); });
+    };
     /* W29b: UNA sola lista con subtítulos por categoría ("Recientes:",
        "Caras y emociones:", …); la búsqueda plana reemplaza la lista. */
     const sections = Vue.computed(function () {
       if (q.value.trim()) return [];
-      const rec = emojiRecent();
+      const rec = usable(emojiRecent());
       const out = [];
       if (rec.length) out.push({ id: 'recientes', label: 'Recientes', items: rec });
       for (let i = 0; i < cats.length; i++) {
         if (cats[i].id === 'recientes') continue;
-        const items = emojiCat(cats[i].id);
+        const items = usable(emojiCat(cats[i].id));
         if (items.length) {
           out.push({ id: cats[i].id, label: cats[i].name, items: items });
         }
@@ -952,7 +977,7 @@ const EmojiPicker = {
       return out;
     });
     const flat = Vue.computed(function () {
-      return q.value.trim() ? emojiSearch(q.value) : [];
+      return q.value.trim() ? usable(emojiSearch(q.value)) : [];
     });
     const empty = Vue.computed(function () {
       return q.value.trim() ? t('Sin coincidencias.') : t('Aún no usas emojis.');
@@ -991,6 +1016,9 @@ const EmojiPicker = {
     const fileOf = function (ch) { return emoFile(ch); };
     const srcOf = function (ch) { return emoSrc(ch); };
     const titleOf = function (ch) { return emojiCode(ch); };
+    /* En modo nativo no hay archivo: se pinta el glyph. En Noto/Twemoji
+       nunca se cae al glyph del sistema (eso era la mezcla). */
+    const emoSystem = Vue.computed(function () { return emoStyle() === 'system'; });
     /* W16: el panel queda fijo y clampeado al área de mensajes; se recalcula
        al abrir (sin la animación de entrada) y al redimensionar la ventana. */
     const rootEl = Vue.ref(null);
@@ -1019,7 +1047,7 @@ const EmojiPicker = {
       roPanel.disconnect();
     });
     return { q, tab, cats, sections, flat, empty, pick, t, rootEl,
-             scrollEl, jump, onScroll, fileOf, srcOf, titleOf };
+             scrollEl, jump, onScroll, fileOf, srcOf, titleOf, emoSystem };
   },
   template:
     '<div class="emo-picker" ref="rootEl" @click.stop>' +
@@ -1034,8 +1062,8 @@ const EmojiPicker = {
             ':class="{ on: !q.trim() && tab === c.id }" type="button" ' +
             ':title="t(c.name)" @click="jump(c.id)">' +
             '<img v-if="fileOf(c.icon)" class="emo" :src="srcOf(c.icon)" ' +
-              ':alt="c.icon" loading="lazy">' +
-            '<span v-else>{{ c.icon }}</span>' +
+              'alt="" loading="lazy">' +
+            '<span v-else-if="emoSystem">{{ c.icon }}</span>' +
           '</button>' +
         '</div>' +
         '<div class="ep-scroll" ref="scrollEl" @scroll.passive="onScroll">' +
@@ -1046,8 +1074,8 @@ const EmojiPicker = {
                 '<button class="ep-e" type="button" v-for="e in s.items" ' +
                   ':key="e" @click="pick(e)" :title="titleOf(e)">' +
                   '<img v-if="fileOf(e)" class="emo" :src="srcOf(e)" ' +
-                    ':alt="e" loading="lazy">' +
-                  '<span v-else>{{ e }}</span>' +
+                    'alt="" loading="lazy">' +
+                  '<span v-else-if="emoSystem">{{ e }}</span>' +
                 '</button>' +
               '</div>' +
             '</div>' +
@@ -1056,8 +1084,8 @@ const EmojiPicker = {
             '<button class="ep-e" type="button" v-for="e in flat" :key="e" ' +
               '@click="pick(e)" :title="titleOf(e)">' +
               '<img v-if="fileOf(e)" class="emo" :src="srcOf(e)" ' +
-                ':alt="e" loading="lazy">' +
-              '<span v-else>{{ e }}</span>' +
+                'alt="" loading="lazy">' +
+              '<span v-else-if="emoSystem">{{ e }}</span>' +
             '</button>' +
           '</div>' +
           '<div class="ep-empty" v-if="!q.trim() ? !sections.length : !flat.length">' +
@@ -1095,21 +1123,7 @@ const MessageRow = {
       if (!rp) return '';
       /* W45: citar un spoiler no lo destapa (ni con el texto local). */
       if (rp.spoiler) return t('Spoiler');
-      /* W37a: con E2E el server sólo manda el marcador; el texto real
-         vive en el mensaje original ya descifrado (store.msgs). Si
-         está local, se cita el texto REAL (igual que en el chat). */
-      let txt = rp.body;
-      if (txt === '[Mensaje cifrado]' || !txt) {
-        const arr = store.msgs[store.activeChatId];
-        if (arr) {
-          for (let i = arr.length - 1; i >= 0; i--) {
-            if (arr[i].id === rp.id && arr[i]._plain != null) {
-              txt = arr[i]._plain;
-              break;
-            }
-          }
-        }
-      }
+      const txt = rp.body;
       if (txt) return txt;
       if (rp.kind === 'voice') return t('Nota de voz');
       if (rp.kind === 'image') return t('Imagen');
@@ -1402,6 +1416,61 @@ const MessageRow = {
       const bar = e.currentTarget.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - bar.left) / bar.width));
       el.currentTime = ratio * aDur.value;
+    };
+    /* W63: arrastrar el círculo/barra para buscar posición (scrubbing).
+       El rectángulo se captura del .wave real: en los listeners de window
+       e.currentTarget es window, no la barra. También soporta táctil. */
+    let waveDrag = false;
+    const waveBarOf = function (target) {
+      if (!target) return null;
+      if (target.closest) return target.closest('.wave');
+      return null;
+    };
+    const waveSeekTo = function (bar, clientX) {
+      const el = aEl.value;
+      if (!el || !aDur.value || !bar) return;
+      const r = bar.getBoundingClientRect();
+      if (!r.width) return;
+      const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+      el.currentTime = ratio * aDur.value;
+    };
+    const waveDown = function (e) {
+      const el = aEl.value;
+      const bar = waveBarOf(e.currentTarget);
+      if (!el || !aDur.value || !bar) return;
+      waveDrag = true;
+      if (e.preventDefault) e.preventDefault();
+      waveSeekTo(bar, e.clientX);
+      const move = function (ev) { waveSeekTo(bar, ev.clientX); };
+      const up = function () {
+        waveDrag = false;
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    };
+    const waveDownTouch = function (e) {
+      const el = aEl.value;
+      const bar = waveBarOf(e.currentTarget);
+      if (!el || !aDur.value || !bar || !e.touches || !e.touches.length) return;
+      if (e.preventDefault) e.preventDefault();
+      waveDrag = true;
+      waveSeekTo(bar, e.touches[0].clientX);
+      const move = function (ev) {
+        if (!ev.touches || !ev.touches.length) return;
+        if (ev.preventDefault) ev.preventDefault();
+        waveSeekTo(bar, ev.touches[0].clientX);
+      };
+      const up = function () {
+        waveDrag = false;
+        window.removeEventListener('touchmove', move);
+        window.removeEventListener('touchend', up);
+        window.removeEventListener('touchcancel', up);
+      };
+      window.addEventListener('touchmove', move, { passive: false });
+      window.addEventListener('touchend', up);
+      window.addEventListener('touchcancel', up);
     };
     /* W37d: velocidad de la NOTA DE VOZ (1× → 1,5× → 2× → 1×) */
     const aRateV = Vue.ref(1);
@@ -1797,7 +1866,7 @@ const MessageRow = {
       if (!on) return;
       /* W32: el texto DESCIFRADO al editar (nunca el marcador). */
       const ref0e = props.row.ref;
-      store.editDraft = (ref0e._plain != null ? ref0e._plain : ref0e.body) || '';
+      store.editDraft = ref0e.body || '';
       Vue.nextTick(function () {
         const el = editEl.value;
         if (el) {
@@ -1889,45 +1958,6 @@ const MessageRow = {
       return 132 - 132 * (up.p || 0);
     };
 
-    /* W59: el único control de descarga de un adjunto. Si ya está en los
-       datos de la app lo abre; si no, lo descarga ahí (nunca a la
-       carpeta pública: eso es "Guardar en el dispositivo" en Ajustes). */
-    const dlFile = function (row, ev) {
-      if (ev && ev.preventDefault) ev.preventDefault();
-      const m = row && (row.media || (row.ref && row.ref.media));
-      if (!m || !m.url) return;
-      const kind = row.kind || (row.ref && row.ref.kind);
-      const url = mediaUrl(m.url, true);
-      const key = downloadKey(url);
-      if (key && store.dlSaved[key]) {
-        openAppDownload(key).then(function (ok) {
-          if (!ok) toast(t('El archivo ya no está disponible'), 'err');
-        });
-        return;
-      }
-      let frame = ev && ev.currentTarget ? ev.currentTarget : null;
-      if (frame && !(frame.classList && frame.classList.contains('mframe')) &&
-          frame.closest) frame = frame.closest('.mframe');
-      startDownload(url, m.name || 'archivo', frame, m.mime, kind);
-    };
-
-    /* W58/W59: estado visible de la descarga en la línea de metadatos:
-       "Descargar · 2,4 MB" o "Descargado · 2,4 MB". Es reactivo a
-       store.dlSaved (se hidrata al arrancar y lo actualizan las
-       descargas automáticas). */
-    const dlSavedSize = function (row) {
-      const m = row && row.ref && row.ref.media;
-      if (!m || !m.url) return 0;
-      return store.dlSaved[downloadKey(mediaUrl(m.url, true))] || 0;
-    };
-    const dlText = function (row) {
-      const m = row && row.ref && row.ref.media;
-      if (!m) return '';
-      const size = m.size ? fmtSize(m.size) : '';
-      const state = dlSavedSize(row) ? t('Descargado') : t('Descargar');
-      return state + (size ? ' · ' + size : '');
-    };
-
     /* W29b: dentro de cada trozo de texto, los emojis salen como
        segmentos propios con su archivo Twemoji (e); las menciones se
        conservan enteras. */
@@ -1983,16 +2013,23 @@ const MessageRow = {
 
     /* W29b: título de un emoji = su :shortcode: (o el carácter solo). */
     const titleOf = function (ch) { return emojiCode(ch); };
+    const emoNative = Vue.computed(function () { return emoStyle() === 'system'; });
+
+    /* W62: si una foto de avatar falla (firma vencida, red), la fila cae
+       a la inicial en vez de dejar el hueco roto. Al cambiar la URL se
+       reintenta sola. */
+    const avErr = Vue.ref(false);
+    Vue.watch(function () { return props.row.avatar && props.row.avatar.url; },
+      function () { avErr.value = false; });
 
     /* W41/W61: 1–3 emojis en el cuerpo → el mensaje se pinta como
        sticker (emoji grande, sin caja y con la hora en pastillita).
-       Con E2E el texto real está en _plain, no en body. No con cita
-       (el bloque .b-reply rompería el look transparente) ni en edición
-       (se ve el textarea). */
+       No con cita (el bloque .b-reply rompería el look transparente)
+       ni en edición (se ve el textarea). */
     const emoBig = function () {
       const ref0 = props.row.ref;
       if (ref0.kind !== 'text' || editing.value || ref0.reply_to) return false;
-      const txt = (ref0._plain != null ? ref0._plain : ref0.body) || '';
+      const txt = ref0.body || '';
       return isEmojiBurst(txt);
     };
     /* W61: un sticker con imagen se puede guardar en la biblioteca. */
@@ -2025,10 +2062,8 @@ const MessageRow = {
        de los MIEMBROS del grupo marcadas (sólo en grupos: el server
        sólo cuenta menciones ahí). */
     const bodySegs = Vue.computed(function () {
-      /* W29f: con E2E el server sólo ve el marcador; el texto real es
-         _plain (se rellena al descifrar — o el mío al enviar). */
       const ref0 = props.row.ref;
-      const txt = (ref0._plain != null ? ref0._plain : ref0.body) || '';
+      const txt = ref0.body || '';
       const c = store.chats.find(function (x) {
         return x.id === store.activeChatId;
       });
@@ -2120,6 +2155,17 @@ const MessageRow = {
     const spoiled = Vue.computed(function () {
       return !!props.row.ref.spoiler && !isSeen(props.row.ref);
     });
+    /* W62: los spoilers de imagen/GIF/sticker muestran la propia media
+       difuminada de fondo. El texto sigue con la capa oscura. */
+    const spoilBg = Vue.computed(function () {
+      if (!spoiled.value) return null;
+      const r = props.row.ref;
+      const m = r.media;
+      if (!m || !m.url) return null;
+      if (r.kind !== 'image' && r.kind !== 'sticker') return null;
+      if (String(m.mime || '').indexOf('image/') !== 0) return null;
+      return { backgroundImage: 'url("' + mediaUrl(m.url) + '")' };
+    });
     const spoilShow = function (m) {
       if (!store.spoilSeen[store.activeChatId]) {
         store.spoilSeen[store.activeChatId] = {};
@@ -2130,18 +2176,8 @@ const MessageRow = {
       const s = store.spoilSeen[store.activeChatId];
       if (s && s[m.id]) delete s[m.id];
     };
-    /* W60: descargar la nota de voz a los datos de la app desde el
-       propio reproductor (antes solo se podía reproducir). */
-    const downloadVoice = function () {
-      const m = props.row.ref.media;
-      if (!m || !m.url) return;
-      const el = aEl.value;
-      const frame = el && el.closest ? el.closest('.mframe') : null;
-      startDownload(m.url, m.name || 'nota-de-voz', frame, m.mime, 'voice');
-    };
-
     return {
-      store, emojis, rpEl, rpPos,
+      store, emojis, rpEl, rpPos, avErr, spoilBg,
       bodySegs,
       /* W35a–c: enlaces, imagen inline y tarjetas */
       imgInline, linkCards,
@@ -2161,22 +2197,23 @@ const MessageRow = {
       isStkFav, toggleStkFav,   /* W60 */
       spoiled, spoilShow, spoilHide,   /* W29d */
       replyName, replyText, groupReactions, myReaction,
-      doReply, doReact, mediaUrl, fmtSize, dlFile, dlText, dlSavedSize,
+      doReply, doReact, mediaUrl, fmtSize,
       pickerOpen, togglePicker, openMenu,
       /* W13 */
-      fullReact, toggleFull, wave, aBar, waveOp, downloadVoice,
+      fullReact, toggleFull, wave, aBar, waveOp,
       /* W22 */
       imgBox,
       /* W8 */
-      aEl, aPlaying, aTime, aPct, togglePlay, seek,
+      aEl, aPlaying, aTime, aPct, togglePlay, seek, waveDown, waveDownTouch,
       aMeta, aTimeUpd, aPlayEv, aPauseEv, aEndEv, aDurEv, aErrEv,
       editing, editEl, cancelEdit, saveEdit,
       /* W11: círculo de subida + video */
       isVideo, upPct, upOff,
       /* W29a */
       isAudio, vidOk, animEnd,
-      /* W29b */
-      emoFile, emoSrc, titleOf, reactTitle,
+      /* W29b/W65: mensajes usan el set alternativo si al elegido le
+         falta ese emoji (nunca la fuente del sistema). */
+      emoAnySrc, emoNative, titleOf, reactTitle,
       emoBig,   /* W41 */
       stickerAssetOn, saveStickerAsset,   /* W61 */
     };
@@ -2187,7 +2224,7 @@ const MessageRow = {
          cara (foto/letra) solo donde se ve el nombre del emisor */
       '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
-        '<img v-if="row.avatar && row.avatar.url" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy">' +
+        '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" @error="avErr = true">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
       '</span>' +
       '<div v-if="row.ref.kind === \'system\'" class="sys-msg">{{ row.ref.body }}</div>' +
@@ -2197,10 +2234,13 @@ const MessageRow = {
            y el puntito del pie lo vuelve a ocultar. Mientras está
            tapado, los hijos se ocultan (visibility): con sólo el
            fondo translúcido el texto asomaba sobre burbujas claras. */
-        '<button v-if="spoiled" class="b-spoil-ov" type="button" ' +
+        '<div v-if="spoilBg" class="b-spoil-bg" :style="spoilBg" aria-hidden="true"></div>' +
+        '<button v-if="spoiled" class="b-spoil-ov" :class="{ \'has-bg\': !!spoilBg }" type="button" ' +
           '@click.stop="spoilShow(row.ref)">' +
-          '<svg class="ic"><use href="#i-eye-off"></use></svg>' +
-          '<span>{{ t(\'Mostrar Spoiler\') }}</span>' +
+          '<span class="b-spoil-pill">' +
+            '<svg class="ic"><use href="#i-eye-off"></use></svg>' +
+            '<span>{{ t(\'Mostrar Spoiler\') }}</span>' +
+          '</span>' +
         '</button>' +
         '<div class="b-actions">' +
           '<button class="b-act" type="button" :title="t(\'Responder\')" @click="doReply(row)">' +
@@ -2241,9 +2281,9 @@ const MessageRow = {
             'ref="rpEl" v-if="pickerOpen(row)" :style="rpPos" @click.stop>' +
             '<button class="rp" :class="{ mine: myReaction(row.ref) === e }" type="button" ' +
               'v-for="e in emojis" :key="e" :title="titleOf(e)" @click="doReact(row, e)">' +
-              '<img v-if="emoFile(e)" class="emo" :src="emoSrc(e)" ' +
-                ':alt="e" loading="lazy">' +
-              '<span v-else>{{ e }}</span></button>' +
+              '<img v-if="emoAnySrc(e)" class="emo" :src="emoAnySrc(e)" ' +
+                'alt="" :title="e" loading="lazy">' +
+              '<span v-else-if="emoNative">{{ e }}</span></button>' +
             '<button class="rp rp-more" type="button" :title="t(\'Más emojis\')" ' +
               '@click="toggleFull">{{ fullReact ? \'–\' : \'＋\' }}</button>' +
             '<emoji-picker v-if="fullReact" :anchored="true" ' +
@@ -2457,17 +2497,17 @@ const MessageRow = {
             ':title="aPlaying ? t(\'Pausar\') : t(\'Reproducir\')" @click="togglePlay">' +
             '<svg class="ic ic-sm"><use :href="aPlaying ? \'#i-pause\' : \'#i-play\'"></use></svg>' +
           '</button>' +
-          /* W13: onda con progreso (clic = buscar posición) */
-          '<span class="wave" @click="seek">' +
+          /* W13: onda con progreso (clic = buscar posición). W63: círculo
+             arrastrable para scrubbing. */
+          '<span class="wave" @click="seek" @mousedown="waveDown" @touchstart="waveDownTouch">' +
             '<i v-for="(h, i) in wave" :key="i" :class="{ on: i <= aBar }" ' +
               ':style="{ height: h + \'%\', opacity: waveOp(i) }"></i>' +
+            '<span class="wave-thumb" :style="{ left: aPct + \'%\' }" @mousedown.stop="waveDown" @touchstart.stop="waveDownTouch"></span>' +
           '</span>' +
           '<span class="au-time">{{ aTime }}</span>' +
           /* W37d: velocidad de la nota de voz (1×/1,5×/2×) */
           '<button class="au-rate" type="button" :title="t(\'Velocidad\')" ' +
             '@click="aRate">{{ aRateV }}×</button>' +
-          '<button class="au-rate au-dl" type="button" :title="t(\'Descargar a la app\')" ' +
-            '@click.stop="downloadVoice"><svg class="ic ic-sm"><use href="#i-download"></use></svg></button>' +
         '</div>' +
         '<div v-else-if="row.ref.kind === \'voice\'" class="b-voice">' +
           '<svg class="ic ic-sm"><use href="#i-mic"></use></svg> {{ t(\'Nota de voz\') }}' +
@@ -2480,8 +2520,11 @@ const MessageRow = {
             '<b class="mention" :class="{ me: sg.me }" v-if="sg.m">{{ sg.t }}</b>' +
             /* W40: el segmento trae el carácter; el estilo activo
                decide imagen (noto/twemoji) o texto del sistema. */
-            '<img v-else-if="emoFile(sg.e)" class="emo" :src="emoSrc(sg.e)" ' +
-              ':alt="sg.t" :title="sg.t" loading="lazy">' +
+            '<img v-else-if="emoAnySrc(sg.e)" class="emo" :src="emoAnySrc(sg.e)" ' +
+              'alt="" :title="sg.t" loading="lazy">' +
+            /* W65: en Noto/Twemoji un emoji sin imagen no cae al glyph
+               del sistema (se prefiere el hueco a mezclar estilos). */
+            '<span v-else-if="sg.e && !emoNative"></span>' +
             /* W35b: link a imagen → la imagen misma (gif animado) */
             '<a v-else-if="sg.u && imgInline(sg.u)" class="msgimg" ' +
               ':href="sg.u" target="_blank" rel="noopener noreferrer">' +
@@ -2520,15 +2563,7 @@ const MessageRow = {
           '</div>' +
         '</div>' +
         /* W7: la hora va ABAJO del texto (antes flotaba arriba). */
-        '<div class="b-meta">' +
-          /* W58: estado de descarga SIEMPRE visible, con tamaño. */
-          '<button v-if="row.ref.media" class="b-dl-state" type="button" ' +
-            ':class="{ saved: !!dlSavedSize(row) }" ' +
-            ':title="dlSavedSize(row) ? t(\'Abrir archivo descargado\') : t(\'Descargar a la app\')" ' +
-            '@click.stop="dlFile(row, $event)">' +
-            '<svg class="ic ic-sm"><use :href="dlSavedSize(row) ? \'#i-check\' : \'#i-download\'"></use></svg>' +
-            '<span>{{ dlText(row) }}</span>' +
-          '</button>' +
+        '<div class="b-meta" v-if="row.showTime || row.ref.pending || row.mine || row.ref.pinned || row.ref.edited_at || (row.ref.spoiler && !spoiled)">' +
           /* W29d/h: revelado → ojo + "Ocultar" para volver a tapar */
           '<button v-if="row.ref.spoiler && !spoiled" class="b-spoil-dot" ' +
             'type="button" :title="t(\'Ocultar\')" ' +
@@ -2549,9 +2584,9 @@ const MessageRow = {
             ':class="{ mine: myReaction(row.ref) === rr.emoji }" ' +
             'v-for="(rr, i) in groupReactions(row.ref)" :key="i" ' +
             '@click="doReact(row, rr.emoji)" :title="reactTitle(row.ref, rr.emoji)">' +
-            '<img v-if="emoFile(rr.emoji)" class="emo" :src="emoSrc(rr.emoji)" ' +
-              ':alt="rr.emoji" loading="lazy">' +
-            '<span v-else>{{ rr.emoji }}</span>' +
+            '<img v-if="emoAnySrc(rr.emoji)" class="emo" :src="emoAnySrc(rr.emoji)" ' +
+              'alt="" loading="lazy">' +
+            '<span v-else-if="emoNative">{{ rr.emoji }}</span>' +
             '<i>{{ rr.count > 1 ? rr.count : \'\' }}</i>' +
           '</button>' +
         '</div>' +
@@ -2725,9 +2760,14 @@ const NewChatModal = {
         }
         try {
           await sendFriendRequest(u.username);
-          toast('Solicitud enviada a @' + u.username, 'ok');
           q.value = '';
           results.value = [];
+          /* W65: el flujo ＋ usa el mismo modal que un enlace directo. */
+          close();
+          store.requestSent = {
+            username: u.username,
+            display_name: u.display_name || u.username,
+          };
         } catch (e) {
           toast((e && e.detail) || 'No se pudo enviar la solicitud', 'err');
         }
@@ -2883,6 +2923,14 @@ const SettingsModal = {
       { val: '#e9e3d8', name: 'Papel' },
       { val: '#dfe9e7', name: 'Menta' },
     ];
+    /* W65: las tres apariencias se eligen por muestra de color; sin
+       botones con el nombre. `dark` mantiene su valor histórico (ahora
+       se llama "Intermedio") para no romper preferencias guardadas. */
+    const themes = [
+      { val: 'light', name: 'Claro', bg: '#e3e5e8', panel: '#f2f3f5', snap: '#ffffff' },
+      { val: 'dark', name: 'Intermedio', bg: '#1e1f22', panel: '#2b2d31', snap: '#383a40' },
+      { val: 'black', name: 'Oscuro puro', bg: '#000000', panel: '#0b0b0b', snap: '#202020' },
+    ];
     /* W8: "Cuenta" queda como ÚLTIMA pestaña: ahí se administra la cuenta
        (correo, contraseña, sesión y baja) y así el cierre de sesión no queda
        a la vista. W9: `group` abre un rótulo de sección en la nav lateral.
@@ -2893,8 +2941,10 @@ const SettingsModal = {
     const tabs = [
       { val: 'apariencia', name: 'Apariencia', group: 'Preferencias', icon: 'i-palette',
         desc: 'Tema, color, fondo y tamaño de letra' },
+      { val: 'notificaciones', name: 'Notificaciones', icon: 'i-bell',
+        desc: 'Avisos, sonidos y tonos' },
       { val: 'chat', name: 'Chat', icon: 'i-chat',
-        desc: 'Mensajes, micrófono, notificaciones y permisos' },
+        desc: 'Mensajes, micrófono y permisos' },
       { val: 'privacidad', name: 'Privacidad', icon: 'i-shield',
         desc: 'Bloqueo con contraseña de Archivados' },
       { val: 'descargas', name: 'Descargas', icon: 'i-download',
@@ -2906,18 +2956,30 @@ const SettingsModal = {
     ];
 
     const settingsMobile = Vue.ref(window.innerWidth <= 760);
-    const settingsHome = Vue.ref(settingsMobile.value);
+    /* W65: la portada móvil y la categoría activa viven en el store
+       porque ahora también forman parte de la URL (?settings=main,
+       ?settings=appearance…). Así el botón atrás y los enlaces directos
+       quedan sincronizados sin un ref local duplicado. */
+    const settingsHome = Vue.computed(function () {
+      return settingsMobile.value && !!store.settingsAtHome;
+    });
+    const setSettingsHome = function (v) {
+      store.settingsAtHome = !!(v && settingsMobile.value);
+    };
     const onSettingsResize = function () {
       settingsMobile.value = window.innerWidth <= 760;
-      if (!settingsMobile.value) settingsHome.value = false;
+      if (!settingsMobile.value) store.settingsAtHome = false;
     };
     window.addEventListener('resize', onSettingsResize);
-    Vue.onUnmounted(function () { window.removeEventListener('resize', onSettingsResize); });
+    Vue.onUnmounted(function () {
+      window.removeEventListener('resize', onSettingsResize);
+      store.settingsAtHome = false;
+    });
 
     const close = function () { store.settingsOpen = false; };
     const setTab = function (tv) { store.settingsTab = tv; };
-    const openCat = function (tv) { setTab(tv); settingsHome.value = false; };
-    const goSettingsHome = function () { settingsHome.value = true; };
+    const openCat = function (tv) { setTab(tv); setSettingsHome(false); };
+    const goSettingsHome = function () { setSettingsHome(true); };
     const pickTheme = function (m) { setTheme(m); };
     const pickAccent = function (c) { setAccent(c); };
     const pickWall = function (v) { setWall(v); };
@@ -3011,6 +3073,121 @@ const SettingsModal = {
     /* W40: estilo de emojis — system (fuente del SO), noto (imágenes
        de Google) o twemoji (imágenes Twemoji del sitio). */
     const setEmo = function (e) { setPrefStr('emo', e.target.value); };
+
+    /* ---------- W63: tonos de mensaje y llamada ---------- */
+    /* Los tonos personalizados se reflejan en refs para que el <select>
+       se actualice en el acto al subir uno (localStorage no es reactivo). */
+    const customMsgTone = Vue.ref(customTone('message'));
+    const customCallTone = Vue.ref(customTone('call'));
+    const saveCustomTone = function (kind, dataUrl) {
+      const obj = {
+        id: 'custom-' + kind,
+        name: kind === 'call' ? t('Tono de llamada') : t('Tono de mensaje'),
+        file: dataUrl,
+      };
+      try { localStorage.setItem('fm.p.customTone.' + kind, JSON.stringify(obj)); } catch (e) {}
+      if (kind === 'call') customCallTone.value = obj;
+      else customMsgTone.value = obj;
+    };
+    const messageTones = Vue.computed(function () {
+      const list = MESSAGE_TONES.slice();
+      if (customMsgTone.value) list.push(customMsgTone.value);
+      return list;
+    });
+    const callTones = Vue.computed(function () {
+      const list = CALL_TONES.slice();
+      if (customCallTone.value) list.push(customCallTone.value);
+      return list;
+    });
+    const messageTone = Vue.computed({
+      get: function () { return store.prefs.messageTone; },
+      set: function (v) { setPrefStr('messageTone', v); },
+    });
+    const callTone = Vue.computed({
+      get: function () { return store.prefs.callTone; },
+      set: function (v) { setPrefStr('callTone', v); },
+    });
+    let previewAudio = null;
+    let previewTimer = null;
+    const stopPreview = function () {
+      if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
+      if (previewAudio) { try { previewAudio.pause(); previewAudio.src = ''; } catch (e) {} previewAudio = null; }
+    };
+    /* Tono "predeterminado": pitido generado con Web Audio (no depende de archivos). */
+    const playBeep = function () {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880; osc.type = 'sine';
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+      osc.start(); osc.stop(ctx.currentTime + 0.18);
+      ctx.close().catch(function () {});
+    };
+    const previewTone = function (id, kind) {
+      stopPreview();
+      const tone = (kind === 'call' ? callTones.value : messageTones.value).find(function (t) { return t.id === id; });
+      if (!tone) return;
+      if (!tone.file) { playBeep(); return; }
+      previewAudio = new Audio(toneSrc(tone.file));
+      previewAudio.play().catch(function () {});
+      /* Un tono de llamada completo puede durar 30 s: la previsualización
+         se corta a los 8 s para no quedar sonando mientras se navega. */
+      previewTimer = setTimeout(stopPreview, 8000);
+    };
+    const pickMessageTone = function (e) {
+      const id = e && e.target ? e.target.value : messageTone.value;
+      messageTone.value = id;
+      previewTone(id, 'message');
+    };
+    const pickCallTone = function (e) {
+      const id = e && e.target ? e.target.value : callTone.value;
+      callTone.value = id;
+      previewTone(id, 'call');
+    };
+    /* En el APK, target="_blank" no abre el navegador: usamos el puente
+       nativo. En web/escritorio se deja el comportamiento normal (nueva
+       pestaña). */
+    const openToneNote = function (e) {
+      const bridge = window.FoxinixAndroid;
+      if (bridge && typeof bridge.openUrl === 'function') {
+        if (e) e.preventDefault();
+        try { bridge.openUrl('https://tonosdellamada.es'); } catch (err) {}
+      }
+    };
+    const readFileDataUrl = function (file) {
+      return new Promise(function (resolve, reject) {
+        const r = new FileReader();
+        r.onload = function () { resolve(r.result); };
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    };
+    const uploadMessageTone = async function (e) {
+      const file = e.target && e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const data = await readFileDataUrl(file);
+        saveCustomTone('message', data);
+        messageTone.value = 'custom-message';
+        previewTone('custom-message', 'message');
+        toast(t('Tono guardado'));
+      } catch (err) { toast(t('No se pudo subir el tono')); }
+    };
+    const uploadCallTone = async function (e) {
+      const file = e.target && e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const data = await readFileDataUrl(file);
+        saveCustomTone('call', data);
+        callTone.value = 'custom-call';
+        previewTone('custom-call', 'call');
+        toast(t('Tono guardado'));
+      } catch (err) { toast(t('No se pudo subir el tono')); }
+    };
 
     /* ---- cambiar contraseña ---- */
     const pwCur = Vue.ref('');
@@ -3402,7 +3579,7 @@ const SettingsModal = {
     return {
       store, tabs, close, setTab, openCat, goSettingsHome,
       settingsMobile, settingsHome,
-      accents, walls,
+      accents, walls, themes,
       pickTheme, pickAccent, pickWall, pickFont, pickLang, langs, toggle, setH12,
       setEmo,   /* W40 */
       /* W20: panel de fondo + micrófono */
@@ -3423,12 +3600,16 @@ const SettingsModal = {
       archiveActivate, archiveDisable, archiveChangePw,
       /* W58: permisos del dispositivo */
       permRows, permReview, permRefresh,
+      /* W63: tonos de mensaje y llamada */
+      messageTones, callTones, messageTone, callTone, previewTone,
+      pickMessageTone, pickCallTone, openToneNote, uploadMessageTone, uploadCallTone,
       doLogout: askLogout, doDelete: askDeleteAccount,
     };
   },
   template: `
     <div class="modal-veil settings-veil" @click.self="close">
-      <div class="modal settings" role="dialog" :aria-label="t('Ajustes')">
+      <div class="modal settings" :class="{ 'is-home': settingsMobile && settingsHome }"
+        role="dialog" :aria-label="t('Ajustes')">
         <header>
           <span class="m-head-title">
             <svg class="mobile-page-logo" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
@@ -3506,11 +3687,20 @@ const SettingsModal = {
           <template v-else-if="store.settingsTab === 'apariencia'">
             <div class="st-title">{{ t('Apariencia') }}</div>
             <div class="ap-sec">{{ t('Tema') }}</div>
-            <div class="ap-row">
-              <button class="ap-opt" type="button" :class="{ on: store.theme === 'dark' }"
-                @click="pickTheme('dark')">{{ t('Oscuro') }}</button>
-              <button class="ap-opt" type="button" :class="{ on: store.theme === 'light' }"
-                @click="pickTheme('light')">{{ t('Claro') }}</button>
+            <div class="ap-themes" role="group" :aria-label="t('Tema')">
+              <button class="ap-theme" type="button" v-for="th in themes" :key="th.val"
+                :class="{ on: store.theme === th.val }"
+                :title="t(th.name)" :aria-label="t(th.name)" :aria-pressed="store.theme === th.val"
+                @click="pickTheme(th.val)">
+                <span class="ap-theme-art" :style="{ background: th.bg }">
+                  <i class="ap-theme-side" :style="{ background: th.panel }"></i>
+                  <i class="ap-theme-bubble" :style="{ background: th.snap }"></i>
+                  <i class="ap-theme-accent" :style="{ background: store.accent }"></i>
+                </span>
+                <span class="ap-theme-check" v-if="store.theme === th.val">
+                  <svg class="ic ic-sm"><use href="#i-check"></use></svg>
+                </span>
+              </button>
             </div>
             <div class="ap-sec">{{ t('Color de acento') }}</div>
             <div class="ap-swatches">
@@ -3557,11 +3747,6 @@ const SettingsModal = {
             <div class="st-title">{{ t('Chat') }}</div>
             <div class="st-sec">
               <div class="st-h">{{ t('Mensajes') }}</div>
-              <div class="st-row">
-                <div class="st-col"><b>{{ t('Sonido de notificaciones') }}</b><span>{{ t('Bip cuando llega un mensaje') }}</span></div>
-                <label class="tgl"><input type="checkbox" :checked="store.prefs.sound"
-                  @change="toggle('sound')"><span class="tgl-track"><span class="tgl-knob"></span></span></label>
-              </div>
               <div class="st-row">
                 <div class="st-col"><b>{{ t('Avisar cuando escribo') }}</b><span>{{ t('Tus contactos ven “escribiendo…”') }}</span></div>
                 <label class="tgl"><input type="checkbox" :checked="store.prefs.typing"
@@ -3615,19 +3800,6 @@ const SettingsModal = {
                 <span class="mic-bar"><i :style="{ width: micLevel + '%' }"></i></span>
               </div>
             </div>
-            <div class="st-sec" v-if="notifOn">
-              <div class="st-h">{{ notifTitle }}</div>
-              <div class="st-row">
-                <div class="st-col"><b>{{ t('Avisos del sistema') }}</b><span>{{ notifLabel }}</span></div>
-                <button class="btn btn-ghost btn-sm" type="button"
-                  v-if="nativeNotifAvail && notifPerm === 'denied'"
-                  @click="openNotifSettings">{{ t('Abrir ajustes') }}</button>
-                <button class="btn btn-ghost btn-sm" type="button"
-                  v-else-if="notifPerm !== 'granted'"
-                  @click="askNotif">{{ t('Activar') }}</button>
-                <span class="st-ok" v-else>{{ t('Activas ✓') }}</span>
-              </div>
-            </div>
             <!-- W58: permisos del dispositivo (micrófono, cámara, avisos,
                  almacenamiento legacy). Se pueden revisar sin reiniciar. -->
             <div class="st-sec">
@@ -3642,6 +3814,68 @@ const SettingsModal = {
                 <button class="btn btn-ghost btn-sm" type="button" @click="permRefresh">{{ t('Actualizar') }}</button>
                 <button class="btn btn-sm" type="button" @click="permReview">{{ t('Revisar permisos') }}</button>
               </div>
+            </div>
+
+          </template>
+
+          <!-- ============ notificaciones ============ -->
+          <template v-else-if="store.settingsTab === 'notificaciones'">
+            <div class="st-title">{{ t('Notificaciones') }}</div>
+            <div class="st-sec">
+              <div class="st-h">{{ t('Avisos') }}</div>
+              <div class="st-row">
+                <div class="st-col"><b>{{ t('Sonido de notificaciones') }}</b><span>{{ t('Bip cuando llega un mensaje') }}</span></div>
+                <label class="tgl"><input type="checkbox" :checked="store.prefs.sound"
+                  @change="toggle('sound')"><span class="tgl-track"><span class="tgl-knob"></span></span></label>
+              </div>
+              <div class="st-row" v-if="notifOn">
+                <div class="st-col"><b>{{ t('Avisos del sistema') }}</b><span>{{ notifLabel }}</span></div>
+                <button class="btn btn-ghost btn-sm" type="button"
+                  v-if="nativeNotifAvail && notifPerm === 'denied'"
+                  @click="openNotifSettings">{{ t('Abrir ajustes') }}</button>
+                <button class="btn btn-ghost btn-sm" type="button"
+                  v-else-if="notifPerm !== 'granted'"
+                  @click="askNotif">{{ t('Activar') }}</button>
+                <span class="st-ok" v-else>{{ t('Activas ✓') }}</span>
+              </div>
+            </div>
+
+            <!-- W63: tonos de mensaje y llamada (W65: categoría propia) -->
+            <div class="st-sec tone-sec">
+              <div class="st-h">{{ t('Sonidos') }}</div>
+              <div class="st-row">
+                <div class="st-col"><b>{{ t('Tono de mensaje') }}</b><span>{{ t('Suena cuando llega un mensaje nuevo') }}</span></div>
+                <div class="tone-pick">
+                  <select class="input tone-select" :value="messageTone" @change="pickMessageTone">
+                    <option v-for="t in messageTones" :key="t.id" :value="t.id">{{ t.name }}</option>
+                  </select>
+                  <button class="btn btn-ghost btn-sm tone-play" type="button"
+                    @click="previewTone(messageTone, 'message')">{{ t('Previsualizar') }}</button>
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-col"><b>{{ t('Tono de llamada') }}</b><span>{{ t('Suena cuando te llaman') }}</span></div>
+                <div class="tone-pick">
+                  <select class="input tone-select" :value="callTone" @change="pickCallTone">
+                    <option v-for="t in callTones" :key="t.id" :value="t.id">{{ t.name }}</option>
+                  </select>
+                  <button class="btn btn-ghost btn-sm tone-play" type="button"
+                    @click="previewTone(callTone, 'call')">{{ t('Previsualizar') }}</button>
+                </div>
+              </div>
+              <div class="st-row tone-upload">
+                <label class="tone-up">
+                  <input type="file" accept="audio/mpeg, audio/wav, audio/ogg" @change="uploadCallTone" style="display: none">
+                  <button class="btn btn-ghost btn-sm" type="button">{{ t('Subir tono de llamada') }}</button>
+                </label>
+                <label class="tone-up">
+                  <input type="file" accept="audio/mpeg, audio/wav, audio/ogg" @change="uploadMessageTone" style="display: none">
+                  <button class="btn btn-ghost btn-sm" type="button">{{ t('Subir tono de mensaje') }}</button>
+                </label>
+              </div>
+              <p class="st-hint tone-note">
+                <a href="https://tonosdellamada.es" target="_blank" rel="noopener" @click="openToneNote">{{ t('Si quieres más tonos de llamada graciosos puedes descargar en: https://tonosdellamada.es') }}</a>
+              </p>
             </div>
           </template>
 
@@ -3859,7 +4093,7 @@ const SettingsModal = {
               <svg class="ic"><use href="#i-x"></use></svg>
             </button>
           </header>
-          <div class="m-body dl-cat-body">
+          <div class="m-body dl-cat-body dl-group-body">
             <div class="dl-item" v-for="d in dlCatGroup.items" :key="d.key">
               <div class="dl-info">
                 <b>{{ d.name }}</b>
@@ -3869,7 +4103,7 @@ const SettingsModal = {
                 @click="dlOpenFile(d)">{{ t('Abrir') }}</button>
               <button class="btn btn-ghost btn-sm" type="button"
                 :disabled="dlSaving === d.key" @click="dlSave(d)">
-                {{ dlSaving === d.key ? t('Guardando…') : t('Guardar') }}</button>
+                {{ dlSaving === d.key ? t('Guardando…') : t('Guardar en el dispositivo') }}</button>
               <button class="icon-btn" type="button" :title="t('Eliminar')" @click="dlDelete(d)">
                 <svg class="ic"><use href="#i-trash"></use></svg>
               </button>
@@ -4179,10 +4413,6 @@ const MeProfileModal = {
                   <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
                 </span>
               </span>
-              <div class="pf-idcol">
-                <div class="pp-name">{{ store.user.display_name || store.user.username }}</div>
-                <div class="pp-user">@{{ store.user.username }}</div>
-              </div>
               <div class="pf-status-wrap">
                 <button class="pf-quote pf-status-btn" type="button"
                   :title="t('Cambiar estado')" :aria-expanded="menuOpen ? 'true' : 'false'"
@@ -4192,6 +4422,10 @@ const MeProfileModal = {
                   <svg class="ic ic-sm pf-quote-chev" :class="{ open: menuOpen }"><use href="#i-chevron-down"></use></svg>
                 </button>
               </div>
+            </div>
+            <div class="pf-idbelow">
+              <div class="pp-name">{{ store.user.display_name || store.user.username }}</div>
+              <div class="pp-user">@{{ store.user.username }}</div>
             </div>
             <bio-text v-if="store.user.bio" :text="store.user.bio"></bio-text>
             <div class="pp-rows pf-rows">
@@ -4934,6 +5168,15 @@ const CallBox = {
     const fabDragging = Vue.ref(false);
     const fabPos = Vue.ref(null);        // {left, top} en píxeles
     let fabDragEnd = 0;
+    /* W62: ventana de llamada arrastrable, limitada al viewport, con
+       modo pantalla completa y mosaico para grupos. */
+    const panelEl = Vue.ref(null);
+    const panelPos = Vue.ref(null);      // {left, top, width, height}
+    const panelDragging = Vue.ref(false);
+    const full = Vue.ref(false);
+    const peerBgs = Vue.reactive({});
+    const peerBgKeys = {};
+    const peerMutedMap = Vue.reactive({});
     let timer = null;
     let speakTimer = null;
     let audioCtx = null;
@@ -4956,10 +5199,64 @@ const CallBox = {
     };
 
     const peer = function () { return store.call ? store.call.peer : null; };
+    const isGroup = function () { return !!(store.call && store.call.group); };
+    const groupPeerList = Vue.computed(function () {
+      const c = store.call;
+      if (!c || !c.group) return [];
+      const list = c.peers || [];
+      if (!list.length && c.state === 'incoming' && c.peer) {
+        return [Object.assign({}, c.peer, { video: false, placeholder: true })];
+      }
+      return list;
+    });
+    const callTitle = function () {
+      const c = store.call;
+      if (!c) return t('Llamada');
+      if (c.group) return c.chatName || t('Llamada de grupo');
+      return peerName() || t('Llamada');
+    };
+    const participantCount = function () {
+      const c = store.call;
+      if (!c || !c.group) return 0;
+      return (groupPeerList.value.length || 0) + (c.state === 'incoming' ? 0 : 1);
+    };
+    const peerNameOf = function (p) {
+      if (!p) return '';
+      return p.display_name || p.username || '';
+    };
+    const peerIniOf = function (p) {
+      return (peerNameOf(p) || '?').charAt(0).toUpperCase();
+    };
+    const peerAvatarOf = function (p) {
+      return p && p.avatar_url ? mediaUrl(p.avatar_url) : '';
+    };
+    const peerHasVideo = function (p) { return !!(p && p.video); };
+    const peerBgOf = function (p) {
+      return p && peerBgs[p.id] ? peerBgs[p.id] : '';
+    };
+    const ensurePeerBgs = function () {
+      if (!isGroup()) return;
+      const list = groupPeerList.value;
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (!p || !p.id) continue;
+        const key = (p.banner_url || '') + '|' + bannerPositionOf(p);
+        if (peerBgKeys[p.id] === key) continue;
+        peerBgKeys[p.id] = key;
+        peerBgs[p.id] = '';
+        if (!p.banner_url) continue;
+        (function (pid) {
+          callBlurBanner(p.banner_url, bannerPositionOf(p)).then(function (u) {
+            if (peerBgs[pid] !== undefined) peerBgs[pid] = u;
+          });
+        })(p.id);
+      }
+    };
     /* W61: respaldo para señales antiguas que solo traían nombre. Si el
        peer no trae avatar/portada, se completa con su perfil público. */
     let peerFetch = '';
     const ensurePeerProfile = function () {
+      if (isGroup()) return;
       const p = peer();
       if (!p || !p.username) return;
       if (p.avatar_url && p.banner_url) return;
@@ -5002,7 +5299,20 @@ const CallBox = {
       return !!(store.call && store.call.remoteVideo);
     };
     const selfCamOn = function () {
-      return !!(store.call && store.call.hasCam && !store.call.camOff);
+      const c = store.call;
+      return !!(c && (c.screen || (c.hasCam && !c.camOff)));
+    };
+    const canScreenShare = function () {
+      const c = store.call;
+      if (!c || !c.hasCam) return false;
+      try {
+        return !!(navigator.mediaDevices &&
+          typeof navigator.mediaDevices.getDisplayMedia === 'function');
+      } catch (e) { return false; }
+    };
+    const toggleScreen = function () {
+      if (store.call && store.call.screen) stopScreenShare();
+      else shareScreen();
     };
     const stateLine = function () {
       const c = store.call;
@@ -5010,6 +5320,9 @@ const CallBox = {
       if (c.state === 'incoming') return t('Llamada entrante');
       if (c.state === 'outgoing') return t('Llamando…');
       if (c.state === 'connecting') return t('Conectando…');
+      if (c.group && !(c.peers || []).length) {
+        return t('Esperando a que se unan');
+      }
       return elapsed.value;
     };
     const bgStyle = function (data) {
@@ -5017,6 +5330,7 @@ const CallBox = {
     };
 
     const makeBgs = function () {
+      if (isGroup()) ensurePeerBgs();
       const p = peer();
       const b = p && p.banner_url ? p.banner_url : '';
       const bp = p ? bannerPositionOf(p) : 50;
@@ -5093,15 +5407,25 @@ const CallBox = {
       } catch (e) { return 0; }
     };
     const pollSpeaking = function () {
-      bindAudio(getLocalStream(), getRemoteStream());
+      let remote = getRemoteStream();
+      if (store.call && store.call.group) {
+        const list = store.call.peers || [];
+        remote = null;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].connected) { remote = getPeerStream(list[i].id); break; }
+        }
+        if (!remote && list.length) remote = getPeerStream(list[0].id);
+      }
+      bindAudio(getLocalStream(), remote);
       const c = store.call;
       mySpeak.value = levelOf(anLocal) > 7 && !(c && c.muted);
       peerSpeak.value = levelOf(anRemote) > 7 && !remoteMuted.value;
     };
 
     const attach = function () {
+      const group = isGroup();
       const st = getRemoteStream();
-      const st2 = getLocalStream();
+      const st2 = getLocalPreviewStream();
       if (remoteEl.value) {
         if (st && remoteEl.value.srcObject !== st) {
           remoteEl.value.srcObject = st;
@@ -5122,7 +5446,35 @@ const CallBox = {
         }
         pipEl.value.muted = true;
       }
-      bindAudio(st2, st);
+      if (group && panelEl.value) {
+        const vids = panelEl.value.querySelectorAll('video[data-peer]');
+        for (let i = 0; i < vids.length; i++) {
+          const el = vids[i];
+          const pid = Number(el.getAttribute('data-peer'));
+          const pst = getPeerStream(pid);
+          if (pst && el.srcObject !== pst) {
+            el.srcObject = pst;
+            try {
+              const pr = el.play();
+              if (pr && typeof pr.catch === 'function') pr.catch(function () {});
+            } catch (e) {}
+          }
+          el.muted = !!peerMutedMap[pid];
+        }
+      }
+      let remoteAudio = st;
+      if (group && store.call) {
+        const list = store.call.peers || [];
+        remoteAudio = null;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].connected) {
+            remoteAudio = getPeerStream(list[i].id);
+            if (remoteAudio) break;
+          }
+        }
+        if (!remoteAudio && list.length) remoteAudio = getPeerStream(list[0].id);
+      }
+      bindAudio(getLocalStream(), remoteAudio);
       scrollChat(false);
     };
 
@@ -5135,14 +5487,13 @@ const CallBox = {
       for (let i = 0; i < all.length; i++) {
         const m = all[i];
         if (m.kind === 'system') continue;
-        if (m.e2e && m._plain == null) continue;
         let txt = '';
         if (m.kind === 'image') txt = t('Imagen');
         else if (m.kind === 'voice') txt = t('Nota de voz');
         else if (m.kind === 'file') {
           txt = m.media && /^video\//.test(m.media.mime || '') ? t('Video') : t('Archivo');
         } else if (m.kind === 'gif') txt = t('GIF');
-        else txt = (m._plain != null ? m._plain : (m.body || '')) || '';
+        else txt = m.body || '' || '';
         if (!txt) continue;
         const mine = !!(m.sender && meId && m.sender.id === meId);
         const nm = m.sender
@@ -5183,20 +5534,121 @@ const CallBox = {
       menu.value = null;
       if (typeof fn === 'function') fn();
     };
+    const menuPeer = function () {
+      if (!menu.value) return null;
+      if (menu.value.who === 'peer') return peer();
+      const who = String(menu.value.who || '');
+      if (who.indexOf('p:') === 0) {
+        const id = Number(who.slice(2));
+        const list = store.call && store.call.peers ? store.call.peers : [];
+        for (let i = 0; i < list.length; i++) {
+          if (Number(list[i].id) === id) return list[i];
+        }
+        if (store.call && store.call.peer && Number(store.call.peer.id) === id) {
+          return store.call.peer;
+        }
+      }
+      return null;
+    };
+    const menuPeerMuted = Vue.computed(function () {
+      const p = menuPeer();
+      if (!p) return false;
+      if (menu.value && menu.value.who === 'peer') return remoteMuted.value;
+      return !!peerMutedMap[p.id];
+    });
     const viewPeer = function () {
-      const p = peer();
+      const p = menuPeer();
       menu.value = null;
       if (p && p.username) openProfile(p.username);
     };
     const toggleRemoteMute = function () {
+      const p = menuPeer();
+      const isGroupPeer = !!(menu.value && String(menu.value.who).indexOf('p:') === 0);
       menu.value = null;
+      if (isGroupPeer && p) {
+        peerMutedMap[p.id] = !peerMutedMap[p.id];
+        if (panelEl.value) {
+          const el = panelEl.value.querySelector('video[data-peer="' + p.id + '"]');
+          if (el) el.muted = !!peerMutedMap[p.id];
+        }
+        return;
+      }
       remoteMuted.value = !remoteMuted.value;
       if (remoteEl.value) remoteEl.value.muted = remoteMuted.value;
       if (remoteMuted.value) peerSpeak.value = false;
     };
 
-    const minimize = function () { minimized.value = true; };
+    const minimize = function () {
+      menu.value = null;
+      full.value = false;
+      minimized.value = true;
+    };
     const restore = function () { minimized.value = false; };
+
+    const panelStyle = Vue.computed(function () {
+      const p = panelPos.value;
+      if (!p || full.value) return {};
+      return {
+        left: p.left + 'px', top: p.top + 'px',
+        width: p.width + 'px', height: p.height + 'px',
+        right: 'auto', bottom: 'auto',
+      };
+    });
+    const clampPanel = function () {
+      const p = panelPos.value;
+      if (!p || full.value) return;
+      const m = 6;
+      const vw = window.innerWidth || 360;
+      const vh = window.innerHeight || 640;
+      const w = Math.min(p.width, vw - m * 2);
+      const h = Math.min(p.height, vh - m * 2);
+      panelPos.value = {
+        left: Math.max(m, Math.min(p.left, vw - w - m)),
+        top: Math.max(m, Math.min(p.top, vh - h - m)),
+        width: w, height: h,
+      };
+    };
+    const startPanelDrag = function (e) {
+      if (!e || e.button) return;
+      if (full.value || minimized.value) return;
+      if (window.innerWidth <= 760) return;
+      if (e.target && e.target.closest && e.target.closest('button, input')) return;
+      const el = panelEl.value;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const x0 = e.clientX;
+      const y0 = e.clientY;
+      const w = r.width;
+      const h = r.height;
+      let moved = false;
+      e.preventDefault();
+      panelDragging.value = true;
+      const move = function (ev) {
+        if (!moved && Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 4) return;
+        moved = true;
+        const m = 6;
+        const vw = window.innerWidth || 360;
+        const vh = window.innerHeight || 640;
+        panelPos.value = {
+          left: Math.max(m, Math.min(r.left + (ev.clientX - x0), vw - w - m)),
+          top: Math.max(m, Math.min(r.top + (ev.clientY - y0), vh - h - m)),
+          width: w, height: h,
+        };
+      };
+      const up = function () {
+        panelDragging.value = false;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    };
+    const toggleFull = function () {
+      full.value = !full.value;
+      if (!full.value) Vue.nextTick(clampPanel);
+    };
 
     const fabStyle = Vue.computed(function () {
       const p = fabPos.value;
@@ -5261,6 +5713,7 @@ const CallBox = {
       document.addEventListener('click', closeMenu);
       document.addEventListener('keydown', closeMenu);
       window.addEventListener('resize', clampFab);
+      window.addEventListener('resize', clampPanel);
     });
     Vue.onUpdated(function () {
       attach();
@@ -5273,6 +5726,7 @@ const CallBox = {
       document.removeEventListener('click', closeMenu);
       document.removeEventListener('keydown', closeMenu);
       window.removeEventListener('resize', clampFab);
+      window.removeEventListener('resize', clampPanel);
       if (audioCtx) {
         try { audioCtx.close(); } catch (e) {}
       }
@@ -5286,17 +5740,22 @@ const CallBox = {
       peerBg, myBg, peerSpeak, mySpeak, remoteMuted, menu,
       fabEl, fabStyle, fabDragging, startFabDrag, fabClick,
       peerName, peerIni, peerAvatar, myAvatar, myIni,
+      isGroup, groupPeerList, callTitle, participantCount,
+      peerNameOf, peerIniOf, peerAvatarOf, peerHasVideo, peerBgOf,
+      peerMutedMap,
+      panelEl, panelStyle, panelDragging, startPanelDrag, full, toggleFull,
+      canScreenShare, toggleScreen,
       isIncoming, inCall, hasVideo, selfCamOn, stateLine, bgStyle,
       callMessages, sendChat, scrollChat,
-      openMenu, menuThen, viewPeer, toggleRemoteMute,
+      openMenu, menuThen, viewPeer, toggleRemoteMute, menuPeer, menuPeerMuted,
       minimize, restore,
       accept: acceptCall, reject: rejectCall, hangup: hangupCall,
       mute: toggleMute, cam: toggleCam,
     };
   },
   template:
-    '<div class="callbox" :class="{ incoming: isIncoming(), calling: !inCall() && !isIncoming(), active: inCall(), minimized: minimized }"' +
-      ' role="dialog" :aria-label="t(\'Llamada\')">' +
+    '<div class="callbox" :class="{ incoming: isIncoming(), calling: !inCall() && !isIncoming(), active: inCall(), minimized: minimized, full: full, dragging: panelDragging }"' +
+      ' :style="panelStyle" role="dialog" :aria-label="t(\'Llamada\')">' +
       '<button class="call-fab" type="button" v-if="minimized" ref="fabEl"' +
         ' :class="{ dragging: fabDragging, moved: !!fabStyle.left }"' +
         ' :style="fabStyle" @pointerdown="startFabDrag" @click.stop="fabClick"' +
@@ -5304,19 +5763,25 @@ const CallBox = {
         '<span class="call-fab-ic"><svg class="ic"><use href="#i-phone"></use></svg></span>' +
         '<span class="call-fab-t">{{ elapsed }}</span>' +
       '</button>' +
-      '<div class="call-panel" v-show="!minimized">' +
-        '<header class="call-head">' +
+      '<div class="call-panel" ref="panelEl" v-show="!minimized">' +
+        '<header class="call-head" @pointerdown="startPanelDrag">' +
           '<span class="call-col">' +
-            '<b>{{ peerName() || t(\'Llamada\') }}</b>' +
-            '<span class="call-state">{{ stateLine() }}</span>' +
+            '<b>{{ callTitle() }}</b>' +
+            '<span class="call-state">{{ stateLine() }}' +
+              '<template v-if="isGroup() && participantCount()"> · {{ participantCount() }}</template>' +
+            '</span>' +
           '</span>' +
+          '<button class="icon-btn call-full" type="button"' +
+            ' @click.stop="toggleFull" :title="full ? t(\'Salir de pantalla completa\') : t(\'Pantalla completa\')">' +
+            '<svg class="ic"><use :href="full ? \'#i-collapse\' : \'#i-expand\'"></use></svg>' +
+          '</button>' +
           '<button class="icon-btn call-min" type="button" v-if="!isIncoming()"' +
             ' @click.stop="minimize" :title="t(\'Minimizar\')">' +
             '<svg class="ic"><use href="#i-chevron-down"></use></svg>' +
           '</button>' +
         '</header>' +
-        '<div class="call-participants" :class="{ solo: isIncoming() }">' +
-          '<div class="call-tile peer" :class="{ speaking: peerSpeak, video: hasVideo() }"' +
+        '<div class="call-participants" :class="{ solo: isIncoming(), group: isGroup() }">' +
+          '<div class="call-tile peer" v-if="!isGroup()" :class="{ speaking: peerSpeak, video: hasVideo() }"' +
             ' @contextmenu.prevent.stop="openMenu($event, \'peer\')">' +
             '<div class="call-tile-bg" :style="bgStyle(peerBg)"></div>' +
             '<video class="call-remote" ref="remoteEl" autoplay playsinline' +
@@ -5329,6 +5794,23 @@ const CallBox = {
             '</div>' +
             '<span class="call-tile-foot">' +
               '<span class="call-tile-name">{{ peerName() }}</span>' +
+            '</span>' +
+          '</div>' +
+          '<div class="call-tile peer group-tile" v-for="p in groupPeerList" :key="\'gp\' + p.id"' +
+            ' :class="{ video: peerHasVideo(p) }" @contextmenu.prevent.stop="openMenu($event, \'p:\' + p.id)">' +
+            '<div class="call-tile-bg" :style="bgStyle(peerBgOf(p))"></div>' +
+            '<video class="call-peer-video" :data-peer="p.id" autoplay playsinline' +
+              ' v-show="peerHasVideo(p)"></video>' +
+            '<div class="call-avatar" v-if="!peerHasVideo(p)">' +
+              '<span class="avatar av72" :class="{ \'has-photo\': !!peerAvatarOf(p) }">' +
+                '<img v-if="peerAvatarOf(p)" :src="peerAvatarOf(p)" alt="">' +
+                '<span v-else>{{ peerIniOf(p) }}</span>' +
+              '</span>' +
+            '</div>' +
+            '<span class="call-tile-foot">' +
+              '<span class="call-tile-name">{{ peerNameOf(p) }}</span>' +
+              '<svg class="ic ic-sm" v-if="peerMutedMap[p.id]" :title="t(\'Silenciado\')">' +
+                '<use href="#i-mute"></use></svg>' +
             '</span>' +
           '</div>' +
           '<div class="call-tile self" v-if="!isIncoming()" :class="{ speaking: mySpeak, video: selfCamOn() }"' +
@@ -5369,6 +5851,11 @@ const CallBox = {
               ' :title="store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\')"' +
               ' :aria-label="store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\')">' +
               '<svg class="ic"><use :href="store.call.camOff ? \'#i-video-off\' : \'#i-video\'"></use></svg></button>' +
+            '<button type="button" class="call-round call-screen" v-if="inCall() && canScreenShare()"' +
+              ' :class="{ on: store.call.screen }" @click="toggleScreen"' +
+              ' :title="store.call.screen ? t(\'Dejar de compartir\') : t(\'Compartir pantalla\')"' +
+              ' :aria-label="store.call.screen ? t(\'Dejar de compartir\') : t(\'Compartir pantalla\')">' +
+              '<svg class="ic"><use href="#i-screen"></use></svg></button>' +
             '<button type="button" class="call-round hang call-hang" @click="hangup"' +
               ' :title="t(\'Colgar\')" :aria-label="t(\'Colgar\')">' +
               '<svg class="ic"><use href="#i-phone-down"></use></svg></button>' +
@@ -5396,17 +5883,22 @@ const CallBox = {
       '</div>' +
       '<div class="call-menu" v-if="menu" :style="{ left: menu.x + \'px\', top: menu.y + \'px\' }"' +
         ' @click.stop>' +
-        '<button type="button" v-if="menu.who === \'peer\'" @click="viewPeer">' +
-          '{{ t(\'Ver perfil\') }}</button>' +
-        '<button type="button" v-if="menu.who === \'peer\'" @click="toggleRemoteMute">' +
-          '{{ remoteMuted ? t(\'Escuchar de nuevo\') : t(\'Silenciar para mí\') }}</button>' +
+        '<button type="button" v-if="menuPeer()" @click="viewPeer">' +
+          '<svg class="ic ic-sm"><use href="#i-user"></use></svg>' +
+          '<span>{{ t(\'Ver perfil\') }}</span></button>' +
+        '<button type="button" v-if="menuPeer()" @click="toggleRemoteMute">' +
+          '<svg class="ic ic-sm"><use :href="menuPeerMuted ? \'#i-vol\' : \'#i-mute\'"></use></svg>' +
+          '<span>{{ menuPeerMuted ? t(\'Escuchar de nuevo\') : t(\'Silenciar para mí\') }}</span></button>' +
         '<button type="button" v-if="menu.who === \'self\'" @click="menuThen(mute)">' +
-          '{{ store.call.muted ? t(\'Activar el micrófono\') : t(\'Silenciar\') }}</button>' +
+          '<svg class="ic ic-sm"><use :href="store.call.muted ? \'#i-mic-off\' : \'#i-mic\'"></use></svg>' +
+          '<span>{{ store.call.muted ? t(\'Activar el micrófono\') : t(\'Silenciar\') }}</span></button>' +
         '<button type="button" v-if="menu.who === \'self\' && store.call.hasCam"' +
           ' @click="menuThen(cam)">' +
-          '{{ store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\') }}</button>' +
+          '<svg class="ic ic-sm"><use :href="store.call.camOff ? \'#i-video-off\' : \'#i-video\'"></use></svg>' +
+          '<span>{{ store.call.camOff ? t(\'Encender la cámara\') : t(\'Apagar la cámara\') }}</span></button>' +
         '<button type="button" class="danger" @click="menuThen(hangup)">' +
-          '{{ t(\'Colgar\') }}</button>' +
+          '<svg class="ic ic-sm"><use href="#i-phone-down"></use></svg>' +
+          '<span>{{ t(\'Colgar\') }}</span></button>' +
       '</div>' +
     '</div>',
 };
@@ -5486,6 +5978,7 @@ const ProfilePanel = {
     const friendState = Vue.computed(function () {
       const p = store.profile;
       if (!p || !p.user) return 'none';
+      if (p.relation === 'blocked') return 'blocked';
       const fs = (store.people && store.people.friends) || [];
       for (let i = 0; i < fs.length; i++) if (fs[i].id === p.user.id) return 'friend';
       const sent = (store.people && store.people.sent) || [];
@@ -5496,6 +5989,12 @@ const ProfilePanel = {
       for (let i = 0; i < recv.length; i++) {
         if (recv[i].user && recv[i].user.id === p.user.id) return 'received';
       }
+      /* W65: un enlace directo puede abrir el perfil antes de que la
+         lista de Personas termine de cargar. `relation` viene del mismo
+         endpoint por ID y evita ofrecer dos veces "Enviar solicitud". */
+      if (p.relation === 'blocked') return 'blocked';
+      if (p.relation === 'friend' || p.relation === 'sent' ||
+          p.relation === 'received') return p.relation;
       return 'none';
     });
 
@@ -5503,15 +6002,29 @@ const ProfilePanel = {
       const p = store.profile;
       if (!p || !p.user) return;
       const username = p.user.username;
+      if (friendState.value === 'blocked') {
+        toast(t('Usuario bloqueado'), 'info');
+        return;
+      }
       if (friendState.value === 'sent') {
         toast(t('Ya enviaste una solicitud de amistad'), 'info');
         return;
       }
       if (friendState.value === 'received') {
-        const recv = (store.people && store.people.received) || [];
-        let req = null;
-        for (let i = 0; i < recv.length; i++) {
-          if (recv[i].user && recv[i].user.id === p.user.id) { req = recv[i]; break; }
+        const findReq = function () {
+          const recv = (store.people && store.people.received) || [];
+          for (let i = 0; i < recv.length; i++) {
+            if (recv[i].user && recv[i].user.id === p.user.id) return recv[i];
+          }
+          return null;
+        };
+        let req = findReq();
+        if (!req) {
+          /* El enlace directo puede llegar antes que Personas. Se pide
+             la lista y se reintenta una sola vez; así "Aceptar" funciona
+             sin obligar a recargar. */
+          try { await loadPeople(); } catch (e) {}
+          req = findReq();
         }
         if (!req) { toast(t('La solicitud ya no está disponible'), 'info'); return; }
         close();
@@ -5600,13 +6113,15 @@ const ProfilePanel = {
                   <span v-else>{{ (store.profile.user.display_name || store.profile.user.username).charAt(0).toUpperCase() }}</span>
                 </span>
               </span>
-              <div class="pf-idcol">
-                <div class="pp-name">{{ store.profile.user.display_name }}</div>
-                <div class="pp-user">@{{ store.profile.user.username }}</div>
+              <div class="pf-status-wrap" v-if="profileQuote(store.profile.user)">
+                <div class="pf-quote pf-quote-static">
+                  <span class="pf-quote-text">{{ profileQuote(store.profile.user) }}</span>
+                </div>
               </div>
-              <div class="pf-quote pf-quote-static" v-if="profileQuote(store.profile.user)">
-                <span class="pf-quote-text">{{ profileQuote(store.profile.user) }}</span>
-              </div>
+            </div>
+            <div class="pf-idbelow">
+              <div class="pp-name">{{ store.profile.user.display_name }}</div>
+              <div class="pp-user">@{{ store.profile.user.username }}</div>
             </div>
             <bio-text v-if="store.profile.user.bio" :text="store.profile.user.bio"></bio-text>
             <div class="pp-rows pf-rows">
@@ -5615,11 +6130,48 @@ const ProfilePanel = {
           </div>
           <div class="pp-foot" v-if="!inActiveDm">
             <button class="btn btn-full" type="button" @click="startChat"
-              :disabled="friendState === 'sent'">
-              {{ friendState === 'friend' ? t('Mensaje') : friendState === 'sent' ? t('Solicitud pendiente') : friendState === 'received' ? t('Aceptar solicitud') : t('Enviar solicitud') }}
+              :disabled="friendState === 'sent' || friendState === 'blocked'">
+              {{ friendState === 'friend' ? t('Mensaje') : friendState === 'sent' ? t('Solicitud pendiente') : friendState === 'received' ? t('Aceptar solicitud') : friendState === 'blocked' ? t('Bloqueado') : t('Enviar solicitud') }}
             </button>
           </div>
         </template>
+      </div>
+    </div>`,
+};
+
+/* ------------------------------------------------- RequestSentModal (W65) */
+
+/* Confirmación única para una solicitud enviada desde un enlace directo
+   o desde el flujo "＋". No usa `alert()`: mantiene el lenguaje visual
+   de los demás modales y deja un acceso directo a Solicitudes. */
+const RequestSentModal = {
+  setup: function () {
+    const close = function () { store.requestSent = null; };
+    const goRequests = function () {
+      store.requestSent = null;
+      store.requestsJump++;
+    };
+    return { store, close, goRequests };
+  },
+  template: `
+    <div class="modal-veil reqsent-veil" @click.self="close" role="dialog"
+      aria-modal="true" :aria-label="t('Solicitud enviada.')">
+      <div class="modal req-sent">
+        <header>
+          <span class="m-head-title"><b>{{ t('Solicitud enviada.') }}</b></span>
+        </header>
+        <div class="req-sent-body">
+          <span class="req-sent-check" aria-hidden="true">
+            <svg class="ic"><use href="#i-check"></use></svg>
+          </span>
+          <p class="req-sent-lead">{{ t('Se ha enviado solicitud a @{n}',
+            { n: store.requestSent ? store.requestSent.username : '' }) }}</p>
+          <p class="req-sent-wait">{{ t('Espera a que acepte, podés ir a la sección') }}
+            <button class="req-link" type="button" @click="goRequests">{{ t('Solicitudes') }}</button></p>
+        </div>
+        <div class="req-sent-foot">
+          <button class="btn req-ok" type="button" @click="close">{{ t('Okey') }}</button>
+        </div>
       </div>
     </div>`,
 };
@@ -5947,35 +6499,6 @@ const ChatInfoPanel = {
       else { store.pinsModal = false; store.galModal = false; }
     }, { immediate: true });
 
-    /* -------- W29f/W31c: cifrado de extremo a extremo (sólo DM) ------
-       Siempre activo: ya no hay switch ni activación manual; el único
-       estado no activo es "Pendiente" (el par aún no publica clave). */
-    /* W30d/W31c: aviso mientras no se puede cifrar (el par no publica);
-       vale para TODOS los DMs. (W39: e2eStatus/"Activado" se eliminó
-       con la nota centrada del panel.) */
-    const e2ePendHint = Vue.computed(function () {
-      const c = chat.value;
-      if (!c || c.type !== 'dm') return '';
-      if (store.e2e[c.id]) return '';
-      if (!(store.e2ePend && store.e2ePend[c.id])) return '';
-      const n = (c.title && (c.title.display_name || c.title.username)) || '';
-      return t('Se activará cuando {n} publique sus claves', { n: n });
-    });
-    const e2eSas = Vue.computed(function () {
-      const c = chat.value;
-      if (!c || !store.e2e[c.id]) return '';
-      return store.e2eSas[c.id] || '';
-    });
-    /* (W39: el modal del código vive en ChatShell — su sasCode se
-       calcula allí sobre store.sasFor.) */
-    /* Al abrir el panel de un chat activado sin huella en memoria (p. ej.
-       tras recargar), se recalcula la clave/SAS. */
-    Vue.watch(chat, function (c) {
-      if (c && c.type === 'dm' && store.e2e[c.id] && !store.e2eSas[c.id]) {
-        e2eChatKey(c.id).catch(function () {});
-      }
-    }, { immediate: true });
-
     return {
       store, close, chat, peer, members, onlineCount, infoError, loading,
       isMe, memberLine, openMember,
@@ -5991,8 +6514,6 @@ const ChatInfoPanel = {
       gal, galLoading, openGal, closeGal, goGal, galClick, galSpoiled, fmtSize,
       /* W29c */
       memberTyping,
-      /* W29f/W31c */
-      e2eSas, e2ePendHint,
     };
   },
   components: { AvatarEditor, BioText },
@@ -6029,34 +6550,20 @@ const ChatInfoPanel = {
                 <span v-else>{{ (peer.display_name || peer.username).charAt(0).toUpperCase() }}</span>
               </span>
             </span>
-            <div class="pf-idcol">
-              <div class="pp-name">{{ peer.display_name || peer.username }}</div>
-              <div class="pp-user">@{{ peer.username }}</div>
+            <div class="pf-status-wrap" v-if="profileQuote(peer)">
+              <div class="pf-quote pf-quote-static">
+                <span class="pf-quote-text">{{ profileQuote(peer) }}</span>
+              </div>
             </div>
-            <div class="pf-quote pf-quote-static" v-if="profileQuote(peer)">
-              <span class="pf-quote-text">{{ profileQuote(peer) }}</span>
-            </div>
+          </div>
+          <div class="pf-idbelow">
+            <div class="pp-name">{{ peer.display_name || peer.username }}</div>
+            <div class="pp-user">@{{ peer.username }}</div>
           </div>
           <bio-text v-if="peer.bio" :text="peer.bio"></bio-text>
           <div class="pp-rows pf-rows">
             <div class="pp-row" v-if="peer.created_at"><b>{{ t('Miembro desde') }}</b><span>{{ joinedLine(peer) }}</span></div>
           </div>
-        </div>
-        <!-- W29f/W31c/W39: cifrado de extremo a extremo (DM) — una sola
-             línea centrada con el icono de llave: al usuario le basta
-             con saber que la conversación ES cifrada (sin "Activado"
-             ni botón de perfil: eso sobraba en el panel). -->
-        <div class="pp-e2e" v-if="chat && chat.type === 'dm'">
-          <div class="pp-e2e-row pp-e2e-center">
-            <svg class="ic ic-sm"><use href="#i-key"></use></svg>
-            <b>{{ t('Cifrado de extremo a extremo') }}</b>
-          </div>
-          <!-- W30d: aviso mientras el par no publica su clave -->
-          <div class="pp-e2e-pend" v-if="e2ePendHint">
-            <svg class="ic ic-sm"><use href="#i-info"></use></svg>
-            <span>{{ e2ePendHint }}</span>
-          </div>
-          <!-- W37b: el código vive en el menú ⋯ → ahora en un MODAL (W39). -->
         </div>
       </template>
 
@@ -6602,7 +7109,7 @@ const PeoplePanel = {
 /* ------------------------------------------------------- ChatShell */
 
 export const ChatShell = {
-  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, UsernameModal, ArchiveLockModal, DownloadViewer, ConfirmBox, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
+  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, UsernameModal, ArchiveLockModal, DownloadViewer, ConfirmBox, RequestSentModal, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
   setup: function () {
     const scroller = Vue.ref(null);
     const input = Vue.ref(null);
@@ -6620,13 +7127,6 @@ export const ChatShell = {
     /* W27h: al (re)montar la pantalla principal, el "Cargando…" del
        arranque cubre la carga de chats, gente y mensajes iniciales. */
     store.booting = true;
-
-    /* W39: código que muestra el MODAL de verificación — el menú ⋯ del
-       chat puede pedirlo para cualquier chat de la lista (el modal vive
-       en esta plantilla, no en el panel de info). */
-    const sasCode = Vue.computed(function () {
-      return (store.e2eSas && store.e2eSas[store.sasFor]) || '';
-    });
 
     /* ---------- lista ---------- */
 
@@ -6696,11 +7196,7 @@ export const ChatShell = {
         /* W11: los videos se distinguen de los archivos comunes */
         return who + (lm.media && /^video\//.test(lm.media.mime || '') ? t('Video') : t('Archivo'));
       }
-      /* W30c/W32: el preview de la lista se muestra DESCIFRADO; si el
-         mensaje cifrado todavía no se descifra, no se pinta nada —
-         nunca el marcador "[Mensaje cifrado]". */
-      if (lm.e2e && lm._plain == null) return '';
-      return who + (lm._plain != null ? lm._plain : (lm.body || ''));
+      return who + (lm.body || '');
     };
 
     /* W29c: pelotita de "escribiendo…" para la lista de chats. */
@@ -6718,28 +7214,19 @@ export const ChatShell = {
 
     /* ---------- conversación ---------- */
 
-    /* P1: no meter miles de filas en el DOM. Se renderiza la ventana
-       más reciente (300) y se amplía con "Ver anteriores" o al llegar
-       arriba; el historial sigue completo en store.msgs. */
-    const ROWS_PAGE = 300;
+    /* P1/W62: no meter miles de filas en el DOM. Se renderiza la ventana
+       más reciente por trozos de 80 y se amplía con "Ver anteriores" o al
+       llegar arriba; el historial sigue completo en store.msgs. */
+    const ROWS_PAGE = 80;
     const renderLimit = Vue.ref(ROWS_PAGE);
 
     const rows = Vue.computed(function () {
       const all = store.msgs[store.activeChatId];
       const out = [];
       if (!all) return out;
-      /* W32: un mensaje cifrado AÚN sin descifrar NO se pinta: así no
-         aparece (ni parpadea) el marcador "[Mensaje cifrado]" — la
-         fila nace cuando llega _plain. Se leen e2e/_plain de TODOS
-         los mensajes para que Vue rastree los ocultos (al descifrar,
-         el computed se re-evalúa y la fila aparece), y el agrupado
-         corre sólo sobre los visibles. */
-      const arr = [];
-      for (let i = 0; i < all.length; i++) {
-        const x = all[i];
-        if (x.e2e && x._plain == null) continue;
-        arr.push(x);
-      }
+      /* Copia: más abajo se recorta con splice y NO hay que tocar el
+         store.msgs original. */
+      const arr = all.slice();
       if (arr.length > renderLimit.value) {
         arr.splice(0, arr.length - renderLimit.value);
       }
@@ -6838,11 +7325,7 @@ export const ChatShell = {
     const hiddenRows = Vue.computed(function () {
       const all = store.msgs[store.activeChatId];
       if (!all) return 0;
-      let visible = 0;
-      for (let i = 0; i < all.length; i++) {
-        if (!(all[i].e2e && all[i]._plain == null)) visible++;
-      }
-      return Math.max(0, visible - renderLimit.value);
+      return Math.max(0, all.length - renderLimit.value);
     });
 
     /* W29c: "escribiendo…" por USUARIO: varios pueden escribir a la vez
@@ -7086,9 +7569,7 @@ export const ChatShell = {
       /* W45: al responder un spoiler, la barra de respuesta tampoco lo
          muestra. */
       if (s.spoiler) return t('Spoiler');
-      /* W37: el texto descifrado manda (los E2E guardan el marcador en
-         body y el claro en _plain). */
-      const txt = (s._plain != null ? s._plain : s.body) || '';
+      const txt = s.body || '';
       if (txt) return txt.length > 90 ? txt.slice(0, 90) + '…' : txt;
       if (s.kind === 'voice') return t('Nota de voz');
       if (s.kind === 'image') return t('Imagen');
@@ -7099,17 +7580,6 @@ export const ChatShell = {
     const onReact = function (m, emoji) {
       toggleReaction(store.activeChatId, m.id, emoji);
     };
-
-    /* W30d: aviso visible mientras el cifrado NO puede activarse
-       (el par aún no publica su clave) — se ve mientras se chatea. */
-    const e2ePendBar = Vue.computed(function () {
-      const c = activeChat.value;
-      if (!c || c.type !== 'dm') return '';
-      if (store.e2e[c.id]) return '';
-      if (!(store.e2ePend && store.e2ePend[c.id])) return '';
-      const n = (c.title && (c.title.display_name || c.title.username)) || '';
-      return t('Cifrado pendiente: se activará cuando {n} publique sus claves', { n: n });
-    });
 
     /* ---------- notas de voz ---------- */
 
@@ -7469,6 +7939,17 @@ export const ChatShell = {
         }
       }
       if (files.length) { e.preventDefault(); pickFiles(files); }
+      /* W65: el texto pegado NO se reescribe en el compositor. Los
+         :código: y emojis Unicode se convierten al enviar (sendText). */
+    };
+
+    /* W65: una imagen de emoji que falle se oculta; el `alt` vacío ya
+       evita que el navegador pinte el glyph del sistema encima. */
+    const onEmojiImgError = function (e) {
+      const el = e.target;
+      if (el && el.tagName === 'IMG' && el.classList.contains('emo')) {
+        el.classList.add('emo-broken');
+      }
     };
 
     /* Arrastrar y soltar archivos sobre la conversación */
@@ -7630,8 +8111,10 @@ export const ChatShell = {
         initInfoPanel();                       // W7: info por defecto si hay lugar
       };
       bootPermissions().catch(function () {}).then(start);
-      /* W61: la biblioteca propia se carga al arrancar para que las
-         estrellas de los stickers recibidos ya salgan rellenas. */
+      /* W61/W62: favoritos y biblioteca se cargan al arrancar para que
+         las estrellas de mensajes ya salgan rellenas, sin esperar a que
+         se abra el selector. */
+      ensureGifFavs();
       ensureUserAssets();
       document.addEventListener('click', onDocClick);
       window.addEventListener('keydown', onEsc);
@@ -7642,6 +8125,7 @@ export const ChatShell = {
       }
       /* W11: pegar (Ctrl+V) + arrastrar y soltar archivos */
       document.addEventListener('paste', onPasteEv);
+      document.addEventListener('error', onEmojiImgError, true);
       const root = rootEl.value;
       if (root) {
         root.addEventListener('dragover', onDragOver);
@@ -7672,6 +8156,7 @@ export const ChatShell = {
       document.removeEventListener('click', onDocClick);
       window.removeEventListener('keydown', onEsc);
       document.removeEventListener('paste', onPasteEv);
+      document.removeEventListener('error', onEmojiImgError, true);
       const root = rootEl.value;
       if (root) {
         root.removeEventListener('dragover', onDragOver);
@@ -7686,7 +8171,10 @@ export const ChatShell = {
       /* W6: ningún panel/ajuste sobrevive a la pantalla */
       store.profile = null;
       store.settingsOpen = false;
+      store.settingsAtHome = false;
       store.settingsTab = 'apariencia';
+      store.requestSent = null;
+      store.pendingUser = 0;
       store.meProfileOpen = false;
       store.confirmBox = null;
       /* W7 */
@@ -7731,8 +8219,11 @@ export const ChatShell = {
     });
 
     const openSettings = function (tab) {
-      /* W8: sin pestaña fija, abre en la última vista (default: la primera). */
+      /* W8: sin pestaña fija, abre en la última vista (default: la primera).
+         W65: en móvil la URL ?settings=main abre la portada de categorías;
+         un enlace a una categoría concreta entra directo a ella. */
       if (tab) store.settingsTab = tab;
+      store.settingsAtHome = !tab && window.innerWidth <= 760;
       store.settingsOpen = true;
     };
 
@@ -7745,6 +8236,7 @@ export const ChatShell = {
        GIFs); pickTab elige el cuerpo y el clamp lo hace el padre. */
     const pickEl = Vue.ref(null);
     const pickTab = Vue.ref('emo');
+    const emoNative = Vue.computed(function () { return emoStyle() === 'system'; });
     const setPickTab = function (id) {
       pickTab.value = id;
       /* W36k/W61: abrir GIFs o Stickers trae la biblioteca propia. */
@@ -8106,6 +8598,25 @@ export const ChatShell = {
     };
     const closePeople = function () { store.peopleMobile = false; };
 
+    /* W65: el modal "Solicitud enviada" enlaza a esta pantalla. */
+    const goRequests = function () {
+      store.settingsOpen = false;
+      store.settingsAtHome = false;
+      store.showArchived = false;
+      store.profile = null;
+      leaveArchiveLock();
+      store.peopleTab = 'req';
+      if (isNarrow.value) {
+        if (store.activeChatId) closeChat();
+        store.peopleMobile = true;
+      } else if (store.activeChatId) {
+        closeChat();
+      }
+    };
+    Vue.watch(function () { return store.requestsJump; }, function (nv, ov) {
+      if (nv && nv !== ov) goRequests();
+    });
+
     /* W54: navegación móvil. En el teléfono la app usa una barra inferior
        (Chats / Personas / Ajustes) en vez de la fila "Personas" y el panel
        de usuario del sidebar de escritorio. */
@@ -8124,7 +8635,15 @@ export const ChatShell = {
       const c = activeChat.value;
       if (!c) return;
       const items = [];
-      if (canCall.value) {
+      if (canJoinGroup.value) {
+        /* W64: en el teléfono el menú muestra la sala abierta con su
+           aforo: "Entrar en la llamada - [persona] N". */
+        items.push({
+          label: 'Entrar en la llamada', icon: 'i-phone',
+          pill: { icon: 'i-user', text: String(activeGroupCall.value.count) },
+          fn: joinCall,
+        });
+      } else if (canCall.value) {
         items.push({
           label: 'Llamar', icon: 'i-phone',
           fn: function () { doCall(false); },
@@ -8407,8 +8926,7 @@ export const ChatShell = {
         { label: 'Responder', icon: 'i-reply', fn: function () { startReply(m); } },
         { label: 'Reaccionar', icon: 'i-smile', fn: function () { store.reactFor = m.id; } },
       ];
-      /* W37b: copiar el texto DESCIFRADO (nunca el marcador E2E) */
-      const cpTxt = (m._plain != null ? m._plain : m.body) || '';
+      const cpTxt = m.body || '';
       if (cpTxt) {
         items.push({
           label: 'Copiar texto', icon: 'i-copy',
@@ -8446,6 +8964,27 @@ export const ChatShell = {
         label: 'Reenviar…', icon: 'i-forward',
         fn: function () { openForward(m); },
       });
+      /* W62: la descarga ya no ocupa una pastilla debajo del adjunto;
+         sigue disponible desde el menú del mensaje y el visor. */
+      if (m.media && m.media.url) {
+        const dlUrl = mediaUrl(m.media.url, true);
+        const dlKey = downloadKey(dlUrl);
+        const dlSaved = !!(dlKey && store.dlSaved[dlKey]);
+        items.push({
+          label: dlSaved ? 'Abrir archivo descargado' : 'Descargar archivo',
+          icon: dlSaved ? 'i-check' : 'i-download',
+          fn: function () {
+            if (dlSaved) {
+              openAppDownload(dlKey).then(function (ok) {
+                if (!ok) toast(t('El archivo ya no está disponible'), 'err');
+              });
+            } else {
+              startDownload(dlUrl, m.media.name || 'archivo', null,
+                m.media.mime || '', m.kind || 'file');
+            }
+          },
+        });
+      }
       /* W8: editar y eliminar sólo lo tuyo */
       if (r.mine) {
         /* W28f: quién leyó tu mensaje — solo en grupos */
@@ -8462,7 +9001,7 @@ export const ChatShell = {
             fn: function () {
               /* W32: texto descifrado al editar (nunca el marcador). */
               store.editFor = m.id;
-              store.editDraft = (m._plain != null ? m._plain : m.body) || '';
+              store.editDraft = m.body || '';
             },
           });
         }
@@ -8784,13 +9323,13 @@ export const ChatShell = {
         if (!store.confirmBox.busy) store.confirmBox = null;
         return;
       }
+      if (store.requestSent) { store.requestSent = null; return; }  // W65
       if (lb.value) { closeLb(); return; }                      // W8
       if (store.ctx) { store.ctx = null; return; }              // W7
       if (acList.value.length) { clearAc(); return; }           // W17
       if (store.emoOpen) { store.emoOpen = false; return; }     // W7/W29g
       if (fwdFor.value) { fwdFor.value = null; return; }        // W13
       if (searchOpen.value) { toggleSearch(); return; }         // W13
-      if (store.sasOpen) { store.sasOpen = false; return; }     // W39
       if (store.unameOpen) { store.unameOpen = false; return; }  // W60
       if (store.meProfileOpen) { store.meProfileOpen = false; return; }
       if (store.pwOpen) { store.pwOpen = false; return; }       // W8
@@ -8814,15 +9353,36 @@ export const ChatShell = {
 
     /* ---------- W28h: llamadas 1:1 ---------- */
 
+    /* W64: presencia de una sala de grupo (aunque yo no esté dentro). */
+    const groupCallOf = function (c) {
+      if (!c || c.type !== 'group' || !store.groupCalls) return null;
+      return store.groupCalls[c.id] || null;
+    };
+    const activeGroupCall = Vue.computed(function () {
+      return groupCallOf(activeChat.value);
+    });
+    const canJoinGroup = Vue.computed(function () {
+      const c = activeChat.value;
+      return !!(c && c.type === 'group' && !store.call &&
+        activeGroupCall.value && activeGroupCall.value.count);
+    });
     const canCall = Vue.computed(function () {
       const c = activeChat.value;
-      if (!c || c.type !== 'dm' || store.call) return false;
+      if (!c || store.call) return false;
+      /* Si ya hay sala, el botón de llamada es el verde de entrar; no
+         se ofrece iniciar otra llamada en paralelo. */
+      if (c.type === 'group') return !activeGroupCall.value;
+      if (c.type !== 'dm') return false;
       const peer = c.title;   // en un DM, title ES el brief del peer
       return !!(peer && peer.id) && (store.blocks || []).indexOf(peer.id) < 0;
     });
     const doCall = function (video) {
       const c = activeChat.value;
-      if (c && c.type === 'dm') startCall(c, !!video);
+      if (c && (c.type === 'dm' || c.type === 'group')) startCall(c, !!video);
+    };
+    const joinCall = function () {
+      const c = activeChat.value;
+      if (c && c.type === 'group') joinGroupCall(c);
     };
 
     return {
@@ -8830,7 +9390,8 @@ export const ChatShell = {
       scroller, input, fileInput, draft,
       draftCount, draftLong, maxText: MAX_TEXT_CHARS,
       rootEl,
-      canCall, doCall,   /* W28h */
+      canCall, canJoinGroup, activeGroupCall, groupCallOf,
+      doCall, joinCall,   /* W28h/W64 */
       /* W13 */
       searchOpen, sQ, sResults, sBusy, sErr,
       toggleSearch, onSearchInput, sSnippet, sTime, jumpResult,
@@ -8846,14 +9407,13 @@ export const ChatShell = {
       keepComposerVisible,   /* W54d: teclado de Android */
       stick, scrollBottom,   /* W44: botón "ir hacia abajo" */
       replyTo, replySender, replyPreview, startReply, cancelReply, onReact,
-      e2ePendBar,   /* W30d: aviso de cifrado pendiente */
-      sasCode,      /* W39: modal del código de verificación */
       spoilNext,   /* W29d: spoiler del próximo mensaje */
       rec, recTime, startRec, stopRec, recWave, recBar,
       open: openChat, close: closeChat,
       toggleTheme, logout, startNewChat, openAddMember, mediaUrl, wsLabel,
       /* W6 */
       myStatusLine, openSettings, openProfile, openPeerProfile,
+      goRequests,
       onComposerKey, askLogout,
       /* W7 */
       myDot, headDotClass, headTitle, onHeadClick, toggleInfo,
@@ -8865,8 +9425,8 @@ export const ChatShell = {
       toggleEmo, insertEmoji,
       /* W29g: panel unificado con 3 pestañas (Emojis/Stickers/GIFs) */
       pickEl, pickTab, setPickTab, onSticker, onGif,
-      /* W36a: los stickers se pintan con Twemoji del sitio */
-      emoFile, emoSrc,
+      /* W36a/W65: imágenes del estilo elegido, con respaldo del otro set */
+      emoFile, emoSrc, emoAnySrc, emoNative,
       /* W36k */
       onGifFav, onFavDel, favGifSrc, isLibGifFav, toggleLibGif,
       isStkFav, toggleStkFav,
@@ -8967,10 +9527,15 @@ export const ChatShell = {
               '<span class="ci-top"><span class="ci-name">{{ titleOf(c) }}</span>' +
               /* W60: fijado / silenciado pegados a la hora, a su izquierda. */
               '<span class="ci-meta">' +
-                '<span class="ci-icons" v-if="c.pinned || c.muted || (store.call && store.call.chatId === c.id)">' +
+                '<span class="ci-icons" v-if="c.pinned || c.muted || (store.call && store.call.chatId === c.id) || groupCallOf(c)">' +
                   '<svg class="ic ic-sm ci-call" v-if="store.call && store.call.chatId === c.id"' +
                     ' :title="store.call.state === \'incoming\' ? t(\'Llamada entrante\') : t(\'En llamada\')">' +
                     '<use href="#i-phone"></use></svg>' +
+                  /* W64: sala de grupo abierta a la que puedo entrar. */
+                  '<span class="ci-call-live" v-else-if="groupCallOf(c)"' +
+                    ' :title="t(\'Llamada de grupo · {n}\', { n: groupCallOf(c).count })">' +
+                    '<svg class="ic ic-sm"><use href="#i-phone"></use></svg>' +
+                    '<b>{{ groupCallOf(c).count }}</b></span>' +
                   '<svg class="ic ic-sm" v-if="c.pinned" :title="t(\'Fijado\')"><use href="#i-pin"></use></svg>' +
                   '<svg class="ic ic-sm" v-if="c.muted" :title="t(\'Silenciado\')"><use href="#i-bell-off"></use></svg>' +
                 '</span>' +
@@ -9051,6 +9616,15 @@ export const ChatShell = {
             ':title="t(\'Buscar en el chat\')" @click="toggleSearch">' +
             '<svg class="ic"><use href="#i-search"></use></svg>' +
           '</button>' +
+          /* W64: sala de grupo abierta — botón verde con aforo. Al
+             pulsarlo se entra a la llamada; no suena en ningún lado. */
+          '<button class="icon-btn call-action call-live" v-if="canJoinGroup" type="button" ' +
+            ':title="t(\'Entrar en la llamada · {n}\', { n: activeGroupCall.count })" ' +
+            ':aria-label="t(\'Entrar en la llamada · {n}\', { n: activeGroupCall.count })" ' +
+            '@click="joinCall">' +
+            '<svg class="ic"><use href="#i-phone"></use></svg>' +
+            '<span class="call-count">{{ activeGroupCall.count }}</span>' +
+          '</button>' +
           /* W28h: llamadas 1:1 (solo DM; si ya hay una, el .callbox manda) */
           '<button class="icon-btn call-action" v-if="canCall" type="button" ' +
             ':title="t(\'Llamar\')" @click="doCall(false)">' +
@@ -9125,8 +9699,8 @@ export const ChatShell = {
         '<footer class="composer">' +
           /* W59: el botón vive DENTRO del compositor y se ancla a su
              borde superior. Así nunca se monta sobre la barra inferior
-             ni sobre el campo de texto, aunque haya respuesta, cifrado
-             pendiente o archivo adjunto (el compositor crece). */
+             ni sobre el campo de texto, aunque haya respuesta o archivo
+             adjunto (el compositor crece). */
           '<button class="jump-bottom" type="button" v-if="!stick" ' +
             ':title="t(\'Ir hacia abajo\')" @click="scrollBottom">' +
             '<svg class="ic"><use href="#i-chevron-down"></use></svg>' +
@@ -9140,11 +9714,6 @@ export const ChatShell = {
             '<button class="icon-btn" type="button" :title="t(\'Cancelar respuesta\')" @click="cancelReply">' +
               '<svg class="ic ic-sm"><use href="#i-x"></use></svg>' +
             '</button>' +
-          '</div>' +
-          /* W30d: aviso de cifrado pendiente (el par aún no publica) */
-          '<div class="e2e-pend-bar" v-if="e2ePendBar">' +
-            '<svg class="ic ic-sm"><use href="#i-info"></use></svg>' +
-            '<span>{{ e2ePendBar }}</span>' +
           '</div>' +
           /* W23: ficha del archivo (nombre + tipo/tamaño); el texto del
              mensaje se escribe en el compositor de abajo */
@@ -9227,8 +9796,8 @@ export const ChatShell = {
                   '<div class="st-grid">' +
                     '<span class="st-wrap" v-for="s in store.stkFavs" :key="\'fav-\' + s">' +
                       '<button class="st-e" type="button" @click="onSticker(s)" :title="s">' +
-                        '<img v-if="emoFile(s)" class="emo" :src="emoSrc(s)" :alt="s">' +
-                        '<span v-else>{{ s }}</span></button>' +
+                        '<img v-if="emoAnySrc(s)" class="emo" :src="emoAnySrc(s)" alt="">' +
+                        '<span v-else-if="emoNative">{{ s }}</span></button>' +
                       '<button class="st-fav on" type="button" ' +
                         ':title="t(\'Quitar de favoritos\')" @click.stop="toggleStkFav(s)">' +
                         '<svg class="ic ic-sm"><use href="#i-star-fill"></use></svg></button>' +
@@ -9260,8 +9829,8 @@ export const ChatShell = {
                 '<div class="st-grid">' +
                   '<span class="st-wrap" v-for="s in stkList" :key="s">' +
                     '<button class="st-e" type="button" @click="onSticker(s)" :title="s">' +
-                      '<img v-if="emoFile(s)" class="emo" :src="emoSrc(s)" :alt="s">' +
-                      '<span v-else>{{ s }}</span></button>' +
+                      '<img v-if="emoAnySrc(s)" class="emo" :src="emoAnySrc(s)" alt="">' +
+                      '<span v-else-if="emoNative">{{ s }}</span></button>' +
                     '<button class="st-fav" :class="{ on: isStkFav(s) }" type="button" ' +
                       ':title="isStkFav(s) ? t(\'Quitar de favoritos\') : t(\'Guardar en stickers\')" ' +
                       '@click.stop="toggleStkFav(s)">' +
@@ -9325,8 +9894,8 @@ export const ChatShell = {
             '<div class="emo-ac" ref="acEl" v-if="acList.length" @click.stop>' +
               '<button class="emo-ac-row" :class="{ on: i === acIdx }" type="button" ' +
                 'v-for="(m, i) in acList" :key="m.code" @click="pickAc(i)">' +
-                '<b><img v-if="emoFile(m.ch)" class="emo" :src="emoSrc(m.ch)" ' +
-                  ':alt="m.ch"><span v-else>{{ m.ch }}</span></b><i>:{{ m.code }}:</i>' +
+                '<b><img v-if="emoAnySrc(m.ch)" class="emo" :src="emoAnySrc(m.ch)" ' +
+                  'alt=""><span v-else-if="emoNative">{{ m.ch }}</span></b><i>:{{ m.code }}:</i>' +
               '</button>' +
             '</div>' +
             /* W28b: @menciones — flota igual que el de :código: */
@@ -9383,7 +9952,7 @@ export const ChatShell = {
          completa (se vuelve con la flecha). */
       '<nav class="mobile-tabs" v-if="!store.activeChatId && !store.wallPanelOpen && ' +
         '!store.meProfileOpen && !store.newChatOpen && !store.profile && ' +
-        '!store.settingsOpen" ' +
+        '(!store.settingsOpen || store.settingsAtHome)" ' +
         ':aria-label="t(\'Navegación principal\')">' +
         '<button class="mt-btn" type="button" :class="{ on: !store.peopleMobile && !store.settingsOpen && !store.showArchived && !store.archiveLockPrompt }" ' +
           '@click="mobileChats">' +
@@ -9512,32 +10081,11 @@ export const ChatShell = {
         '</div>' +
       '</div>' +
       '</transition>' +
-      /* W39: el código de verificación E2E en un MODAL centrado (antes
-         era un toast que se perdía en la esquina). Icono de llave,
-         los 6 números bien grandes y una pista para compararlo. */
-      '<transition name="veil">' +
-      '<div class="modal-veil" v-if="store.sasOpen" @click.self="store.sasOpen = false">' +
-        '<div class="modal sas-modal" role="dialog" ' +
-          ':aria-label="t(\'Código de verificación\')">' +
-        '<header>' +
-          '<b>{{ t(\'Código de verificación\') }}</b>' +
-          '<button class="icon-btn" type="button" :title="t(\'Cerrar\')" ' +
-            '@click="store.sasOpen = false">' +
-            '<svg class="ic"><use href="#i-x"></use></svg>' +
-          '</button>' +
-        '</header>' +
-        '<div class="sas-body">' +
-          '<svg class="ic sas-ic"><use href="#i-key"></use></svg>' +
-          '<div class="sas-code">{{ sasCode }}</div>' +
-          '<div class="sas-hint">' +
-            '{{ t(\'Compara este código con tu contacto. Si coincide, ' +
-              'nadie intercepta la conversación.\') }}' +
-          '</div>' +
-        '</div>' +
-        '</div>' +
-      '</div>' +
-      '</transition>' +
       '<profile-panel></profile-panel>' +
+      /* W65: confirmación de solicitud enviada (enlace directo o ＋). */
+      '<transition name="veil">' +
+      '<request-sent-modal v-if="store.requestSent"></request-sent-modal>' +
+      '</transition>' +
       /* W11: soltar archivos sobre el chat */
       '<div class="drop-hint" v-if="dropping">' +
         '<span>{{ t(\'Suelta los archivos para enviarlos\') }}</span>' +
@@ -9582,12 +10130,16 @@ export const ChatShell = {
         '<button class="ctx-item" :class="{ danger: it.danger }" type="button" ' +
           'v-for="(it, i) in store.ctx.items" :key="i" @click="runCtx(it)">' +
           '<svg class="ic ic-sm ctx-ic" v-if="it.icon"><use :href="\'#\' + it.icon"></use></svg>' +
-          '<span>{{ t(it.label) }}</span></button>' +
+          '<span class="ctx-label">{{ t(it.label) }}</span>' +
+          '<span class="ctx-sep" v-if="it.pill">-</span>' +
+          '<span class="ctx-pill" v-if="it.pill">' +
+            '<svg class="ic ic-sm" v-if="it.pill.icon"><use :href="\'#\' + it.pill.icon"></use></svg>' +
+            '<b>{{ it.pill.text }}</b></span></button>' +
       '</div>' +
       /* W27h: pantalla de arranque — cubre la app hasta que chats,
          gente (perfiles), vistas previas y mensajes iniciales están
          listos y la interfaz se revela completa. W38: ahora muestra
-         la pantalla compartida (icono, cifrado, barra y fase). */
+         la pantalla compartida (icono, barra y fase). */
       '<div class="app-boot" v-if="store.booting">' +
         '<boot-screen></boot-screen>' +
       '</div>' +

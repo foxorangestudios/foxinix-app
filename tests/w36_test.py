@@ -17,13 +17,13 @@ B. Maneja Firefox headless (BiDi via scripts/shot.py):
   5. modal "Tu perfil": la pelotica de estado mide 22px (doble)
   6. chat-head del grupo: "Agregar miembros" con icono i-userplus
   7. menús: segundo clic en el ⋯ de la lista cierra el menú
-  8. panel del compositor: altura fija entre pestañas + animación
-     pageflip + stickers Twemoji (<img>, no texto nativo)
+  8. panel del compositor: altura fija entre pestañas + animación de
+     apertura + stickers Twemoji (<img>, no texto nativo)
   9. en el grupo, el ⋯ de un mensaje ajeno ofrece "Eliminar mensaje"
      (A es owner); y el modal de fijados junta título+(1) y el
      conteo de la fila es texto plano transparente
- 10. el GIF en la DM: burbuja transparente (.bubble.gif) con chip de
-     hora/palomitas y botón ★ en la barra flotante
+ 10. el GIF en la DM: burbuja transparente (.bubble.gif), hora/palomitas
+     sin pastilla oscura y botón ★ en la barra flotante
  11. reproductores propios: audio adjunto con player (.au-btn + <audio>
      oculto) y video con controles dentro (.v-center/.v-bar/.v-fs/.v-meta)
      que se ocultan a los 1 s reproduciendo (.vhide)
@@ -308,13 +308,14 @@ JS_GIFBUB = """(async () => {
   const meta = b.querySelector('.b-meta');
   const mpos = meta ? getComputedStyle(meta).position : '';
   const mbg = meta ? getComputedStyle(meta).backgroundColor : '';
+  const mradius = meta ? parseFloat(getComputedStyle(meta).borderRadius) : 0;
   const acts = b.querySelector('.b-actions');
   if (acts) acts.style.pointerEvents = 'auto';
   const starBtn = b.querySelector(
     '.b-actions button[title="Agregar a favoritos"]');
   const star = starBtn ? starBtn.querySelector('use') : null;
   return JSON.stringify({
-    bg: bg, mpos: mpos, mbg: mbg,
+    bg: bg, mpos: mpos, mbg: mbg, mradius: mradius,
     starHref: star ? (star.getAttribute('href') || '') : '',
   });
 })()"""
@@ -360,9 +361,19 @@ JS_PLAYERS = """(async () => {
     const seek = !!vd.querySelector('.v-seek');
     const vmeta = !!vd.querySelector('.v-meta');
     const outer = vd.closest('.bubble');
-    const outerMeta = outer
-      ? getComputedStyle(outer.querySelector(':scope > .b-meta')).display
-      : '';
+    /* W62: el .b-meta exterior sigue en el DOM (puede llevar el botón de
+       spoiler), pero su hora/palomitas no se duplican: deben estar
+       ocultas y vivir sólo dentro del video. */
+    let outerMeta = true;
+    if (outer) {
+      const om = outer.querySelector(':scope > .b-meta');
+      if (om) {
+        Array.from(om.children).forEach(function (ch) {
+          if ((ch.classList.contains('b-time') || ch.classList.contains('tick')) &&
+              getComputedStyle(ch).display !== 'none') outerMeta = false;
+        });
+      }
+    }
     // play → a los 1,3 s los controles deben estar ocultos (.vhide)
     vd.style.pointerEvents = 'auto';
     vd.querySelector('.v-center').click();
@@ -543,6 +554,13 @@ JS_FAVS = """(async () => {
   btn.click();
   await sleep(600);
   const href = btn.querySelector('use').getAttribute('href') || '';
+  /* W63: un GIF de la biblioteca ya guardado por nombre también debe
+     mostrar la estrella rellena en el mensaje (no sólo por media_id). */
+  const libMsg = document.querySelector('.msg[data-mid="{LIBGIFMID}"]');
+  const libBtn = libMsg
+    ? libMsg.querySelector('.b-actions button[title="Quitar de favoritos"]')
+    : null;
+  const libMsgUse = libBtn ? libBtn.querySelector('use') : null;
   // pestaña GIFs: sección Favoritos con la miniatura recién marcada
   const eb = document.querySelector('.comp-emo');
   if (!eb) return 'FAIL: sin botón de emojis';
@@ -574,6 +592,8 @@ JS_FAVS = """(async () => {
     libOn = !!body.querySelector('.st-grid .st-fav.on');
   }
   return JSON.stringify({ starHref: href, secs: secs, favWraps: favWraps,
+                          libMsgStar: libMsgUse
+                            ? (libMsgUse.getAttribute('href') || '') : '',
                           mediaFav: mediaFav, libStar: !!libStar, libOn: libOn });
 })()"""
 
@@ -697,6 +717,19 @@ def main():
     ct.send(a.base, A["access"], dm,
             {"kind": "image", "body": "", "media_id": upgif["id"],
              "client_msg_id": str(uuid.uuid4())})
+    # W63: GIF de la biblioteca enviado como imagen. Al guardarlo por
+    # nombre, la estrella del mensaje debe salir rellena aunque su
+    # media_id no coincida con el favorito.
+    uplib = ct.upload(a.base, A["access"],
+                      ROOT / "server/web/gifs/fire.gif")
+    libgif_msg = ct.send(a.base, A["access"], dm,
+                         {"kind": "image", "body": "",
+                          "media_id": uplib["id"],
+                          "client_msg_id": str(uuid.uuid4())})
+    st, favlib = ct.http("POST", a.base + "/api/gifs/favorites",
+                         {"name": "fire.gif"}, token=A["access"])
+    if st != 201:
+        raise SystemExit(f"✗ favorito fire.gif: {st} {favlib}")
     wav = SHOTS / "w36-nota.wav"
     make_wav(wav)
     upwav = ct.upload(a.base, A["access"], wav)
@@ -723,6 +756,16 @@ def main():
         raise SystemExit(f"✗ fijar mensaje: {st}")
 
     # ============ sesión de A en el navegador =========================
+    # W65: limpiar SW/caché y cualquier sesión anterior ANTES de inyectar.
+    # Si queda la sesión de otro lote (usuario ya borrado), el arranque
+    # puede recibir un 401 tardío y borrar la sesión recién inyectada.
+    shot(a.base + "/", SHOTS / "w36-0-prep.png",
+         js="(async()=>{try{const rs=await navigator.serviceWorker"
+            ".getRegistrations();for(const r of rs)await r.unregister();}"
+            "catch(e){};try{const ks=await caches.keys();for(const k of ks)"
+            "await caches.delete(k);}catch(e){};"
+            "localStorage.removeItem('fm.session');return 'ok';})()",
+         wait=350)
     ok, res, log = shot(a.base + "/", SHOTS / "w36-0-injectar.png",
                         js=sess_js(A))
     step("sesión inyectada", ok and res == "sesión inyectada", log[-300:])
@@ -786,7 +829,8 @@ def main():
     step("altura fija en las 3 pestañas",
          ok and r.get("hEmo") and r.get("hEmo") == r.get("hGif") == r.get("hSt"),
          f"res={res!r}")
-    step("animación pageflip", ok and r.get("anim") == "pageflip", f"res={res!r}")
+    step("animación de apertura del panel (fundido)",
+         ok and r.get("anim") == "epfadeIn", f"res={res!r}")
     step("stickers con Twemoji <img> (sin texto nativo)",
          ok and (r.get("stImg") or 0) >= 8 and not r.get("stTxt"),
          f"res={res!r}")
@@ -826,12 +870,13 @@ def main():
         r = json.loads(res)
     except Exception:
         pass
-    # W42: la pastillita ya no va encima del GIF (position: absolute)
-    # sino en una fila separada debajo (position: static)
-    step("burbuja transparente con pastillita de hora/palomitas",
+    # W62/W65: el GIF conserva la burbuja transparente, pero la
+    # hora/palomitas lleva una pastilla oscura legible debajo.
+    step("GIF transparente con pastilla oscura legible de hora/palomitas",
          ok and r.get("bg") == "rgba(0, 0, 0, 0)"
          and r.get("mpos") == "static"
-         and r.get("mbg") == "rgba(0, 0, 0, 0.55)",
+         and r.get("mbg") == "rgba(0, 0, 0, 0.52)"
+         and (r.get("mradius") or 0) >= 10,
          f"res={res!r}")
     step("barra flotante con ★ (i-star)", ok and r.get("starHref") == "#i-star",
          f"res={res!r}")
@@ -854,8 +899,8 @@ def main():
              ok and v.get("center") and v.get("fs") and v.get("seek")
              and v.get("vmeta") and v.get("dur", 0) > 0.2,
              f"res={res!r}")
-        step("hora/palomitas viven DENTRO del video (meta exterior oculta)",
-             ok and v.get("outerMeta") == "none", f"res={res!r}")
+        step("hora/palomitas viven DENTRO del video (sin duplicar fuera)",
+             ok and v.get("outerMeta") is True, f"res={res!r}")
         step("controles ocultos a los 1 s y reaparecen al mover",
              ok and v.get("hide") is True and v.get("peek") is False,
              f"res={res!r}")
@@ -888,7 +933,8 @@ def main():
     # ============ 12. favoritos en la UI ==============================
     print("→ paso12 favoritos en la UI")
     ok, res, log = shot(a.base + "/", SHOTS / "w36-10-favs.png",
-                        js=js_t(JS_FAVS, BU=BU))
+                        js=js_t(JS_FAVS, BU=BU,
+                                LIBGIFMID=str(libgif_msg["id"])))
     r = {}
     try:
         r = json.loads(res)
@@ -896,6 +942,8 @@ def main():
         pass
     step("★ del mensaje se llena (#i-star-fill)",
          ok and r.get("starHref") == "#i-star-fill", f"res={res!r}")
+    step("★ del GIF de biblioteca ya guardado sale rellena",
+         ok and r.get("libMsgStar") == "#i-star-fill", f"res={res!r}")
     secs = r.get("secs") or []
     step("pestaña GIFs con sección Favoritos y la miniatura del mensaje",
          ok and secs and "Favoritos" in secs[0] and r.get("mediaFav"),

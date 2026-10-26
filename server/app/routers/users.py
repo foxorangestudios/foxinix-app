@@ -1,12 +1,10 @@
 """Usuarios: perfiles públicos y búsqueda de contactos."""
 from __future__ import annotations
 
-import base64
 import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 
 from .. import db, medialink
 from ..auth import current_user
@@ -75,6 +73,57 @@ def search(q: str, user: dict = Depends(current_user)) -> dict[str, Any]:
     return {"results": [user_brief(r) for r in rows]}
 
 
+def _relation(me_id: int, other_id: int) -> str:
+    """Estado de la relación entre dos cuentas para los enlaces públicos."""
+    if me_id == other_id:
+        return "me"
+    # W65: un bloqueo manda sobre una amistad previa; el enlace directo
+    # no debe ofrecer "Mensaje"/"Enviar solicitud" a quien está bloqueado.
+    if db.one(
+        "SELECT 1 AS x FROM blocks"
+        " WHERE (blocker_id = ? AND blocked_id = ?)"
+        "    OR (blocker_id = ? AND blocked_id = ?)",
+        (me_id, other_id, other_id, me_id),
+    ):
+        return "blocked"
+    if db.one(
+        "SELECT 1 AS x FROM friend_requests WHERE status = 'accepted'"
+        " AND ((from_user = ? AND to_user = ?) OR (from_user = ? AND to_user = ?))",
+        (me_id, other_id, other_id, me_id),
+    ):
+        return "friend"
+    if db.one(
+        "SELECT 1 AS x FROM friend_requests WHERE status = 'pending'"
+        " AND from_user = ? AND to_user = ?",
+        (me_id, other_id),
+    ):
+        return "sent"
+    if db.one(
+        "SELECT 1 AS x FROM friend_requests WHERE status = 'pending'"
+        " AND from_user = ? AND to_user = ?",
+        (other_id, me_id),
+    ):
+        return "received"
+    return "none"
+
+
+@router.get("/id/{user_id}")
+def profile_by_id(user_id: int, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """Perfil público por ID numérico (el que viaja en /app/user/<id>).
+
+    Incluye el estado de amistad para que un enlace directo pueda abrir
+    el MD, mostrar el perfil o enviar la solicitud automáticamente sin
+    depender de que la lista de Personas ya esté cargada en el cliente.
+    """
+    u = db.one(
+        "SELECT * FROM users WHERE id = ? AND email_verified = 1",
+        (user_id,),
+    )
+    if not u:
+        raise HTTPException(404, "Usuario no encontrado")
+    return {"user": user_brief(u), "relation": _relation(user["id"], u["id"])}
+
+
 @router.get("/{username}")
 def profile(username: str, user: dict = Depends(current_user)) -> dict[str, Any]:
     u = db.one(
@@ -84,41 +133,3 @@ def profile(username: str, user: dict = Depends(current_user)) -> dict[str, Any]
     if not u:
         raise HTTPException(404, "Usuario no encontrado")
     return {"user": user_brief(u)}
-
-
-# ---------------------------------------------- W29f: claves E2E (ECDH)
-
-class E2EKeyIn(BaseModel):
-    # P-256 sin comprimir = 65 B → base64 = 88 chars (+ relleno '=').
-    public_key: str = Field(min_length=88, max_length=120)
-
-
-@router.put("/me/e2e-key")
-def put_e2e_key(body: E2EKeyIn, user: dict = Depends(current_user)) -> dict[str, Any]:
-    """Publica MI clave pública ECDH. La privada jamás sale del
-    navegador (IndexedDB del usuario): aquí sólo se reenvía ésta."""
-    try:
-        raw = base64.b64decode(body.public_key, validate=True)
-    except Exception:
-        raise HTTPException(422, "La clave pública no es base64 válido")
-    if len(raw) != 65 or raw[0] != 4:
-        raise HTTPException(422, "Se espera una clave P-256 sin comprimir (65 B)")
-    db.run(
-        "INSERT OR REPLACE INTO e2e_keys (user_id, pubkey, created_at)"
-        " VALUES (?, ?, ?)",
-        (user["id"], body.public_key, int(time.time())),
-    )
-    return {"ok": True}
-
-
-@router.get("/{username}/e2e-key")
-def get_e2e_key(username: str, user: dict = Depends(current_user)) -> dict[str, Any]:
-    """Clave pública E2E de OTRO usuario (null si aún no la publicó)."""
-    u = db.one(
-        "SELECT id FROM users WHERE username = ? AND email_verified = 1",
-        (username.strip().lower(),),
-    )
-    if not u:
-        raise HTTPException(404, "Usuario no encontrado")
-    row = db.one("SELECT pubkey FROM e2e_keys WHERE user_id = ?", (u["id"],))
-    return {"public_key": row["pubkey"] if row else None}

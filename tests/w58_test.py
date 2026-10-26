@@ -298,11 +298,19 @@ def main():
       if (head) head.click();
       const modal = await wait('.modal.pmodal', 6000);
       if (!modal) return 'FAIL: sin perfil abierto';
-      const pre = (modal.querySelector('.pf-quote') || {}).textContent || '';
-      const dlState = document.querySelector('.msgs .msg .b-dl-state');
-      const dlTxt = dlState ? dlState.textContent.trim() : '';
-      const dlVisible = dlState ? (dlState.offsetWidth > 0 &&
-        getComputedStyle(dlState).display !== 'none') : false;
+      const preEl = await (async () => {
+        const t0 = Date.now();
+        while (Date.now() - t0 < 8000) {
+          const q = modal.querySelector('.pf-quote');
+          if (q) return q;
+          await sleep(120);
+        }
+        return null;
+      })();
+      const pre = (preEl || {}).textContent || '';
+      /* W62: la descarga vive en el menú del mensaje/visor, no en una
+         pastilla dentro de cada adjunto. */
+      const dlInline = document.querySelectorAll('.msgs .msg .b-dl-state').length;
       const rq = await fetch('/api/auth/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json',
@@ -334,7 +342,7 @@ def main():
       }
       const active = document.querySelector('.chat-item.active');
       return JSON.stringify({
-        pre: pre.trim(), dlTxt: dlTxt, dlVisible: dlVisible,
+        pre: pre.trim(), dlInline: dlInline,
         chatPreset: chatPreset, memPreset: memPreset, pplPreset: pplPreset,
         profTxt: profTxt, quote: quote,
         readOnly: !modal.querySelector('.pf-status-btn'),
@@ -347,10 +355,8 @@ def main():
     d = jparse(res)
     step("el perfil abierto de B ya mostraba el estado de A",
          ok and d.get("pre") == "ocupado con W58", d or log[-400:])
-    step("el control de descarga siempre visible dice «Descargar/Descargado · tamaño»",
-         d.get("dlVisible") and ((d.get("dlTxt") or "").startswith("Descargar ·") or
-                                 (d.get("dlTxt") or "").startswith("Descargado ·")),
-         d)
+    step("los mensajes ya no llevan botones de descarga incrustados",
+         d.get("dlInline") == 0, d)
     step("el cambio de estado llega a la lista, miembros y Personas",
          d.get("chatPreset") == "busy" and d.get("memPreset") == "busy" and
          d.get("pplPreset") == "busy", d)
@@ -408,8 +414,10 @@ def main():
       const imgHead = Array.from(heads)
         .find(b => b.textContent.indexOf('Imágenes') >= 0);
       if (imgHead) imgHead.click();
-      await sleep(250);
-      const body = modal.querySelector('.dl-group-body');
+      /* W60: cada categoría se abre en su propio modal (.dl-cat-modal),
+         fuera de .modal.settings. */
+      const cat = await wait('.dl-cat-modal', 6000);
+      const body = cat ? cat.querySelector('.dl-group-body') : null;
       const btns = body ? Array.from(body.querySelectorAll('.btn'))
         .map(b => b.textContent.trim()) : [];
       const del = body ? body.querySelector('.icon-btn[title="Eliminar"]') : null;

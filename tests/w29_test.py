@@ -27,7 +27,7 @@ Ajustes — el default ahora es "Nativo del sistema"):
      activo; ":fire:" se envía y la burbuja muestra el emoji; el chip
      de reacción también
 
-W29d/e/f (spoilers, hora 12/24 y E2E):
+W29d/e (spoilers y hora 12/24):
 
  12. spoiler: long-press de 3 s en Enviar (texto) o botón "Mensaje
      Spoiler: On/Off" (SOLO con adjunto) → capa que cubre el contenido
@@ -36,19 +36,15 @@ W29d/e/f (spoilers, hora 12/24 y E2E):
      salir y volver reaparece; también en imagen y en la galería
  13. "Formato de hora" como desplegable: 24 h por defecto, 12 h con
      am/pm y vuelta a 24 h
- 14. E2E: B publica su clave P-256, A activa el switch (SAS), envía
-     cifrado; el server guarda SÓLO "[Mensaje cifrado]" + blob, B lo
-     descifra en Python y su respuesta cifrada se ve descifrada en A
-     (preview del sidebar con el marcador)
+ 14. envío en claro (W67: la app no cifra): A envía desde la UI y su
+     burbuja y el preview muestran el texto; cuando B responde por API,
+     A lo ve en claro por WS con el preview actualizado y el marcador
+     de mensaje cifrado nunca aparece en pantalla.
 
 Uso: server/.venv/bin/python tests/w29_test.py [--base http://127.0.0.1:8899]
 """
 import argparse
-import base64
-import hashlib
-import hmac
 import json
-import os
 import re
 import subprocess
 import sys
@@ -57,9 +53,6 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
@@ -108,40 +101,6 @@ def sess_js(u):
                        "user": u["user"], "pendingEmail": ""})
     return ct.JS_INJECT.replace(
         "SESSION_JSON", sess.replace("\\", "\\\\").replace("'", "\\'"))
-
-
-# --------- W29f: el lado "B" de la conversación E2E (espejo de e2e.js)
-def e2e_keypair():
-    """Par ECDH P-256; devuelve (privada, pública base64 de 65 B)."""
-    priv = ec.generate_private_key(ec.SECP256R1())
-    raw = priv.public_key().public_bytes(Encoding.X962,
-                                         PublicFormat.UncompressedPoint)
-    return priv, base64.b64encode(raw).decode()
-
-
-def e2e_derive(priv, peer_pub_b64, uid_me, uid_you):
-    """HKDF-SHA256 manual idéntico al del cliente:
-       PRK = HMAC(salt, ikm); T1 = HMAC(PRK, info || 0x01) → 32 B."""
-    peer = ec.EllipticCurvePublicKey.from_encoded_point(
-        ec.SECP256R1(), base64.b64decode(peer_pub_b64))
-    ikm = priv.exchange(ec.ECDH(), peer)
-    lo, hi = sorted((uid_me, uid_you))
-    info = f"foxinix-e2e-v1|{lo}|{hi}".encode()
-    prk = hmac.new(b"foxinix-e2e-v1-salt", ikm, hashlib.sha256).digest()
-    return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:32]
-
-
-def e2e_dec(key, blob):
-    raw_iv = base64.b64decode(blob["iv"])
-    raw_ct = base64.b64decode(blob["ct"])
-    return AESGCM(key).decrypt(raw_iv, raw_ct, None).decode()
-
-
-def e2e_enc(key, text):
-    nonce = os.urandom(12)
-    ct_blob = AESGCM(key).encrypt(nonce, text.encode(), None)
-    return {"iv": base64.b64encode(nonce).decode(),
-            "ct": base64.b64encode(ct_blob).decode()}
 
 
 W_WAIT = """const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -797,8 +756,10 @@ JS_H12 = """(async () => {
     back24: back24, before: before });
 })()"""
 
-# 14a. A activa el cifrado en el panel y envía un mensaje cifrado
-JS_E2E1 = """(async () => {
+# 14a. A envía un mensaje EN CLARO y su propia burbuja muestra el texto
+#      (W67: la app no cifra — se fueron el switch, el estado por
+#      chat y el código de verificación/SAS)
+JS_UI14a = """(async () => {
   """ + W_WAIT + """
   const CID = '«DM»';
   let tb = Date.now();
@@ -809,59 +770,7 @@ JS_E2E1 = """(async () => {
   it.click();
   if (!(await wait('.msgs .msg', 8000)))
     return JSON.stringify({ stage: 'chat' });
-  let panel = document.querySelector('aside.profile-panel');
-  if (!panel) {
-    const ib = document.querySelector(
-      '.chat-head button[title="Info del usuario"]');
-    if (ib) ib.click();
-    panel = await wait('aside.profile-panel', 5000);
-  }
-  if (!panel) return JSON.stringify({ stage: 'sin-panel' });
-  const box = await wait('.pp-e2e', 4000);
-  if (!box) return JSON.stringify({ stage: 'sin-e2e' });
-  const cb = box.querySelector('input[type=checkbox]');
-  /* W31c: el switch YA NO EXISTE (cifrado siempre activo). */
-  if (cb) return JSON.stringify({ stage: 'quedo-switch' });
-  /* W31c: el cifrado se AUTO-ACTIVA al abrir el DM (B ya publicó su
-     clave). W39: el panel ya no dice "Activado" (solo queda la nota
-     centrada de cifrado) — se mira el estado real del store. */
-  let on = false;
-  const t0 = Date.now();
-  while (Date.now() - t0 < 15000) {
-    if (__fm.store.e2e && __fm.store.e2e[CID]) { on = true; break; }
-    await sleep(200);
-  }
-  /* W39: el código YA NO está en el panel — vive en el menú ⋯ del
-     chat de la lista y se muestra en un MODAL. */
-  let sas = '';
-  if (!sas) {
-    const item0 = document.querySelector(
-      '.chat-list .chat-item[data-chat-id="' + CID + '"]');
-    if (item0) {
-      item0.dispatchEvent(new MouseEvent('contextmenu',
-        { bubbles: true, cancelable: true, clientX: 60, clientY: 120 }));
-      const mi = await wait('.ctx-menu', 4000);
-      if (mi) {
-        const miIt = Array.prototype.slice
-          .call(mi.querySelectorAll('.ctx-item'))
-          .find(function (b) {
-            return b.textContent.trim() === 'Ver código de verificación';
-          });
-        if (miIt) {
-          /* W39: el menú abre un MODAL con el código (antes toast que
-             se perdía); se lee y se cierra para no tapar el composer. */
-          miIt.click();
-          const sm = await wait('.sas-modal .sas-code', 4000);
-          if (sm) sas = sm.textContent.trim();
-          const xb = document.querySelector('.sas-modal header .icon-btn');
-          if (xb) xb.click();
-          await sleep(300);
-        }
-      }
-    }
-  }
-  if (!on) return JSON.stringify({ stage: 'no-activa', sas: sas });
-  /* mensaje propio: se ve DESCIFRADO en la burbuja… */
+  /* mensaje propio: se ve en claro en la burbuja */
   const ta = document.querySelector('.composer-input');
   ta.value = 'secreto para ti w29';
   ta.dispatchEvent(new Event('input', { bubbles: true }));
@@ -879,17 +788,16 @@ JS_E2E1 = """(async () => {
     if (sent) break;
     await sleep(150);
   }
-  /* …pero el preview del sidebar muestra el marcador */
+  /* el preview del sidebar muestra el texto */
   const item = document.querySelector(
     '.chat-list .chat-item[data-chat-id="' + CID + '"]');
   const pv = item ? item.querySelector('.ci-prev') : null;
-  return JSON.stringify({ stage: 'ok', on: on, noswitch: true, sas: sas,
-    sent: sent,
+  return JSON.stringify({ stage: 'ok', sent: sent,
     prev: pv ? pv.textContent : '' });
 })()"""
 
-# 14b. B (Python) manda un mensaje cifrado: A debe verlo descifrado
-JS_E2E2 = """(async () => {
+# 14b. B (Python) manda un mensaje: A debe verlo en claro
+JS_UI14b = """(async () => {
   """ + W_WAIT + """
   const CID = '«DM»';
   let tb = Date.now();
@@ -900,9 +808,8 @@ JS_E2E2 = """(async () => {
   it.click();
   if (!(await wait('.msgs .msg', 8000)))
     return JSON.stringify({ stage: 'chat' });
-  /* W30a: observa las burbujas — el marcador del server NUNCA debe
-     aparecer en un mensaje (ni un frame): todo se descifra antes de
-     insertar, con la clave de la caché local (IndexedDB). */
+  /* W30a: observa las burbujas — el marcador de mensaje cifrado NUNCA
+     debe aparecer (ni un frame): el texto llega siempre en claro. */
   let markerSeen = false;
   const mo = new MutationObserver(function (muts) {
     for (let i = 0; i < muts.length; i++) {
@@ -922,7 +829,7 @@ JS_E2E2 = """(async () => {
   while (Date.now() - t0 < 30000) {
     const rows = document.querySelectorAll('.msgs .msg:not(.mine)');
     for (let i = 0; i < rows.length; i++) {
-      if ((rows[i].textContent || '').indexOf('respuesta cifrada w29') >= 0) {
+      if ((rows[i].textContent || '').indexOf('respuesta de B w29') >= 0) {
         found = true; break;
       }
     }
@@ -1220,75 +1127,42 @@ def main():
          f"t24={t24!r} t12={t12!r} back24={back24!r} before={before!r} "
          f"log={log[-200:]}")
 
-    # =================== 14. E2E (W29f) ==============================
-    print("→ paso14 E2E cifrado de extremo a extremo (W29f)")
-    b_priv, b_pub = e2e_keypair()
-    st, r = ct.http("PUT", f"{a.base}/api/users/me/e2e-key",
-                    {"public_key": b_pub}, token=B["access"])
-    step("B publica su clave pública E2E (P-256)",
-         st in (200, 201) and r.get("ok") is True, f"{st} {r}")
-
-    ok, res, log = shot(a.base + "/", SHOTS / "w29-14-e2e-on.png",
-                        js=JS_E2E1.replace("«DM»", str(dm)))
+    # =================== 14. envío en claro (UI) ===================
+    # W67: la app no cifra. A envía desde la UI y el texto se ve en la
+    # burbuja y en el preview de la lista; cuando B responde, A lo ve en
+    # claro y nunca aparece el marcador de mensaje cifrado.
+    print("→ paso14 UI en claro: burbuja, preview y respuesta de B")
+    ok, res, log = shot(a.base + "/", SHOTS / "w29-14-claro.png",
+                        js=JS_UI14a.replace("«DM»", str(dm)))
     d = {}
     try:
         d = json.loads(res)
     except Exception:
         pass
-    step("auto-activa cifrado al abrir el DM (sin switch) + código numérico + preview descifrado",
-         ok and d.get("stage") == "ok" and d.get("on") and d.get("noswitch")
-         and d.get("sent")
-         and (d.get("sas") or "").replace(" ", "").isdigit()
-         and len((d.get("sas") or "").replace(" ", "")) == 6
+    step("A envía en claro: la burbuja y el preview muestran el texto",
+         ok and d.get("stage") == "ok" and d.get("sent")
          and "secreto para ti w29" in (d.get("prev") or ""),
          f"res={res!r} log={log[-200:]}")
 
-    # el server jamás ve el texto: body = marcador; B descifra en Python
-    key_b, marker, plain = None, "", ""
-    st, rka = ct.http("GET",
-                      f"{a.base}/api/users/{A['user']['username']}/e2e-key",
-                      token=B["access"])
-    st2, msgs = ct.http("GET", f"{a.base}/api/chats/{dm}/messages",
-                        token=B["access"])
-    e2emsg = None
-    for m in msgs.get("messages") or []:
-        snd = m.get("sender") or {}
-        if m.get("e2e") and snd.get("id") == A["user"]["id"]:
-            e2emsg = m
-    if rka.get("public_key") and e2emsg:
-        try:
-            key_b = e2e_derive(b_priv, rka["public_key"],
-                               B["user"]["id"], A["user"]["id"])
-            marker = e2emsg.get("body") or ""
-            plain = e2e_dec(key_b, e2emsg["e2e"])
-        except Exception as ex:
-            plain = f"EX {ex}"
-    step("server guardó '[Mensaje cifrado]' + blob y B descifra el texto",
-         key_b is not None and marker == "[Mensaje cifrado]"
-         and plain == "secreto para ti w29",
-         f"marker={marker!r} plain={plain!r}")
-
-    # B responde cifrado → A debe verlo descifrado (WS) con preview descifrado
+    # B responde en claro por API mientras A tiene el chat abierto (WS).
     ok2, res2, log2 = False, "", ""
-    if key_b:
-        enc = e2e_enc(key_b, "respuesta cifrada w29")
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(shot, a.base + "/", SHOTS / "w29-14-e2e-reply.png",
-                            JS_E2E2.replace("«DM»", str(dm)), 80)
-            time.sleep(10)   # A acaba de abrir el chat: WS en pie
-            ct.http("POST", f"{a.base}/api/chats/{dm}/messages",
-                    {"kind": "text", "body": "",
-                     "client_msg_id": uuid.uuid4().hex, "e2e": enc},
-                    token=B["access"])
-            ok2, res2, log2 = fut.result(timeout=240)
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(shot, a.base + "/", SHOTS / "w29-14-respuesta.png",
+                        JS_UI14b.replace("«DM»", str(dm)), 80)
+        time.sleep(10)   # A acaba de abrir el chat: WS en pie
+        ct.http("POST", f"{a.base}/api/chats/{dm}/messages",
+                {"kind": "text", "body": "respuesta de B w29",
+                 "client_msg_id": uuid.uuid4().hex},
+                token=B["access"])
+        ok2, res2, log2 = fut.result(timeout=240)
     d2 = {}
     try:
         d2 = json.loads(res2)
     except Exception:
         pass
-    step("A descifra la respuesta de B (nunca pinta marcador) y el preview se ve en claro",
+    step("A ve la respuesta de B en claro y el preview también",
          ok2 and d2.get("found") and d2.get("marker") is False
-         and "respuesta cifrada w29" in (d2.get("prev") or ""),
+         and "respuesta de B w29" in (d2.get("prev") or ""),
          f"res={res2!r} log={log2[-200:]}")
 
     print(f"\nW29: {_pass[0]} ok, {_fail[0]} fallos")

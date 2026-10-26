@@ -160,6 +160,25 @@ export function emoSrc(ch) {
   return f ? '/static/emoji/' + f + '.svg' : '';
 }
 
+/** W65: imagen para MENSAJES cuando el estilo elegido no tiene ese
+    emoji. Twemoji cubre 1746 y Noto 3786: en vez de caer a la fuente
+    del sistema (mezcla visible), se usa el otro set personalizado.
+    Devuelve '' sólo en modo nativo o si no hay ninguna imagen. */
+export function emoAnyFile(ch) {
+  if (emoStyle() === 'system') return '';
+  return emoFile(ch) || EMO_FILE_NOTO[ch] || EMO_FILE[ch] || '';
+}
+
+export function emoAnySrc(ch) {
+  if (emoStyle() === 'system') return '';
+  const f = emoFile(ch);
+  if (f) return emoSrc(ch);
+  /* El set alternativo conserva el glow "personalizado" del mensaje. */
+  if (EMO_FILE_NOTO[ch]) return '/static/emoji-noto/' + EMO_FILE_NOTO[ch] + '.png';
+  if (EMO_FILE[ch]) return '/static/emoji/' + EMO_FILE[ch] + '.svg';
+  return '';
+}
+
 /** W41: ¿el texto es UN SOLO emoji del set? (el mensaje se pinta
     grande, estilo sticker — igual que al enviar un sticker). W42: se
     ignoran espacios alrededor (el autocompletado ":fire:" a veces
@@ -171,9 +190,10 @@ export function isOneEmoji(txt) {
 /* W61: 1–3 emojis (con o sin espacios entre ellos) → burbuja grande.
    Se buscan las secuencias MÁS LARGAS del set (ZWJ, tonos de piel,
    banderas…) para que un emoji compuesto cuente como UNO. */
-const EMO_KEYS = Object.keys(EMO_FILE).sort(function (a, b) {
-  return b.length - a.length;
-});
+const EMO_KEYS = Object.keys(EMO_FILE)
+  .concat(Object.keys(EMO_FILE_NOTO))
+  .filter(function (ch, i, arr) { return arr.indexOf(ch) === i; })
+  .sort(function (a, b) { return b.length - a.length; });
 export function isEmojiBurst(txt) {
   const s = String(txt == null ? '' : txt).trim();
   if (!s) return false;
@@ -248,11 +268,15 @@ export function prefetchEmojis() {
 /* Índice por primer codepoint → candidatos del más largo al más corto
    (secuencias ZWJ como 👨‍👩‍👧 y banderas se reconocen enteras). */
 const EMO_FIRST = {};
-for (const ch in EMO_FILE) {
+function addEmojiKey(ch) {
   const cp = ch.codePointAt(0);
   if (!EMO_FIRST[cp]) EMO_FIRST[cp] = [];
-  EMO_FIRST[cp].push(ch);
+  if (EMO_FIRST[cp].indexOf(ch) < 0) EMO_FIRST[cp].push(ch);
 }
+/* W65: Noto incluye ~2040 emojis que Twemoji no tiene. El troceador
+   debe reconocerlos todos; el render elige la imagen disponible. */
+for (const ch in EMO_FILE) addEmojiKey(ch);
+for (const ch in EMO_FILE_NOTO) addEmojiKey(ch);
 for (const k in EMO_FIRST) {
   EMO_FIRST[k].sort(function (a, b) { return b.length - a.length; });
 }

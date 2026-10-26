@@ -2,7 +2,7 @@
    No importa api.js (sin ciclos). */
 const { reactive, watch } = Vue;
 
-function readLs(key) {
+export function readLs(key) {
   try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
 }
 
@@ -28,6 +28,15 @@ export const store = reactive({
   /* W22: chat pendiente de abrir desde la URL (deep link o botón atrás):
      {kind:'user'|'group', id} — lo resuelve actions.resolvePendingChat. */
   pendingPath: null,
+  /* W65: un enlace /app/user/<id> sin MD se resuelve contra la API de
+     perfiles (amistad → abrir MD; sin relación → solicitud automática).
+     Mientras tanto la URL no debe reescribirse. */
+  pendingUser: 0,
+  /* W65: loadChats ya terminó (aunque no haya ni un chat). */
+  chatsReady: false,
+  /* W65: modal único de "Solicitud enviada" (enlace directo y ＋). */
+  requestSent: null,      // {username, display_name} | null
+  requestsJump: 0,        // gatillo: abrir Personas → Solicitudes
   /* W57: destino de una notificación {chatId, msgId, tries}. Se resuelve
      cuando la lista de chats ya está cargada (también en arranque frío). */
   notifyTarget: null,
@@ -51,10 +60,6 @@ export const store = reactive({
      tipo). Los carga /api/assets al abrir el selector. */
   userAssets: { gifs: [], stickers: [] },
   userAssetsLoaded: false,
-  /* W29f: cifrado de extremo a extremo (por chat, persistido aparte) */
-  e2e: {},                 // chatId → 1
-  e2eSas: {},              // chatId → '8 2 0 7 0 2' (código de verificación)
-  e2ePend: {},             // W30d/W31c: chatId → 1 (par sin clave; en memoria)
   pinsRev: 0,             // W28c: gatillo para refrescar los fijados abiertos
   msgs: {},               // chatId → array de mensajes (crudos)
   loaded: {},             // chatId → mensajes iniciales ya pedidos
@@ -77,6 +82,10 @@ export const store = reactive({
   deliveredSeqs: {},      // chatId → {userId: seq} (eventos 'delivered', W12)
   ws: 'off',              // off | connecting | on
   call: null,             // W28h: llamada WebRTC 1:1 en curso | null
+  /* W64: presencia de salas de grupo ajenas a mi llamada:
+     chatId → {callId, count, video, host}. Permite el botón verde y el
+     contador sin que el usuario esté dentro de la llamada. */
+  groupCalls: {},
   search: '',             // filtro de la lista de chats
   showArchived: false,    // ver la pestaña de chats/grupos archivados
   /* W60: la sección Archivados es privada. El bloqueo se guarda como
@@ -96,12 +105,13 @@ export const store = reactive({
   blocks: [],             // W28e: ids de los usuarios que yo bloqueé
   /* ---- W6: panel de usuario, perfil y ajustes ---- */
   settingsOpen: false,    // modal "Ajustes"
-  settingsTab: 'apariencia',  // apariencia | chat | atajos | cuenta (W8: cuenta = última)
+  /* W62: Ajustes en móvil muestra la barra inferior en la portada de
+     categorías y la oculta al entrar a una categoría. */
+  settingsAtHome: false,
+  settingsTab: 'apariencia',  // apariencia | notificaciones | chat | privacidad | descargas | atajos | cuenta (W8: cuenta = última)
   meProfileOpen: false,   // modal "Tu perfil" (solo vista; W27b)
   meEditOpen: false,      // modal "Editar perfil" (foto, nombre, estado, bio)
   unameOpen: false,       // W60: modal aparte para cambiar el @usuario
-  sasOpen: false,         // W39: modal con el código de verificación E2E
-  sasFor: 0,              // W39: chat cuyo código se muestra
   peopleMobile: false,    // W27b: pantalla Personas a pantalla completa (móvil)
   peopleTab: 'active',    // W27c: pestaña de Personas (la reinicia el sidebar)
   /* W27b: foto de grupo en edición { chatId, src, initial } — vive en el
@@ -150,6 +160,11 @@ export const store = reactive({
     enter: readLs('fm.p.enter') !== '0',
     /* W17: hora de 12 horas (am/pm). Default: 24 h. */
     h12: readLs('fm.p.h12') === '1',
+    /* W63: tono de mensaje y de llamada seleccionados. 'default' = el
+       tono del sistema; otro valor es la clave del tono (archivo bajo
+       /tonos/) o un tono subido por el usuario. */
+    messageTone: readLs('fm.p.messageTone') || 'default',
+    callTone: readLs('fm.p.callTone') || 'default',
     /* W40: estilo de los emojis — 'system' (fuente del sistema,
        default: cero descargas), 'noto' (imágenes de Google) o
        'twemoji' (imágenes Twemoji del sitio). */
@@ -218,6 +233,29 @@ const ROUTE_PATHS = {
 };
 const KNOWN_ROUTES = Object.keys(ROUTE_PATHS);
 
+/* W65: nombres públicos de las categorías de Ajustes en la URL. Los
+   valores internos siguen en español (no rompen el estado ni los tests),
+   pero la URL usa nombres semánticos en inglés.
+   ?settings=main solo tiene sentido en móvil (portada de categorías). */
+export const SETTINGS_SLUGS = {
+  apariencia: 'appearance',
+  notificaciones: 'notifications',
+  chat: 'chat',
+  privacidad: 'privacy',
+  descargas: 'downloads',
+  atajos: 'shortcuts',
+  cuenta: 'account',
+};
+const SETTINGS_TABS = Object.keys(SETTINGS_SLUGS).reduce(function (out, tab) {
+  out[SETTINGS_SLUGS[tab]] = tab;
+  return out;
+}, {});
+
+/** Categoría interna → nombre de la URL. */
+export function settingsSlug(tab) {
+  return SETTINGS_SLUGS[tab] || SETTINGS_SLUGS.apariencia;
+}
+
 let nav = null;   // espejo de las entradas que empuja la app (atrás/cierre)
 
 function locPath() { return location.pathname + location.search; }
@@ -257,9 +295,17 @@ export function urlForState() {
     } else {
       path = '/app/group/' + chat.id;
     }
+  } else if (store.profile && store.profile.user && store.profile.user.id) {
+    /* W65: el perfil abierto sin chat también es una vista direccionable.
+       Así un enlace directo a alguien sin amistad conserva su URL y al
+       recargar se vuelve a resolver (sin duplicar solicitudes). */
+    path = '/app/user/' + store.profile.user.id;
   }
   const q = [];
-  if (store.settingsOpen) q.push('settings=1');
+  if (store.settingsOpen) {
+    const home = store.settingsAtHome && window.innerWidth <= 760;
+    q.push('settings=' + (home ? 'main' : settingsSlug(store.settingsTab)));
+  }
   if (store.jumpMsg) q.push('m=' + store.jumpMsg);
   return path + (q.length ? '?' + q.join('&') : '');
 }
@@ -357,18 +403,41 @@ function applyState(p) {
   }
 
   store.route = route;
+  store.pendingUser = 0;   // una navegación nueva cancela la resolución anterior
   if (route === 'app') {
-    store.settingsOpen = sp.params.settings === '1';
+    const rawSettings = sp.params.settings;
+    store.settingsOpen = rawSettings != null;
     store.jumpMsg = parseInt(sp.params.m, 10) || 0;
+    if (store.settingsOpen) {
+      /* W65: slugs semánticos (appearance, notifications, …). `1` sigue
+         funcionando para enlaces viejos; `main` es la portada móvil. */
+      if (rawSettings === 'main') {
+        store.settingsAtHome = window.innerWidth <= 760;
+      } else if (rawSettings === '1') {
+        store.settingsAtHome = window.innerWidth <= 760;
+      } else if (SETTINGS_TABS[rawSettings]) {
+        store.settingsTab = SETTINGS_TABS[rawSettings];
+        store.settingsAtHome = false;
+      } else {
+        store.settingsAtHome = window.innerWidth <= 760;
+      }
+    } else {
+      store.settingsAtHome = false;
+    }
     if (chatRef && chatRef.id) {
+      store.profile = null;          // la URL de chat manda sobre el perfil
       store.pendingPath = chatRef;   // lo abre actions.resolvePendingChat
     } else {
       store.pendingPath = null;
+      store.profile = null;          // volver a /app cierra el perfil
       if (store.activeChatId) store.activeChatId = 0;   // volver al panel
     }
   } else {
     /* Fuera de la app (ChatShell se desmonta y limpia sus estados). */
     store.pendingPath = null;
+    store.profile = null;
+    store.settingsOpen = false;
+    store.settingsAtHome = false;
     store.jumpMsg = 0;
   }
 }
@@ -403,10 +472,14 @@ window.addEventListener('popstate', function () {
    destino o replace si no (deep link). */
 watch(
   function () {
-    return [store.route, store.activeChatId, store.settingsOpen, store.jumpMsg];
+    const profileId = (store.profile && store.profile.user && store.profile.user.id) || 0;
+    return [
+      store.route, store.activeChatId, store.settingsOpen, store.jumpMsg,
+      store.settingsTab, store.settingsAtHome, profileId,
+    ];
   },
   function (nv, ov) {
-    if (store.pendingPath) return;         // un deep link se resuelve aparte
+    if (store.pendingPath || store.pendingUser) return; // deep link en curso
     const want = urlForState();
     if (want === locPath()) return;
     const routeChanged = nv[0] !== ov[0];
@@ -414,11 +487,20 @@ watch(
     const settingsClosed = !!ov[2] && !nv[2];
     const chatSwitched = !!ov[1] && !!nv[1] && ov[1] !== nv[1];
     const jumpChanged = nv[3] !== ov[3];
-    if (!routeChanged && (chatClosed || settingsClosed)) closeUrl(want);
-    /* replace solo cuando el cambio es "en el sitio" (el ?m= de un salto
-       o su limpieza); abrir/switch de chat siempre empuja. */
-    else if (jumpChanged && !routeChanged && !chatSwitched) writeUrl(want, 'replace');
-    else writeUrl(want, 'push');
+    const settingsNav = !routeChanged && nv[2] && ov[2] &&
+      (nv[4] !== ov[4] || nv[5] !== ov[5]);
+    const profileOpened = !nv[1] && !ov[6] && !!nv[6];
+    const profileClosed = !nv[1] && !!ov[6] && !nv[6];
+    if (!routeChanged && (chatClosed || settingsClosed || profileClosed)) {
+      closeUrl(want);
+    }
+    /* replace para cambios "en el sitio" (categoría de Ajustes, ?m=);
+       abrir un chat o un perfil empuja una entrada nueva. */
+    else if (!routeChanged && !chatSwitched && (jumpChanged || settingsNav)) {
+      writeUrl(want, 'replace');
+    } else if (profileOpened && !routeChanged && !chatSwitched) {
+      writeUrl(want, 'push');
+    } else writeUrl(want, 'push');
   }
 );
 
@@ -457,7 +539,7 @@ function syncNativeTheme() {
 }
 
 export function setTheme(mode) {
-  if (mode !== 'dark' && mode !== 'light') return;
+  if (mode !== 'dark' && mode !== 'light' && mode !== 'black') return;
   document.documentElement.setAttribute('data-theme', mode);
   store.theme = mode;
   try { localStorage.setItem('fm.theme', mode); } catch (e) {}
@@ -466,7 +548,9 @@ export function setTheme(mode) {
 }
 
 export function toggleTheme() {
-  setTheme(store.theme === 'light' ? 'dark' : 'light');
+  /* W65: claro → intermedio → negro → claro. */
+  setTheme(store.theme === 'light' ? 'dark'
+    : (store.theme === 'dark' ? 'black' : 'light'));
 }
 
 /* ---------- acento y fondo (W4) ---------- */

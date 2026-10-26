@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import math
 import time
@@ -140,11 +139,18 @@ def _mentions_col(ids: list[int]) -> str:
     return "," + ",".join(str(i) for i in ids) + "," if ids else ""
 
 
-def _parse_mentions(chat_id: int, text: str) -> list[int]:
-    """Ids de los MIEMBROS del grupo citados como @usuario en el texto.
+_MENTION_ID_RE = re.compile(r"@<(\d{1,18})>")
+_MENTION_NAME_RE = re.compile(r"@([A-Za-z0-9_.]{3,20})")
+_GLOBAL_MENTIONS = {"everyone", "todos", "online", "activos"}
 
-    Sólo cuenta usuarios reales del chat: escribir "@cualquiera" sin ser
-    miembro no genera mención.
+
+def _parse_mentions(chat_id: int, text: str) -> list[int]:
+    """Ids de los MIEMBROS del grupo citados en el texto.
+
+    Acepta las dos formas: ``@usuario`` (la que sigue escribiendo el
+    autocompletado mientras se redacta) y ``@<id>`` (la forma canónica
+    que se guarda en el mensaje). Así una mención sigue apuntando a la
+    misma cuenta aunque la persona cambie su @usuario.
     W37e: menciones globales — @everyone/@todos cita a TODOS los miembros
     y @online/@activos sólo a los conectados AHORA. Se reconocen en
     cualquier idioma (escribe la forma que escribas) y el cliente la
@@ -159,10 +165,67 @@ def _parse_mentions(chat_id: int, text: str) -> list[int]:
         return [r["id"] for r in rows]
     if re.search(r"@(online|activos)\b", text, re.IGNORECASE):
         return [r["id"] for r in rows if hub.is_online(r["id"])]
-    names = {n.lower() for n in re.findall(r"@([A-Za-z0-9_.]{3,20})", text)}
-    if not names:
+    wanted_ids = {int(m.group(1)) for m in _MENTION_ID_RE.finditer(text)}
+    names = {n.lower() for n in _MENTION_NAME_RE.findall(text)}
+    if not names and not wanted_ids:
         return []
-    return [r["id"] for r in rows if (r["username"] or "").lower() in names]
+    return [
+        r["id"] for r in rows
+        if r["id"] in wanted_ids
+        or (r["username"] or "").lower() in names
+    ]
+
+
+def _canonicalize_mentions(chat_id: int, text: str) -> str:
+    """Guarda las menciones a miembros como ``@<id>``.
+
+    El cuerpo visible se sigue armando con el @usuario ACTUAL en
+    ``message_out``; así un cambio de nombre no rompe menciones viejas.
+    Las formas globales (@todos, @online…) y los nombres que no son
+    miembros se dejan intactos.
+    """
+    if not text or "@" not in text:
+        return text
+    rows = db.rows(
+        "SELECT u.id, u.username FROM chat_members cm"
+        " JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = ?",
+        (chat_id,),
+    )
+    by_name = {
+        (r["username"] or "").lower(): r["id"]
+        for r in rows
+        if r["username"] and r["username"].lower() not in _GLOBAL_MENTIONS
+    }
+    if not by_name:
+        return text
+
+    def repl(m: re.Match[str]) -> str:
+        uid = by_name.get(m.group(1).lower())
+        return f"@<{uid}>" if uid else m.group(0)
+
+    return _MENTION_NAME_RE.sub(repl, text)
+
+
+def _display_mentions(text: str) -> str:
+    """``@<id>`` → ``@usuario`` actual, resolviendo todos los ids en una
+    sola consulta. Los ids inexistentes se dejan tal cual (no se inventa
+    un nombre) para no perder información."""
+    if not text or "@<" not in text:
+        return text
+    ids = sorted({int(m.group(1)) for m in _MENTION_ID_RE.finditer(text)})
+    if not ids:
+        return text
+    marks = ",".join("?" for _ in ids)
+    rows = db.rows(
+        f"SELECT id, username FROM users WHERE id IN ({marks})",  # noqa: S608
+        tuple(ids),
+    )
+    names = {r["id"]: r["username"] for r in rows}
+    return _MENTION_ID_RE.sub(
+        lambda m: ("@" + names[int(m.group(1))])
+        if int(m.group(1)) in names else m.group(0),
+        text,
+    )
 
 
 def message_out(
@@ -231,7 +294,8 @@ def message_out(
                 "id": orig["id"],
                 "seq": orig["seq"],
                 # W45: una cita de un spoiler no debe revelar el texto.
-                "body": "Spoiler" if orig.get("spoiler") else orig["body"][:120],
+                "body": "Spoiler" if orig.get("spoiler")
+                else _display_mentions(orig["body"])[:120],
                 "spoiler": bool(orig.get("spoiler")),
                 "kind": orig["kind"],
                 "sender": (orig_sender["display_name"] or orig_sender["username"])
@@ -256,7 +320,9 @@ def message_out(
         "seq": m["seq"],
         "chat_id": m["chat_id"],
         "kind": m["kind"],
-        "body": m["body"],
+        # W65: las menciones internas viajan como @<id>; la API muestra
+        # siempre el @usuario actual de esa cuenta.
+        "body": _display_mentions(m["body"]),
         "media": media,
         "reply_to": reply,
         "client_msg_id": m["client_msg_id"],
@@ -269,11 +335,6 @@ def message_out(
         "peaks": _peaks_out(m.get("peaks")),     # W13: onda de voz
         "dur": m.get("dur"),                    # W13: duración de la nota (s)
         "spoiler": bool(m.get("spoiler")),      # W29d: tapado hasta tocar
-        # W29f: blob cifrado (si existe, body = "[Mensaje cifrado]")
-        "e2e": (
-            {"iv": m.get("e2e_iv"), "ct": m.get("e2e_ct")}
-            if m.get("e2e_ct") else None
-        ),
         "sender": sender_out,
         "reactions": reactions,
     }
@@ -638,24 +699,6 @@ class RenameChatIn(BaseModel):
     title: str = Field(min_length=1, max_length=60)
 
 
-class E2EBlob(BaseModel):
-    """W29f: cuerpo cifrado (AES-GCM). El server NO ve el texto: sólo
-    valida tamaño/base64 (blob ≤32 KB) y guarda IV + cifrado."""
-    iv: str = Field(max_length=64)       # base64 de 12 B (96 bits) = 16 chars
-    ct: str = Field(max_length=46000)    # base64 de ≤32 KB
-
-    @field_validator("iv", "ct")
-    @classmethod
-    def _b64(cls, v: str) -> str:
-        try:
-            raw = base64.b64decode(v, validate=True)
-        except Exception:
-            raise ValueError("no es base64 válido")
-        if not raw:
-            raise ValueError("blob vacío")
-        return v
-
-
 class SendIn(BaseModel):
     kind: str = "text"  # text | image | file | voice | system
     body: str = Field(default="", max_length=config.MAX_BODY_CHARS)
@@ -665,7 +708,6 @@ class SendIn(BaseModel):
     peaks: str | None = Field(default=None, max_length=2048)  # W13: onda de voz (JSON)
     dur: int | None = Field(default=None, ge=1, le=3600)      # W13: duración (voz)
     spoiler: bool = False                 # W29d: el destinatario debe tocar para ver
-    e2e: E2EBlob | None = None            # W29f: si viene, body DEBE venir vacío
 
     @field_validator("peaks")
     @classmethod
@@ -1038,26 +1080,6 @@ def get_messages(
     return {"messages": _messages_out(rows, chat_id)}
 
 
-def _e2e_stored(blob: "E2EBlob | None", text: str) -> tuple[str, str, str]:
-    """W29f/W37a: valida un blob E2E y devuelve (iv, ct, cuerpo guardado).
-
-    Con cifrado el server NUNCA ve texto en claro: body debe llegar
-    vacío y aquí se guarda el marcador "[Mensaje cifrado]" + IV/blob
-    tal cual. Sin blob, devuelve el texto limpio. Compartido entre el
-    envío y la EDICIÓN (W37a: editar un mensaje cifrado re-cifra)."""
-    if not blob:
-        return "", "", text.strip()
-    if text.strip():
-        raise HTTPException(
-            422, "Un mensaje cifrado no puede traer texto en claro"
-        )
-    if len(base64.b64decode(blob.iv)) > 32:
-        raise HTTPException(413, "IV cifrado demasiado grande")
-    if len(base64.b64decode(blob.ct)) > 32768:
-        raise HTTPException(413, "Blob cifrado supera los 32 KB")
-    return blob.iv, blob.ct, "[Mensaje cifrado]"
-
-
 @router.post("/{chat_id}/messages", status_code=201)
 def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user)) -> dict[str, Any]:
     chat = _require_member(chat_id, user["id"])
@@ -1075,8 +1097,7 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
         # 'system' es exclusivo del server (altas/bajas de miembros): un
         # cliente no puede fabricar avisos del sistema (W14).
         raise HTTPException(400, "Tipo de mensaje inválido")
-    if body.kind == "text" and not body.body.strip() and not body.e2e:
-        # W29f: con cifrado E2E el cuerpo llega vacío (va en e2e.ct).
+    if body.kind == "text" and not body.body.strip():
         raise HTTPException(400, "El mensaje está vacío")
     if body.kind == "sticker" and not body.media_id and not (0 < len(body.body.strip()) <= 8):
         # W28g: un sticker es un emoji corto; W61: o una imagen propia.
@@ -1132,11 +1153,8 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
             "spam": True,
         })
 
-    # W29f: con cifrado de extremo a extremo el server NUNCA ve texto
-    # en claro: body llega vacío y aquí se guarda el marcador
-    # "[Mensaje cifrado]" (los previews/notificaciones lo muestran a
-    # quien no tenga la clave) + IV/cifrado como están.
-    e2e_iv, e2e_ct, stored_body = _e2e_stored(body.e2e, body.body)
+    # W67: el texto viaja SIEMPRE en claro (el cifrado E2E se retiró).
+    stored_body = body.body.strip()
     # W29d: marcado de spoiler (el cliente lo tapa hasta que se toque)
     spoiler = 1 if body.spoiler else 0
 
@@ -1151,11 +1169,13 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
         if not ref:
             raise HTTPException(400, "El mensaje citado no existe en este chat")
 
-    # W28b: @menciones de MIEMBROS del grupo (sólo texto y sólo grupos;
-    # con e2e no hay cuerpo en claro, así que no se parsea)
+    # W28b: @menciones de MIEMBROS del grupo (sólo texto y sólo grupos)
     mentions = ""
-    if not body.e2e and chat["type"] != "dm" and body.kind == "text":
-        ids = _parse_mentions(chat_id, body.body)
+    if chat["type"] != "dm" and body.kind == "text":
+        # W65: la mención se guarda por ID (sobrevive al cambio de
+        # @usuario); el cuerpo visible se resuelve al serializar.
+        stored_body = _canonicalize_mentions(chat_id, stored_body)
+        ids = _parse_mentions(chat_id, stored_body)
         if ids:
             mentions = _mentions_col(ids)
 
@@ -1179,11 +1199,11 @@ def send_message(chat_id: int, body: SendIn, user: dict = Depends(current_user))
             cur = conn.execute(
                 "INSERT INTO messages (chat_id, seq, sender_id, kind, body, media_id,"
                 " reply_to, client_msg_id, peaks, dur, created_at, mentions,"
-                " spoiler, e2e_iv, e2e_ct)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " spoiler)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (chat_id, seq, user["id"], body.kind, stored_body,
                  body.media_id, body.reply_to, body.client_msg_id, body.peaks,
-                 body.dur, now, mentions, spoiler, e2e_iv, e2e_ct),
+                 body.dur, now, mentions, spoiler),
             )
             msg_id = cur.lastrowid
     except Exception:
@@ -1331,8 +1351,6 @@ def message_reads(chat_id: int, message_id: int, user: dict = Depends(current_us
 
 class EditIn(BaseModel):
     body: str = Field(default="", max_length=config.MAX_BODY_CHARS)
-    # W37a: con cifrado E2E el server recibe SÓLO el blob nuevo (body vacío)
-    e2e: E2EBlob | None = None
 
 
 @router.put("/{chat_id}/messages/{message_id}")
@@ -1340,7 +1358,7 @@ def edit_message(
     chat_id: int, message_id: int, body: EditIn, user: dict = Depends(current_user)
 ) -> dict[str, Any]:
     """W8: editar el texto de un mensaje propio (avisa por WS)."""
-    _require_member(chat_id, user["id"])
+    chat = _require_member(chat_id, user["id"])
     msg = db.one(
         "SELECT * FROM messages WHERE id = ? AND chat_id = ?", (message_id, chat_id)
     )
@@ -1350,27 +1368,30 @@ def edit_message(
         raise HTTPException(403, "Solo puedes editar tus propios mensajes")
     if msg["kind"] != "text" or msg.get("media_id"):
         raise HTTPException(400, "Solo se pueden editar mensajes de texto")
-    # W37a: la edición respeta el cifrado — un mensaje E2E se RE-CIFRA
-    # (el server recibe sólo el blob nuevo); si era en claro, la
-    # edición va en claro (nada de convertir claro en cifrado ni al
-    # revés: eso desincronizaría a los receptores).
-    was_e2e = bool(msg.get("e2e_ct"))
-    if was_e2e != bool(body.e2e):
-        raise HTTPException(
-            400,
-            "El mensaje cifrado debe editarse cifrado"
-            if was_e2e
-            else "Sólo se reedita cifrado un mensaje que ya lo era",
-        )
-    e2e_iv, e2e_ct, stored_body = _e2e_stored(body.e2e, body.body)
+    # W67: el cifrado E2E se retiró. El cliente edita SIEMPRE en claro, y
+    # un mensaje que aún guardaba el blob pasa a texto plano al editarse.
+    stored_body = body.body.strip()
     if not stored_body:
         raise HTTPException(400, "El mensaje quedó vacío")
+    # W65: reeditar también vuelve a fijar las menciones por ID, de modo
+    # que al cambiar el texto no queden avisos viejos ni se pierdan los
+    # nuevos. El cliente edita viendo @usuario (message_out); acá se
+    # vuelve a guardar la forma canónica.
+    mention_col = None
+    if chat["type"] != "dm":
+        stored_body = _canonicalize_mentions(chat_id, stored_body)
+        mention_col = _mentions_col(_parse_mentions(chat_id, stored_body))
     now = int(time.time())
-    db.execute(
-        "UPDATE messages SET body = ?, edited_at = ?, e2e_iv = ?, e2e_ct = ?"
-        " WHERE id = ?",
-        (stored_body, now, e2e_iv, e2e_ct, message_id),
-    )
+    if mention_col is None:
+        db.execute(
+            "UPDATE messages SET body = ?, edited_at = ? WHERE id = ?",
+            (stored_body, now, message_id),
+        )
+    else:
+        db.execute(
+            "UPDATE messages SET body = ?, edited_at = ?, mentions = ? WHERE id = ?",
+            (stored_body, now, mention_col, message_id),
+        )
     msg = db.one("SELECT * FROM messages WHERE id = ?", (message_id,))
     out = message_out(msg)
     hub.emit_to_chat(chat_id, {
@@ -1379,8 +1400,6 @@ def edit_message(
         "message_id": message_id,
         "body": out["body"],
         "edited_at": out["edited_at"],
-        # W37a: el blob nuevo para que el resto de receptores re-descifre
-        "e2e": out["e2e"],
     })
     return {"message": out}
 
@@ -1577,12 +1596,6 @@ def forward_message(
         raise HTTPException(404, "Mensaje no encontrado")
     if msg["kind"] == "system":
         raise HTTPException(400, "No se puede reenviar un mensaje del sistema")
-    # W37f: la clave E2E es por PAR de usuarios (ECDH) — un blob cifrado
-    # sólo es descifrable en SU chat, así que "reenviarlo" dejaría el
-    # marcador "[Mensaje cifrado]" como texto literal (o compartiera
-    # cifrado con quien no corresponde). Mejor rechazarlo claro.
-    if msg.get("e2e_ct"):
-        raise HTTPException(400, "No se puede reenviar un mensaje cifrado de extremo a extremo")
     # W18: igual que send_message: primero el bloqueo anti-spam, después
     # el bucket (el rechazo suma punto y la bandera "spam" avisa al cliente).
     blk = ratelimit.SPAM.remaining(user["id"])

@@ -19,24 +19,6 @@ export const session = {
    (logout, 401 real, cancelar verificación) corta la WebSocket. */
 export const sessionHooks = { onLogout: null };
 
-/* W29f: estado del cifrado E2E por usuario ({chatId: 1}), en la MISMA
-   clave de localStorage que usa e2e.js para escribirlo. Se recarga al
-   entrar la sesión (y se vacía al salir). */
-export function loadE2eState() {
-  let obj = {};
-  const uid = (store.user && store.user.id) || 0;
-  try {
-    obj = JSON.parse(localStorage.getItem('fm.e2e.' + uid) || '{}') || {};
-  } catch (e) { obj = {}; }
-  store.e2e = obj;
-  /* W31c: se retiraron los flags de opt-out/deseado (el cifrado es
-     siempre activo); sus claves viejas de localStorage se limpian. */
-  try {
-    localStorage.removeItem('fm.e2eoff.' + uid);
-    localStorage.removeItem('fm.e2ewant.' + uid);
-  } catch (e) {}
-}
-
 export class ApiError extends Error {
   constructor(status, detail, retryAfter = 0, spam = false) {
     super(detail);
@@ -64,7 +46,7 @@ export function loadSession() {
       session.pendingEmail = raw.pendingEmail || '';
       session.legacy = !!(raw.access || raw.refresh);
       store.hasSession = true;
-      if (session.user) { store.user = session.user; loadE2eState(); }
+      if (session.user) store.user = session.user;
       if (session.pendingEmail) store.pendingEmail = session.pendingEmail;
       return;
     }
@@ -95,8 +77,8 @@ export function clearSession() {
   session.legacy = false;
   store.hasSession = false;
   store.user = null;
-  store.e2e = {};
   store.chats = [];
+  store.chatsReady = false;   // W65
   store.activeChatId = 0;
   store.pendingEmail = '';
   store.pendingInfo = null;
@@ -119,16 +101,18 @@ export function clearSession() {
      También se limpian los estados que antes sobrevivían al logout y
      reaparecían al entrar con otra cuenta en el mismo dispositivo. */
   store.settingsOpen = false;
-  store.settingsTab = 'cuenta';
+  store.settingsAtHome = false;
+  store.settingsTab = 'apariencia';
   store.meProfileOpen = false;
   store.meEditOpen = false;
   store.profile = null;
+  store.requestSent = null;
+  store.requestsJump = 0;
+  store.pendingUser = 0;
   store.confirmBox = null;
   store.drafts = {};
   store.gifFavs = [];
   store.gifFavsLoaded = false;
-  store.e2eSas = {};
-  store.e2ePend = {};
   store.pinsRev = 0;
   store.spoilSeen = {};
   store.linkPrev = {};
@@ -144,8 +128,6 @@ export function clearSession() {
   store.dlSaved = {};
   store.dlRev++;
   store.dlAutoRev++;
-  store.sasOpen = false;
-  store.sasFor = 0;
   store.readsBox = null;
   store.lb = null;
   store.pinsModal = false;
@@ -179,7 +161,6 @@ export function applyAuth(res) {
   if (res.user) {
     session.user = res.user;
     store.user = res.user;
-    loadE2eState();
   }
   if (res.verification && res.verification.required) {
     session.pendingEmail = res.verification.email_masked || session.pendingEmail;
@@ -499,7 +480,6 @@ export async function bootstrap() {
        la petición estaba en vuelo. La marca se refresca en cada arranque
        y el cambio explícito de usuario sí guarda la sesión. */
     store.user = r.user;
-    loadE2eState();
     if (store.route !== 'app') goReplace('app');
   } catch (e) {
     if (e.status === 403) {

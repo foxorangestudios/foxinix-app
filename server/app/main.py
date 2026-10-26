@@ -146,6 +146,13 @@ INDEX_HTML = WEB_DIR / "index.html"
 if WEB_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=WEB_DIR), name="web")
 
+# W63: tonos de mensaje y llamada. Se sirven en /tonos/… (fuera de
+# /static) para que el navegador pueda cachearlos y el APK los encuentre
+# sin exponer todo el árbol web.
+TONES_DIR = WEB_DIR / "tonos"
+if TONES_DIR.is_dir():
+    app.mount("/tonos", StaticFiles(directory=TONES_DIR), name="tones")
+
 
 @app.get("/")
 def index() -> FileResponse:

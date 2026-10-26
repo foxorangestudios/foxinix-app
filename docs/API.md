@@ -55,7 +55,7 @@ Regla: el **primer registro es abierto**; el usuario queda `email_verified=false
 - Exige la **contraseña actual** y solo se permite **una vez cada 12 horas**.
 - Formato: 3–20 caracteres, minúsculas, números, `.` y `_`; empieza por letra o número.
 - `409` si ya está en uso; `429` con el tiempo restante si el enfriamiento está activo.
-- Los chats, el `id`, la cuota y las claves E2E **no cambian**. Los contactos reciben un
+- Los chats, el `id` y la cuota **no cambian**. Los contactos reciben un
   evento WS `profile` con el `username` nuevo; las menciones `@viejo` ya escritas no se reescriben.
 
 ### `POST /api/auth/verify` — pending

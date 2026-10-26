@@ -110,8 +110,8 @@ const EN = {
     'Used to record voice notes and talk on calls. It only turns on when you ask for it.',
   'Sirve para videollamadas y para enviar fotos o videos desde la cámara.':
     'Used for video calls and to send photos or videos from the camera.',
-  'Avisa de mensajes nuevos aunque Foxinix esté en segundo plano. Nunca muestra el contenido cifrado.':
-    'Alerts you about new messages even when Foxinix is in the background. It never shows encrypted content.',
+  'Avisa de mensajes nuevos aunque Foxinix esté en segundo plano. Muestra el texto del mensaje.':
+    'Alerts you about new messages even when Foxinix is in the background. It shows the message text.',
   'Permite guardar una copia de tus descargas en Descargas/Foxinix. Las descargas normales ya quedan en los datos de la app.':
     'Lets you save a copy of your downloads to Downloads/Foxinix. Regular downloads already stay in the app data.',
   'El micrófono está bloqueado. Puedes activarlo en los ajustes del sistema.':
@@ -446,6 +446,9 @@ const EN = {
   'Chat': 'Chat',
   'Apariencia': 'Appearance',
   'Atajos': 'Shortcuts',
+  'Avisos, sonidos y tonos': 'Alerts, sounds and tones',
+  'Mensajes, micrófono y permisos': 'Messages, microphone and permissions',
+  'Tema, color, fondo y tamaño de letra': 'Theme, color, background and font size',
   'Tu cuenta': 'Your account',
   'Usuario': 'Username',
   'Correo': 'Email',
@@ -457,6 +460,8 @@ const EN = {
     'permanently deletes your profile, messages and files. Every chat shows a notice. This cannot be undone.',
   'Tema': 'Theme',
   'Oscuro': 'Dark',
+  'Intermedio': 'Intermediate',
+  'Oscuro puro': 'Pure black',
   'Claro': 'Light',
   'Color de acento': 'Accent color',
   'Fondo de la conversación': 'Chat background',
@@ -472,6 +477,7 @@ const EN = {
   'Grande': 'Large',
   'Idioma de la interfaz': 'Interface language',
   'Mensajes': 'Messages',
+  'Avisos': 'Alerts',
   'Sonido de notificaciones': 'Notification sounds',
   'Bip cuando llega un mensaje': 'Beep when a message arrives',
   'Avisar cuando escribo': 'Notify when I am typing',
@@ -637,6 +643,13 @@ const EN = {
   'Rechazar': 'Reject',
   'Enviar solicitud': 'Send request',
   'Solicitud enviada': 'Request sent',
+  'Solicitud enviada.': 'Request sent.',
+  'Se ha enviado solicitud a @{n}': 'A request was sent to @{n}',
+  'Espera a que acepte, podés ir a la sección':
+    'Wait for them to accept; you can go to the',
+  'Okey': 'Okay',
+  'No se pudo enviar la solicitud': 'Could not send the request',
+  'No se pudo abrir el perfil': 'Could not open the profile',
   'Nueva solicitud de amistad de {n}': 'New friend request from {n}',
   'Buscar personas por usuario': 'Search people by username',
   'Aún no tienes amigos. ¡Busca personas arriba para empezar!':
@@ -691,30 +704,26 @@ const EN = {
   'No se pudo iniciar la llamada': 'The call could not be started',
   'El usuario no está disponible': 'The user is not available',
   'Usuario desconectado': 'User is offline',
+  /* W64: salas de grupo drop-in */
+  'Llamada de grupo': 'Group call',
+  'Llamada de grupo · {n}': 'Group call · {n}',
+  'Entrar en la llamada': 'Join call',
+  'Entrar en la llamada · {n}': 'Join call · {n}',
+  'La llamada ya terminó': 'The call has ended',
+  'La llamada está llena': 'The call is full',
+  'Esperando a que se unan': 'Waiting for others to join',
 
-  /* ---------- W29d/e/f/g/h: spoilers, hora 12/24, E2E y UI ---------- */
+  /* ---------- W29d/e/f/g/h: spoilers, hora 12/24 y UI ---------- */
   'Mostrar Spoiler': 'Show spoiler',
   'Spoiler': 'Spoiler',
   'Ocultar': 'Hide',
   'Mensaje Spoiler': 'Spoiler message',
   'Enviado como spoiler': 'Sent as spoiler',
-  'Cifrado de extremo a extremo': 'End-to-end encryption',
   'Activado': 'On',
   'Pendiente': 'Pending',
-  'Se activará cuando {n} publique sus claves': 'It will turn on when {n} publishes their keys',
-  'Cifrado pendiente: se activará cuando {n} publique sus claves':
-    'Encryption pending: it will turn on when {n} publishes their keys',
-  'Código de verificación': 'Verification code',
-  'No se pudo cifrar el mensaje': 'Could not encrypt the message',
   /* ---------- W37: menciones globales, players, menús ---------- */
   '@todos': '@everyone',           /* mención global (se escribe en cualquier idioma) */
   '@activos': '@online',           /* menciona sólo a los conectados */
-  'Ver código de verificación': 'View verification code',
-  'Código de verificación: {c}': 'Verification code: {c}',
-  'El código estará disponible al abrir el chat':
-    'The code will be available when you open the chat',
-  'Compara este código con tu contacto. Si coincide, nadie intercepta la conversación.':
-    'Compare this code with your contact. If it matches, no one is intercepting the conversation.',
   'Este video tiene un error y no se puede reproducir':
     'This video has an error and cannot be played',
   'Pantalla completa': 'Fullscreen',
@@ -781,6 +790,18 @@ const EN = {
   'Sticker agregado': 'Sticker added',
   'No se pudo subir el archivo': 'Could not upload the file',
   'No se pudo borrar el archivo': 'Could not delete the file',
+  /* ---------- W63: tonos de mensaje y llamada ---------- */
+  'Sonidos': 'Sounds',
+  'Tono de mensaje': 'Message tone',
+  'Tono de llamada': 'Call tone',
+  'Previsualizar': 'Preview',
+  'Subir tono de llamada': 'Upload call ringtone',
+  'Subir tono de mensaje': 'Upload message tone',
+  'Uno por tipo': 'One per type',
+  'Si quieres más tonos de llamada graciosos puedes descargar en: https://tonosdellamada.es':
+    'If you want more funny call ringtones you can download at: https://tonosdellamada.es',
+  'Tono guardado': 'Tone saved',
+  'No se pudo subir el tono': 'Could not upload the tone',
 };
 
 /**

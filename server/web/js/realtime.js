@@ -5,11 +5,10 @@ import { session, refreshTokens, authLost, ApiError, sessionHooks } from './api.
 import { hooks, loadChats, loadMembers, loadPeople, loadBlocks,
   onIncomingMessage, catchUpChat, mediaUrl, openNotificationTarget } from './actions.js';
 import { t } from './i18n.js';
-/* W37a: los avisos y las citas muestran el texto DESCIFRADO (igual que
-   el chat); si no hay clave, el aviso usa un texto neutro. */
-import { decryptInto } from './e2e.js';
 /* W28h: la señalización de llamadas WebRTC reutiliza este socket */
 import { initCall, handleCallEvent, abortCall } from './call.js';
+/* W63: el aviso de mensaje nuevo usa el tono elegido en Ajustes. */
+import { selectedToneSrc } from './tones.js';
 import { clearMediaBlobs } from './mediadl.js';
 
 let ws = null;
@@ -62,10 +61,31 @@ function findChatPreview(chatId, msgId) {
   return null;
 }
 
+/* W62: al volver a la app se refrescan las solicitudes de amistad.
+   Sin esto, un evento perdido con la pestaña dormida exigía recargar. */
+let focusBound = false;
+let lastPeopleRefresh = 0;
+function refreshPeopleSoon() {
+  if (!store.hasSession || store.bootPhase !== 'ready') return;
+  if (document.visibilityState && document.visibilityState !== 'visible') return;
+  const now = Date.now();
+  if (now - lastPeopleRefresh < 4000) return;
+  lastPeopleRefresh = now;
+  loadPeople();
+  loadBlocks();
+}
+function bindFocusRefresh() {
+  if (focusBound || typeof document === 'undefined') return;
+  focusBound = true;
+  document.addEventListener('visibilitychange', refreshPeopleSoon);
+  window.addEventListener('focus', refreshPeopleSoon);
+}
+
 export function startWS() {
   stopped = false;
   backoff = 1000;
   hasOpened = false;
+  bindFocusRefresh();
   connect();
 }
 
@@ -74,6 +94,7 @@ export function stopWS() {
   /* P0: al desmontar/logout no puede quedar una llamada con la cámara
      encendida ni un RTCPeerConnection abierto. */
   abortCall('hangup');
+  store.groupCalls = {};
   if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (ws) { try { ws.close(); } catch (e) {} ws = null; }
@@ -142,7 +163,14 @@ function connect() {
        chats ya cargados se marcan para catch-up; el activo se pide ya
        mismo y el resto al abrirlos. */
     for (const id in store.loaded) store.syncNeeded[id] = true;
-    if (store.bootPhase === 'ready') loadChats();
+    if (store.bootPhase === 'ready') {
+      loadChats();
+      /* W62: una solicitud de amistad pudo llegar mientras el socket
+         estaba caído (app en segundo plano, cambio de red…). Al
+         reconectar se refrescan Personas y bloqueos, no sólo los chats. */
+      loadPeople();
+      loadBlocks();
+    }
     const active = store.activeChatId;
     if (active && store.loaded[active]) {
       catchUpChat(active).catch(function () {});
@@ -213,26 +241,46 @@ hooks.sendSeen = function (chatId, seq) {
 /* ------------------------------------------------- avisos (W6) */
 
 let actx = null;
+let msgAudio = null;
 
-/* Bip corto con WebAudio (sin assets: funciona en XP/Mypal). */
+/* W63: si hay un tono de mensaje elegido, suena el archivo; el pitido
+   WebAudio queda como "Predeterminado" y como respaldo si el asset falla. */
 function blip() {
+  const src = selectedToneSrc('message');
+  if (src) {
+    try {
+      if (msgAudio) {
+        msgAudio.pause();
+        msgAudio.src = '';
+        msgAudio = null;
+      }
+      const a = new Audio(src);
+      a.volume = 0.75;
+      msgAudio = a;
+      a.addEventListener('ended', function () {
+        if (msgAudio === a) msgAudio = null;
+      });
+      a.play().catch(function () {});
+      return;
+    } catch (e) { /* cae al pitido */ }
+  }
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     if (!actx) actx = new AC();
-    const t = actx.currentTime;
+    const t0 = actx.currentTime;
     const o = actx.createOscillator();
     const g = actx.createGain();
     o.type = 'sine';
-    o.frequency.setValueAtTime(880, t);
-    o.frequency.exponentialRampToValueAtTime(620, t + 0.12);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.10, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.frequency.setValueAtTime(880, t0);
+    o.frequency.exponentialRampToValueAtTime(620, t0 + 0.12);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
     o.connect(g);
     g.connect(actx.destination);
-    o.start(t);
-    o.stop(t + 0.2);
+    o.start(t0);
+    o.stop(t0 + 0.2);
   } catch (e) {}
 }
 
@@ -243,17 +291,7 @@ function previewBody(m) {
   if (m.kind === 'voice') return t('Nota de voz');
   if (m.kind === 'image') return t('Imagen');
   if (m.kind === 'file') return t('Archivo adjunto');
-  /* W37a: con E2E el aviso muestra el texto DESCIFRADO (el mismo que
-     ve el usuario en el chat). W54d: si todavía no hay clave, NUNCA
-     mostramos el marcador interno del servidor; un texto neutro evita
-     que la notificación parezca un error. */
-  if (m._plain != null) {
-    return String(m._plain).indexOf('[Mensaje cifrado]') >= 0
-      ? t('Nuevo mensaje') : m._plain;
-  }
-  if (m.e2e) return t('Nuevo mensaje');
-  const body = m.body || '';
-  return body.indexOf('[Mensaje cifrado]') >= 0 ? t('Nuevo mensaje') : body;
+  return m.body || '';
 }
 
 /* W56: en No molestar se silencian sonido y avisos, salvo que el mensaje
@@ -269,10 +307,7 @@ function hasDirectMention(m) {
       if (String(ms[i]) === me) return true;
     }
   }
-  /* W56: en los mensajes E2E el server no ve el texto y no puede rellenar
-     mentions. Tras descifrar, detectamos @usuario/@everyone/@online en el
-     texto local (nunca se envía nada al servidor). */
-  const text = m && (m._plain != null ? m._plain : (m.e2e ? '' : m.body));
+  const text = m && m.body;
   if (typeof text !== 'string' || text.indexOf('@') < 0) return false;
   if (/@(everyone|todos)\b/i.test(text)) return true;
   if (/@(online|activos)\b/i.test(text)) return true;
@@ -313,8 +348,8 @@ function nativeAvatarUrl(raw) {
   return absoluteAvatar(u);
 }
 
-/* Aviso del navegador — se extrae para poder esperar al descifrado
-   (W37a): con E2E el cuerpo es el MISMO texto que ve el chat. */
+/* Aviso del navegador — se extrae para poder reutilizarlo desde el
+   manejo de mensajes entrantes. */
 function browserNotify(m) {
   /* W55: resolver el puente ANTES del guard de Notification: el WebView
      de Android no define Notification, pero sí FoxinixAndroid. */
@@ -390,30 +425,11 @@ function notifyIncoming(m) {
   }
   if (muted) return;
   /* W56: No molestar apaga sonido y aviso, pero una mención directa
-     (@usuario) sigue avisando. En E2E la mención solo se conoce tras
-     descifrar: si la clave aún no estaba lista, esperamos ese intento
-     antes de decidir (si no hay clave, se silencia como corresponde). */
-  if (m.e2e && m._plain == null && !hasDirectMention(m) &&
-      store.user.status_preset === 'dnd' && !m._dndTried) {
-    m._dndTried = true;
-    Promise.resolve(decryptInto(m)).then(function () {
-      if (m._plain != null) notifyIncoming(m);
-    });
-    return;
-  }
+     (@usuario) sigue avisando. */
   if (dndSilences(m)) return;
   /* W55: el sonido del aviso nativo lo pone Android; no duplicamos el bip. */
   if (store.prefs.sound && (!open || document.hidden) && !nativeNotifyReady()) blip();
   if (document.hidden) {
-    /* W37a: con cifrado E2E se espera a descifrar (si hay clave) para
-       avisar con el texto real — igual que en el chat. Sin clave
-       (aún) se avisa con un texto neutro, nunca con el marcador. */
-    if (m.e2e && m._plain == null) {
-      Promise.resolve(decryptInto(m)).then(function () {
-        browserNotify(m);
-      });
-      return;
-    }
     browserNotify(m);
   }
 }
@@ -452,7 +468,7 @@ function clearTyping(chatId, userId) {
 /* W15: aplica un cambio de perfil (evento 'profile') a todo lo cargado:
    lista de chats (DM), mensajes ya renderizados (incl. respuestas),
    panel de miembros y el perfil propio si cambió en otra pestaña. */
-function applyProfileFields(target, u) {
+export function applyProfileFields(target, u) {
   if (!target || typeof target !== 'object') return;
   target.display_name = u.display_name;
   target.username = u.username;
@@ -489,8 +505,14 @@ function applyProfileUpdate(u) {
       if (mb.id === u.id) applyProfileFields(mb, u);
     }
   }
-  if (store.profile && store.profile.user && store.profile.user.id === u.id) {
-    applyProfileFields(store.profile.user, u);
+  if (store.profile) {
+    if (store.profile.user && store.profile.user.id === u.id) {
+      applyProfileFields(store.profile.user, u);
+    } else if (store.profile.loading && store.profile.username === u.username) {
+      /* W63: el perfil aún carga; guardar el evento para no pisarlo con
+         la respuesta (más vieja) de la petición en curso. */
+      store.profile.liveUser = u;
+    }
   }
   /* W58: Personas (amigos/enviadas/recibidas) también se actualiza en
      vivo. Las filas envueltas guardan el usuario en `user`. */
@@ -554,6 +576,7 @@ function dropRemovedChat(chatId) {
   delete store.loaded[chatId];
   delete store.syncNeeded[chatId];
   delete store.hasMore[chatId];
+  if (store.groupCalls) delete store.groupCalls[chatId];
   clearTyping(chatId);
 }
 
@@ -569,6 +592,10 @@ function handle(ev) {
   if (!store.hasSession) return;
   switch (ev.type) {
     case 'connected':
+      /* W64: el servidor manda justo después la presencia de las salas
+         de grupo que siguen activas. Vaciar primero evita botones verdes
+         fantasma tras un reinicio del servidor o una reconexión. */
+      store.groupCalls = {};
       return;
 
     case 'pong':
@@ -585,16 +612,8 @@ function handle(ev) {
         if (wt && senderId && wt[senderId]) {
           clearTyping(ev.message.chat_id, senderId);
         }
-        /* W37a: si el chat es E2E y la clave está en memoria, el aviso
-           espera al descifrado y muestra el texto REAL (igual que el
-           chat); sin clave queda el marcador del server. */
-        const done = onIncomingMessage(ev.message);
-        if (done && done.then) {
-          const nm = ev.message;
-          done.then(function () { notifyIncoming(nm); });
-        } else {
-          notifyIncoming(ev.message);
-        }
+        onIncomingMessage(ev.message);
+        notifyIncoming(ev.message);
       }
       return;
 
@@ -728,14 +747,6 @@ function handle(ev) {
             arr[i] = Object.assign({}, arr[i], {
               body: ev.body, edited_at: ev.edited_at,
             });
-            /* W37a: edición cifrada — el blob cambió; limpiar el texto
-               descifrado viejo y re-descifrar con la clave del chat. */
-            if (ev.e2e) {
-              arr[i].e2e = ev.e2e;
-              delete arr[i]._plain;
-              delete arr[i]._e2eTried;
-              decryptInto(arr[i]);
-            }
             break;
           }
         }
@@ -743,12 +754,6 @@ function handle(ev) {
       const ce = findChatPreview(ev.chat_id, ev.message_id);
       if (ce) {
         ce.body = ev.body;
-        if (ev.e2e) {
-          ce.e2e = ev.e2e;
-          delete ce._plain;
-          delete ce._e2eTried;
-          decryptInto(ce);
-        }
       }
       return;
     }
@@ -801,7 +806,12 @@ function handle(ev) {
       applyProfileUpdate(ev.user);
       return;
 
-    /* W28h: señalización de llamadas WebRTC (solo relé del server) */
+    /* W28h/W62/W64: señalización de llamadas WebRTC (solo relé del
+       server). call_state es la presencia drop-in de las salas de grupo;
+       call_join es la entrada a la malla. */
+    case 'call_state':
+    case 'call_invite':
+    case 'call_join':
     case 'call_offer':
     case 'call_answer':
     case 'call_ice':

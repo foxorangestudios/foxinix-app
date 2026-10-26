@@ -14,7 +14,7 @@ let lastIdentifier = '';
 
 /* ---------- carga ---------- */
 /* W38: la pantalla de arranque es la compartida (icono de la app,
-   sello de cifrado, barra de progreso y fase real del arranque).
+   barra de progreso y fase real del arranque).
    W39: el envoltorio .boot CENTRA desde el primer pintado — sin él
    la pantalla salía arriba y "se acomodaba" al llegar el overlay
    fijo del chat (parpadeo). */

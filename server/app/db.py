@@ -157,22 +157,12 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned_at     INTEGER NOT NULL DEFAULT 0,   -- W28c: 0 = sin fijar
     pinned_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
     spoiler       INTEGER NOT NULL DEFAULT 0,   -- W29d: contenido con spoiler
-    e2e_iv        TEXT,                         -- W29f: IV (base64) del blob AES-GCM
-    e2e_ct        TEXT,                         -- W29f: cifrado (base64, ≤32 KB)
     UNIQUE (chat_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, seq DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client
     ON messages(chat_id, sender_id, client_msg_id)
     WHERE client_msg_id IS NOT NULL;
-
--- W29f: clave pública ECDH (P-256) por usuario. La privada JAMÁS sale
--- del navegador (IndexedDB); el server solo reenvía la pública.
-CREATE TABLE IF NOT EXISTS e2e_keys (
-    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    pubkey     TEXT NOT NULL,               -- base64 (punto sin comprimir, 65 B)
-    created_at INTEGER NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS reactions (
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -248,6 +238,19 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
+def _drop_column(conn: sqlite3.Connection, table: str, column: str) -> None:
+    """W67: elimina una columna en bases viejas.
+
+    `ALTER TABLE ... DROP COLUMN` necesita SQLite 3.35+ (2021). Si el del
+    servidor fuera más viejo se ignora en seco: la columna queda ahí a
+    `NULL`, inofensiva, porque el server ya no la escribe ni la lee.
+    """
+    try:
+        conn.execute(f'ALTER TABLE "{table}" DROP COLUMN "{column}"')
+    except sqlite3.Error:
+        pass
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Columnas agregadas después del esquema inicial (CREATE IF NOT EXISTS
     no altera tablas existentes): se añaden una sola vez por PRAGMA."""
@@ -315,10 +318,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE messages ADD COLUMN spoiler INTEGER NOT NULL DEFAULT 0"
         )
-    if "e2e_iv" not in mcols:
-        conn.execute("ALTER TABLE messages ADD COLUMN e2e_iv TEXT")
-    if "e2e_ct" not in mcols:
-        conn.execute("ALTER TABLE messages ADD COLUMN e2e_ct TEXT")
+    # W67: retirada del cifrado E2E. Las bases viejas traen estas dos
+    # columnas y la tabla de claves; se eliminan en la migración. Todo el
+    # historial estaba ya en texto plano (o era un marcador vacío), así que
+    # no se pierde nada legible.
+    if "e2e_iv" in mcols:
+        _drop_column(conn, "messages", "e2e_iv")
+    if "e2e_ct" in mcols:
+        _drop_column(conn, "messages", "e2e_ct")
+    conn.execute("DROP TABLE IF EXISTS e2e_keys")
     med = {r["name"] for r in conn.execute("PRAGMA table_info(media)")}
     if "slug" not in med:
         conn.execute("ALTER TABLE media ADD COLUMN slug TEXT")

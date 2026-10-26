@@ -651,6 +651,25 @@ class AndroidNotifier(private val activity: Activity) {
     }
   }
 
+  /* W63: abrir enlaces externos en el navegador del dispositivo. En el
+     WebView target="_blank" no abre nada, así que la web llama a este
+     puente y sólo cae al comportamiento normal en escritorio. */
+  @JavascriptInterface
+  @Keep
+  fun openUrl(url: String?) {
+    val raw = url?.trim().orEmpty()
+    if (!(raw.startsWith("https://") || raw.startsWith("http://"))) return
+    activity.runOnUiThread {
+      try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(raw))
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        activity.startActivity(intent)
+      } catch (e: Exception) {
+        // Sin navegador o URL inválida: la app sigue funcionando.
+      }
+    }
+  }
+
   /* W56: Android no rellena env(safe-area-inset-bottom) dentro del
      WebView. Devolvemos el inset de la barra de navegación/gestos en dp;
      boot.js lo aplica a --sab. Con el teclado abierto devolvemos 0 para
@@ -713,7 +732,10 @@ class AndroidNotifier(private val activity: Activity) {
   }
 
   private fun storageState(): String {
-    if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return "unavailable"
+    /* W62: en Android 10+ se guarda en Descargas/Foxinix con MediaStore,
+       sin permiso legacy. Antes se mostraba "No disponible" y parecía
+       que las descargas estaban rotas. */
+    if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return "granted"
     return runtimeState(Manifest.permission.WRITE_EXTERNAL_STORAGE, "storage")
   }
 
@@ -751,7 +773,7 @@ class AndroidNotifier(private val activity: Activity) {
         Manifest.permission.POST_NOTIFICATIONS
       }
       "storage" -> {
-        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return "unavailable"
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) return "granted"
         Manifest.permission.WRITE_EXTERNAL_STORAGE
       }
       else -> return "unavailable"

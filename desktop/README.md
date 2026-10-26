@@ -94,7 +94,7 @@ un keystore guardado en secretos (`ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`,
   La pantalla de login se probó en un emulador Android 15 x86_64 con un APK
   compilado desde el mismo código.
 - Pide permiso de micrófono y cámara solo cuando la web los usa (notas de
-  voz, adjuntos). El cifrado E2E de los chats individuales sigue activo.
+  voz, adjuntos).
 - Para actualizar hay que conservar el mismo keystore. Sin esa clave Android
   rechaza la instalación sobre la versión anterior.
 

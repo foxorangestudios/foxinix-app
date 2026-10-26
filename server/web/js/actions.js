@@ -2,11 +2,6 @@
 import { store, toast, syncUrl } from './store.js';
 import { api, uploadMedia, session } from './api.js';
 import { t } from './i18n.js';
-/* W29f: cifrado de extremo a extremo (envío y descifrado de blobs). */
-import {
-  chatKey, chatKeyReady, decryptInto, encryptText, isEncrypting,
-  maybeAutoActivate,
-} from './e2e.js';
 
 /* Puentes que registra realtime.js para mandar 'seen' por WS (fallback: REST). */
 export const hooks = { sendSeen: null };
@@ -50,9 +45,28 @@ dlHooks.onSaved = function (meta) {
   store.dlRev++;
 };
 
+/* W62: los avatares y las portadas se firman de nuevo en cada respuesta
+   de la API. La firma cambia aunque el archivo sea el mismo, y el
+   navegador descarga otra vez cada URL. Guardamos una URL estable por
+   RUTA mientras su firma siga vigente (más de 5 min de margen), así todos
+   los mensajes de una persona reutilizan la misma foto y carga. */
+const profileUrlCache = new Map();
+
+function stableProfileUrl(url) {
+  const path = String(url).split('?')[0];
+  if (path.indexOf('/media/profile/') !== 0) return url;
+  const m = /(?:[?&])exp=(\d+)/.exec(url);
+  const exp = m ? parseInt(m[1], 10) : 0;
+  const now = Math.floor(Date.now() / 1000);
+  const hit = profileUrlCache.get(path);
+  if (hit && hit.exp > now + 300) return hit.url;
+  profileUrlCache.set(path, { url: url, exp: exp });
+  return url;
+}
+
 export function mediaUrl(url, noCache, full) {
   if (!url) return '';
-  let u = url;
+  let u = stableProfileUrl(url);
   if (!/[?&](sig|token)=/.test(u) && u.indexOf('/media/') !== 0) {
     u = u + (u.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(session.access || '');
   }
@@ -149,6 +163,7 @@ async function loadChatsOnce() {
     // fetch en vuelo), descartar: la pantalla principal queda sin datos.
     if (!store.hasSession) return;
     store.chats = r.chats || [];
+    store.chatsReady = true;   // W65: incluso con 0 chats se resuelven enlaces
     /* W26: la presencia vive en store.presence (eventos WS + snapshot del
        server al reconectar). El REST solo rellena lo que aún no se sabe:
        un snapshot con fecha de consulta vieja no pisa un evento más
@@ -160,25 +175,10 @@ async function loadChatsOnce() {
       }
     }
     sortChats();
-    decryptChatPreviews();   // W30c: previews de la lista en claro (si hay clave)
     resolvePendingChat();   // W22: el deep link pendiente ya tiene la lista
     resolveNotificationTarget();  // W57: aviso tocado durante el arranque
   } catch (e) {
     if (e && e.status !== 401) toast(e.detail || 'No se pudo cargar la lista', 'err');
-  }
-}
-
-/* W30c: descifra el último mensaje (preview) de cada chat DM con blob
-   E2E. Con las claves ya en caché (W30a) es solo un AES local por
-   chat — sin RTT — y así la lista no enseña "[Mensaje cifrado]" a
-   quien sí tiene la clave; el marcador queda sólo si no hay clave. */
-function decryptChatPreviews() {
-  const chats = store.chats || [];
-  for (let i = 0; i < chats.length; i++) {
-    const c = chats[i];
-    if (c.type !== 'dm') continue;
-    const lm = c.last_message;
-    if (lm && lm.e2e && lm._plain == null && !lm._e2eTried) decryptInto(lm);
   }
 }
 
@@ -188,7 +188,7 @@ function decryptChatPreviews() {
 export function resolvePendingChat() {
   const ref = store.pendingPath;
   if (!ref) return false;
-  if (!store.chats.length) return false;    // sin la lista todavía
+  if (!store.chatsReady) return false;      // la lista todavía no llegó
   store.pendingPath = null;
   let id = 0;
   for (let i = 0; i < store.chats.length; i++) {
@@ -200,14 +200,90 @@ export function resolvePendingChat() {
       break;
     }
   }
-  if (!id) {
-    /* El chat no existe (o ya no está): volver al panel con la URL real. */
-    if (store.activeChatId) closeChat();
-    syncUrl();
-    return false;
+  if (id) {
+    openChat(id, true);   // keepJump: el ?m= de la URL se aplica después
+    return true;
   }
-  openChat(id, true);   // keepJump: el ?m= de la URL se aplica después
-  return true;
+  if (ref.kind === 'user' && ref.id) {
+    /* W65: /app/user/<id> sin MD. El perfil por ID decide: amistad →
+       abrir/crear el DM; sin relación → solicitud automática + modal. */
+    store.pendingUser = ref.id;
+    resolveUserDeepLink(ref.id);
+    return true;
+  }
+  /* El chat no existe (o ya no está): volver al panel con la URL real. */
+  if (store.activeChatId) closeChat();
+  syncUrl();
+  return false;
+}
+
+/* W65: resuelve un enlace público a una cuenta. El ID no cambia aunque
+   la persona cambie su @usuario; el endpoint devuelve también la
+   relación para no duplicar solicitudes ni abrir MD sin amistad. */
+async function resolveUserDeepLink(uid) {
+  try {
+    const r = await api('GET', '/api/users/id/' + uid, undefined, { retry401: true });
+    if (store.pendingUser !== uid) return;   // navegación nueva: descartar
+    const u = r.user;
+    if (r.relation === 'me') {
+      store.profile = null;
+      store.meProfileOpen = true;
+      return;
+    }
+    /* Un amigo siempre entra a su MD (si ya existe, se reutiliza; si no,
+       el servidor lo crea). */
+    if (r.relation === 'friend') {
+      const mine = store.chats.filter(function (c) {
+        return c.type === 'dm' && c.title && c.title.id === u.id;
+      })[0];
+      if (mine) await openChat(mine.id, true);
+      else {
+        await createDm(u.username);
+        const made = store.chats.filter(function (c) {
+          return c.type === 'dm' && c.title && c.title.id === u.id;
+        })[0];
+        if (made) await openChat(made.id, true);
+      }
+      return;
+    }
+    store.profile = {
+      loading: false, user: u, error: '', username: u.username,
+      relation: r.relation,
+    };
+    if (r.relation === 'none') {
+      try {
+        await sendFriendRequest(u.username);
+        if (store.pendingUser === uid && store.profile &&
+            store.profile.user && store.profile.user.id === u.id) {
+          store.profile.relation = 'sent';
+          store.requestSent = {
+            username: u.username,
+            display_name: u.display_name || u.username,
+          };
+        }
+      } catch (e) {
+        /* 409: otra pestaña/dispositivo la envió entre la consulta y el
+           POST. No es un error para la persona: el perfil queda como
+           "Solicitud pendiente" y no se repite el aviso. */
+        if (e && e.status === 409 && store.profile &&
+            store.profile.user && store.profile.user.id === u.id) {
+          store.profile.relation = 'sent';
+        } else if (!e || e.status !== 409) {
+          toast((e && e.detail) || t('No se pudo enviar la solicitud'), 'err');
+        }
+      }
+    }
+  } catch (e) {
+    if (e && e.status !== 401) {
+      toast(e.status === 404 ? t('Usuario no encontrado')
+        : (e.detail || t('No se pudo abrir el perfil')), 'err');
+    }
+  } finally {
+    if (store.pendingUser === uid) {
+      store.pendingUser = 0;
+      syncUrl();
+    }
+  }
 }
 
 /* W57: una notificación trae chat + mensaje. En Android puede llegar en
@@ -250,6 +326,60 @@ export function resolveNotificationTarget() {
    deep link reutilizan la misma promesa en vez de pedir dos veces. */
 const inflightMsgs = {};
 
+/* W62: memoria de chats. Sólo se conservan hidratados los 3 últimos
+   abiertos (más el activo); los anteriores se liberan entre 30 y 60 s
+   después de dejar de usarse. Los mensajes se vuelven a pedir al abrir. */
+const KEEP_HYDRATED = 3;
+const RELEASE_MS = 45000;
+const chatLastOpen = Object.create(null);
+let releaseTimer = null;
+
+function releaseOldChats() {
+  const loaded = [];
+  for (const id in store.loaded) {
+    if (store.loaded[id]) loaded.push(String(id));
+  }
+  if (loaded.length <= KEEP_HYDRATED) return false;
+  loaded.sort(function (a, b) {
+    return (chatLastOpen[b] || 0) - (chatLastOpen[a] || 0);
+  });
+  const keep = {};
+  for (let i = 0; i < KEEP_HYDRATED; i++) keep[loaded[i]] = 1;
+  const active = String(store.activeChatId || 0);
+  const now = Date.now();
+  let pending = false;
+  for (let i = 0; i < loaded.length; i++) {
+    const id = loaded[i];
+    if (keep[id] || id === active) continue;
+    if (now - (chatLastOpen[id] || 0) < RELEASE_MS) { pending = true; continue; }
+    /* Liberar la conversación, no la ficha del chat: la lista, el
+       último mensaje y los contadores se quedan. */
+    delete store.msgs[id];
+    delete store.loaded[id];
+    delete store.hasMore[id];
+    delete store.syncNeeded[id];
+    delete store.readSeqs[id];
+    delete store.deliveredSeqs[id];
+    delete store.spoilSeen[id];
+    delete store.typing[id];
+  }
+  return pending;
+}
+
+function scheduleRelease() {
+  if (releaseTimer) return;
+  releaseTimer = setTimeout(function () {
+    releaseTimer = null;
+    if (releaseOldChats()) scheduleRelease();
+  }, 15000);
+}
+
+function touchChat(id) {
+  if (!id) return;
+  chatLastOpen[String(id)] = Date.now();
+  scheduleRelease();
+}
+
 /* W34d: visita de un chat — su contador baja (título "(N) Foxinix")
    y se confirma el visto al server. Sólo corre al ENTRAR al chat (o
    al volver la pestaña estando ya en él); nunca por el simple hecho
@@ -269,19 +399,13 @@ export function markChatRead(id) {
 
 export async function openChat(id, keepJump) {
   store.activeChatId = id;
+  touchChat(id);
   /* W27b: al entrar a un chat se cierra la pantalla Personas (móvil) */
   store.peopleMobile = false;
   /* W22: el salto ?m= pertenece al chat de la URL; al entrar a otro
      chat desde la lista se limpia. */
   if (!keepJump && store.jumpMsg) store.jumpMsg = 0;
   markChatRead(id);
-  const chat = findChat(id);
-  /* W30d: al abrir un DM se intenta auto-activar el cifrado (si el par
-     ya publicó su clave y no lo apagué); si no, queda "pendiente" con
-     aviso. Comparte la petición de clave con el descifrado de abajo. */
-  if (chat && chat.type === 'dm') {
-    maybeAutoActivate(chat).catch(function () {});
-  }
   if (store.loaded[id]) {
     /* W45a: si la WS se reconectó mientras este chat estaba cerrado,
        pueden faltar mensajes. Se piden los que siguen al último seq en
@@ -298,19 +422,8 @@ export async function openChat(id, keepJump) {
   store.chatLoading = true;
   inflightMsgs[id] = (async function () {
     try {
-      /* W30a: mientras baja el historial se calienta la clave E2E (si
-         el chat la usa): los blobs se descifran ANTES de insertar y
-         el primer pintado ya sale con texto real. */
-      if (chat && chat.type === 'dm' && store.e2e[id]) {
-        chatKey(id).catch(function () {});
-      }
       const r = await api('GET', '/api/chats/' + id + '/messages?limit=50');
       const list = r.messages || [];
-      const e2eList = [];
-      for (let i = 0; i < list.length; i++) if (list[i].e2e) e2eList.push(list[i]);
-      if (e2eList.length) {
-        await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
-      }
       mergeMessages(id, list);
       /* W59: del historial solo se completan los adjuntos MÁS RECIENTES
          (12) al abrir el chat. Así activar la descarga automática no
@@ -319,6 +432,7 @@ export async function openChat(id, keepJump) {
       autoDownloadMessages(list, 12);
       store.hasMore[id] = list.length >= 50;
       store.loaded[id] = true;
+      touchChat(id);
       sendSeen(id, maxSeq(store.msgs[id]));
     } catch (e) {
       toast(e.detail || 'No se pudieron cargar los mensajes', 'err');
@@ -351,11 +465,6 @@ export async function catchUpChat(chatId) {
       if (!store.hasSession) break;
       const list = r.messages || [];
       if (!list.length) break;
-      const e2eList = [];
-      for (let i = 0; i < list.length; i++) if (list[i].e2e) e2eList.push(list[i]);
-      if (e2eList.length) {
-        await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
-      }
       mergeMessages(chatId, list);
       /* P1: tras reconectar no se descarga el historial entero. Solo la
          primera página y como máximo 12 adjuntos; las páginas antiguas
@@ -394,13 +503,6 @@ export async function loadOlder(chatId) {
     const r = await api('GET', '/api/chats/' + chatId + '/messages?before_seq=' + before + '&limit=50');
     const list = r.messages || [];
     if (list.length) {
-      /* W30a: los blobs cifrados se descifran antes de pegar la página
-         (así las filas antiguas nacen con texto real). */
-      const e2eList = [];
-      for (let i = 0; i < list.length; i++) if (list[i].e2e) e2eList.push(list[i]);
-      if (e2eList.length) {
-        await Promise.all(e2eList.map(function (x) { return decryptInto(x); }));
-      }
       store.msgs[chatId] = list.concat(arr);
       /* W59: las páginas viejas NO se descargan automáticamente. */
     }
@@ -420,8 +522,6 @@ export async function createDm(username) {
   else store.chats.push(chat);
   sortChats();
   store.newChatOpen = false;
-  /* W30d/W31c: el DM nuevo se auto-activa al abrir (sin flags: el
-     cifrado intenta encenderse en todos los DMs). */
   openChat(chat.id);
   return chat;
 }
@@ -660,13 +760,6 @@ export function upsertMessage(m) {
     }
   }
   if (!stored) { arr.push(m); stored = arr[arr.length - 1]; }
-  /* W29f/W30a: descifrado de respaldo sobre el objeto YA reactivo —
-     la asignación posterior a la inserción repinta la burbuja en el
-     momento exacto en que llega _plain (antes se escribía sobre el
-     objeto crudo y Vue no se enteraba hasta el siguiente render). */
-  if (stored.e2e && stored._plain == null && !stored._e2eTried) {
-    decryptInto(stored);
-  }
 }
 
 /* Une la página inicial (o de WS) con lo ya presente, sin perder carreras. */
@@ -695,14 +788,6 @@ export function sendSeen(chatId, seq) {
 
 /* Mensaje entrante por WS: insertar + preview + badge + seen. */
 export function onIncomingMessage(m) {
-  /* W30a: si la clave del chat ya está en memoria, el blob se
-     descifra ANTES de insertar (sub-ms) y la burbuja nace con el
-     texto real: el marcador del server no se pinta ni un frame. */
-  if (m.e2e && m._plain == null && chatKeyReady(m.chat_id)) {
-    /* W37a: devuelve la promesa para que realtime.js pueda notificar
-       DESPUÉS de descifrar (la notificación muestra el texto real). */
-    return decryptInto(m).then(function () { finishIncoming(m); });
-  }
   finishIncoming(m);
 }
 
@@ -791,7 +876,7 @@ function replyStub(src) {
     seq: src.seq,
     kind: src.kind || 'text',
     /* W32: cita el texto DESCIFRADO si existe (nunca el marcador). */
-    body: ((src._plain != null ? src._plain : src.body) || '').slice(0, 120),
+    body: (src.body || '').slice(0, 120),
     sender: src.sender ? (src.sender.display_name || src.sender.username) : null,
   };
 }
@@ -811,25 +896,8 @@ export async function sendText(chatId, text, srcMsg, kind, opts) {
     return sendMedia(chatId, file, 'file', srcMsg, '', null, null,
       { spoiler: !!opts.spoiler });
   }
-  /* W29d/W29f: el server recibe el flag de spoiler y, si el chat está
-     activo para E2E, SÓLO el blob cifrado (body vacío). El texto en
-     claro vive en la burbuja local (tmp._plain). */
-  let bodySend = text;
-  let e2eBlob = null;
-  /* W29f: los stickers van en claro (el emoji ES el contenido y el
-     server exige el cuerpo corto); el resto del texto se cifra. */
-  if (isEncrypting(chatId) && kind !== 'sticker') {
-    try {
-      const ck = await chatKey(chatId);
-      if (!ck || ck.none) throw new Error('sin clave del contacto');
-      e2eBlob = await encryptText(ck.key, text);
-      bodySend = '';
-    } catch (e) {
-      /* Nunca se manda en claro si el usuario pidió cifrado. */
-      toast(t('No se pudo cifrar el mensaje'), 'err');
-      throw e;
-    }
-  }
+  /* W29d: el server recibe el flag de spoiler. W67: el texto va SIEMPRE
+     en claro — el cifrado de extremo a extremo se retiró. */
   const cid = uuid();
   const tmp = {
     id: -Math.floor(Date.now() + Math.random()),
@@ -838,8 +906,6 @@ export async function sendText(chatId, text, srcMsg, kind, opts) {
     kind: kind,
     body: text,
     spoiler: !!opts.spoiler,   // W29d
-    e2e: e2eBlob,              // W29f
-    _plain: e2eBlob ? text : undefined,
     media: null,
     reply_to: srcMsg ? replyStub(srcMsg) : null,
     client_msg_id: cid,
@@ -853,9 +919,8 @@ export async function sendText(chatId, text, srcMsg, kind, opts) {
   store.msgs[chatId].push(tmp);
   try {
     const r = await api('POST', '/api/chats/' + chatId + '/messages',
-      { kind: kind, body: bodySend, reply_to: srcMsg ? srcMsg.id : null,
-        client_msg_id: cid, spoiler: !!opts.spoiler, e2e: e2eBlob });
-    if (e2eBlob) r.message._plain = text;   // el mío ya lo conozco
+      { kind: kind, body: text, reply_to: srcMsg ? srcMsg.id : null,
+        client_msg_id: cid, spoiler: !!opts.spoiler });
     upsertMessage(r.message);
     bumpPreview(chatId, r.message);
   } catch (e) {
@@ -937,7 +1002,7 @@ function runUpload(chatId, cid) {
         reply_to: u.srcMsg ? u.srcMsg.id : null, client_msg_id: cid,
         peaks: u.peaks ? JSON.stringify(u.peaks) : null,      // W13: onda
         dur: u.dur || null,                                   // W13: duración
-        spoiler: !!u.spoiler, e2e: u.e2e || null });   // W29d/W29f
+        spoiler: !!u.spoiler });   // W29d
   };
   var chain;
   if (u.up) {
@@ -951,7 +1016,6 @@ function runUpload(chatId, cid) {
   chain.then(send).then(function (r) {
     delete _uploads[cid];
     if (u.localUrl) { try { URL.revokeObjectURL(u.localUrl); } catch (e) {} }
-    if (u.e2e && u.plain) r.message._plain = u.plain;   // W29f: ya lo sé
     upsertMessage(r.message);
     bumpPreview(chatId, r.message);
   }).catch(function (e) {
@@ -989,21 +1053,7 @@ export async function sendMedia(chatId, file, kind, srcMsg, caption, peaks, dur,
   if (charCount(caption) > MAX_TEXT_CHARS) {
     caption = Array.from(caption).slice(0, MAX_TEXT_CHARS).join('');
   }
-  /* W29f: pie de foto cifrado si el chat está activo para E2E (el
-     archivo viaja por URL normal, sin cifrar: así está diseñado). */
-  let bodySend = caption || '';
-  let e2eBlob = null;
-  if (caption && isEncrypting(chatId)) {
-    try {
-      const ck = await chatKey(chatId);
-      if (!ck || ck.none) throw new Error('sin clave del contacto');
-      e2eBlob = await encryptText(ck.key, caption);
-      bodySend = '';
-    } catch (e) {
-      toast(t('No se pudo cifrar el mensaje'), 'err');
-      throw e;
-    }
-  }
+  /* El pie de foto va SIEMPRE en claro. */
   const cid = uuid();
   const tmp = {
     id: -Math.floor(Date.now() + Math.random()),
@@ -1037,8 +1087,7 @@ export async function sendMedia(chatId, file, kind, srcMsg, caption, peaks, dur,
   }
   if (!store.msgs[chatId]) store.msgs[chatId] = [];
   store.msgs[chatId].push(tmp);
-  _uploads[cid] = { file: file, kind: kind, body: bodySend,
-                    plain: caption || '', e2e: e2eBlob,
+  _uploads[cid] = { file: file, kind: kind, body: caption || '',
                     spoiler: !!opts.spoiler,
                     srcMsg: srcMsg || null, localUrl: tmp.localUrl || '',
                     peaks: peaks || null, dur: dur || null,
@@ -1094,10 +1143,7 @@ function bumpPreview(chatId, m) {
 
 /* ---- W8: editar y eliminar mensajes ---- */
 
-/* Edita el texto de un mensaje propio (server: PUT + WS message_edited).
-   W37a: con cifrado E2E el server recibe SÓLO el nuevo blob (como al
-   enviar); el texto claro nunca viaja. El evento WS lleva el blob para
-   que el resto lo re-descifre. */
+/* Edita el texto de un mensaje propio (server: PUT + WS message_edited). */
 export async function editMessage(chatId, msgId, text) {
   text = (text || '').replace(/\s+$/, '');
   if (!text) return;
@@ -1105,25 +1151,9 @@ export async function editMessage(chatId, msgId, text) {
     toast(t('El mensaje supera los 3000 caracteres'), 'err');
     return;
   }
-  let bodySend = text;
-  let e2eBlob = null;
-  if (isEncrypting(chatId)) {
-    try {
-      const ck = await chatKey(chatId);
-      if (!ck || ck.none) throw new Error('sin clave del contacto');
-      e2eBlob = await encryptText(ck.key, text);
-      bodySend = '';
-    } catch (e) {
-      toast(t('No se pudo cifrar el mensaje'), 'err');
-      throw e;
-    }
-  }
   const r = await api('PUT', '/api/chats/' + chatId + '/messages/' + msgId,
-    { body: bodySend, e2e: e2eBlob }, { retry401: true });
-  if (r.message) {
-    if (e2eBlob) r.message._plain = text;   // el mío ya lo conozco
-    upsertMessage(r.message);
-  }
+    { body: text }, { retry401: true });
+  if (r.message) upsertMessage(r.message);
   store.editFor = 0;
   store.editDraft = '';
   return r.message;

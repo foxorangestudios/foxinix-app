@@ -33,7 +33,7 @@ const PERM_TITLE = {
 const PERM_TEXT = {
   mic: 'Sirve para grabar notas de voz y hablar en llamadas. Solo se activa cuando tú lo pides.',
   camera: 'Sirve para videollamadas y para enviar fotos o videos desde la cámara.',
-  notif: 'Avisa de mensajes nuevos aunque Foxinix esté en segundo plano. Nunca muestra el contenido cifrado.',
+  notif: 'Avisa de mensajes nuevos aunque Foxinix esté en segundo plano. Muestra el texto del mensaje.',
   storage: 'Permite guardar una copia de tus descargas en Descargas/Foxinix. Las descargas normales ya quedan en los datos de la app.',
 };
 const PERM_DENIED = {
@@ -72,7 +72,10 @@ export async function permissionState(kind) {
     try {
       const fn = kind === 'storage' ? 'storagePermission' : 'permissionState';
       if (typeof a[fn] === 'function') {
-        const st = String(a[fn](nativeKind(kind)) || '');
+        let st = String(a[fn](nativeKind(kind)) || '');
+        /* W62: APKs anteriores devolvían "unavailable" para storage en
+           Android 10+, donde ya no hace falta permiso (MediaStore). */
+        if (kind === 'storage' && st === 'unavailable') st = 'granted';
         if (st === 'granted' || st === 'denied' || st === 'prompt' ||
             st === 'unavailable') return st;
       }
@@ -102,7 +105,9 @@ export async function permissionState(kind) {
     return 'unknown';
   }
   /* El navegador no tiene "permiso de almacenamiento" equivalente al
-     legacy de Android: Cache Storage funciona sin diálogo. */
+     legacy de Android: Cache Storage y las descargas funcionan sin
+     diálogo. Se muestra como concedido, no como "No disponible". */
+  if (kind === 'storage') return 'granted';
   return 'unavailable';
 }
 
@@ -348,7 +353,14 @@ export function permissionStateLabel(kind) {
   const st = store.permStates[kind];
   if (st === 'granted') return t('Concedido');
   if (st === 'denied') return t('Bloqueado');
-  if (st === 'unavailable') return t('No disponible');
+  if (st === 'unavailable') {
+    /* W62: el almacenamiento del navegador no necesita permiso; la
+       cámara sin getUserMedia se deja como pendiente para poder
+       reintentar en lugar de declararla muerta. */
+    if (kind === 'storage') return t('No requiere permiso');
+    if (kind === 'camera') return t('Pendiente');
+    return t('No disponible');
+  }
   return t('Pendiente');
 }
 

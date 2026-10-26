@@ -626,10 +626,8 @@ def main():
       if (!item) return JSON.stringify({err:'sin chat'});
       item.click();
       await wait(() => (__fm.store.msgs[cid]||[]).length > 0, 12000);
-      // publicar la clave E2E (abrir el DM la genera si aún no existe)
-      const pub = await wait(() => localStorage.getItem('fm.e2e.pub'), 15000);
       await sleep(600);
-      const out = {pub: !!pub, stickers: __fm.store.userAssets.stickers.length,
+      const out = {stickers: __fm.store.userAssets.stickers.length,
         gifs: __fm.store.userAssets.gifs.length};
       const srow = document.querySelector('.msgs .msg .b-sticker-img');
       out.stickerImg = !!srow;
@@ -654,16 +652,17 @@ def main():
     ok, res, log = shot(a.base + "/?v=w61-b", SHOTS / "w61-6-b.png",
                         js=js_b, wait=700)
     d = jparse(res)
-    step("B: clave E2E publicada y biblioteca completa (10/10)",
-         ok and d.get("pub") and d.get("stickers") == 10 and
+    step("B: biblioteca de stickers/GIFs completa (10/10)",
+         ok and d.get("stickers") == 10 and
          d.get("gifs") == 10 and d.get("stCount") == "10/10" and
          d.get("gifCount") == "10/10", d or log[-400:])
     step("B: el sticker recibido aparece con estrella rellena",
          d.get("stickerImg") and d.get("starTitle") == "Quitar de favoritos", d)
 
-    # ---------------- emoji grande en un chat cifrado (A vuelve) ----------------
+    # ---------------- emoji grande en el DM (A vuelve) ----------------
+    # W67: el DM se usa en claro y no hay ninguna espera antes de enviar.
     shot(a.base + "/", SHOTS / "w61-7-sesion-a2.png", js=sess_js(A), wait=300)
-    js_e2e = """(async () => {
+    js_emo = """(async () => {
       const sleep = ms => new Promise(r => setTimeout(r, ms));
       const wait = async (fn, ms=25000) => { const t=Date.now(); while(Date.now()-t<ms){const v=fn(); if(v) return v; await sleep(120);} return null; };
       const cid = {CID};
@@ -671,8 +670,6 @@ def main():
       const item = await wait(() => document.querySelector('.chat-item[data-chat-id="' + cid + '"]'), 12000);
       if (!item) return JSON.stringify({err:'sin chat'});
       item.click();
-      const on = await wait(() => (__fm.store.e2e||{})[cid] === 1, 20000);
-      if (!on) return JSON.stringify({e2e:false, pend:!!((__fm.store.e2ePend||{})[cid])});
       await wait(() => (__fm.store.msgs[cid]||[]).length > 0, 12000);
       await sleep(300);
       const ta = document.querySelector('.composer-input');
@@ -683,20 +680,20 @@ def main():
       const send = document.querySelector('.send-btn'); if (send) send.click();
       const lm = await wait(() => {
         const arr = __fm.store.msgs[cid] || [];
-        return arr.length > before ? arr[arr.length-1] : null;
+        const m = arr.length > before ? arr[arr.length-1] : null;
+        return (m && !m.pending) ? m : null;
       }, 25000);
       const row = lm ? document.querySelector('.msg[data-msg-id="' + lm.id + '"] .bubble') : null;
-      return JSON.stringify({e2e: on, pending: !!(lm && lm.pending),
-        encrypted: !!(lm && lm.e2e), plain: lm && lm._plain,
-        body: lm && lm.body, big: !!(row && row.className.indexOf('emo-big') >= 0),
+      return JSON.stringify({pending: !!(lm && lm.pending),
+        body: lm && lm.body,
+        big: !!(row && row.className.indexOf('emo-big') >= 0),
         rowClass: row ? row.className : ''});
     })()""".replace("{CID}", str(cid))
-    ok, res, log = shot(a.base + "/?v=w61-e2e", SHOTS / "w61-8-e2e.png",
-                        js=js_e2e, wait=700)
+    ok, res, log = shot(a.base + "/?v=w61-emo", SHOTS / "w61-8-emo.png",
+                        js=js_emo, wait=700)
     d = jparse(res)
-    step("E2E: el DM se cifra y 3 emojis se ven grandes",
-         ok and d.get("e2e") and not d.get("pending") and d.get("encrypted") and
-         d.get("plain") == "😂😂😂" and d.get("body") != "😂😂😂" and
+    step("3 emojis en el DM se ven grandes (mensaje en claro)",
+         ok and not d.get("pending") and d.get("body") == "😂😂😂" and
          d.get("big"), d or log[-400:])
 
     # ---------------- llamada: perfil completo y globo arrastrable ----------------

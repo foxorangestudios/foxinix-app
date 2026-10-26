@@ -76,7 +76,7 @@ JS_AJUSTES = """(async () => {
   gear.click();
   const modal = await wait('.modal.settings');
   if (!modal) return 'FAIL: no abrió Ajustes';
-  const labels = ['Cuenta', 'Apariencia', 'Chat', 'Atajos'];
+  const labels = ['Cuenta', 'Apariencia', 'Chat', 'Notificaciones', 'Atajos'];
   for (let i = 0; i < labels.length; i++) {
     if (modal.textContent.indexOf(labels[i]) < 0) return 'FAIL: falta pestaña ' + labels[i];
   }
@@ -98,14 +98,20 @@ JS_AJUSTES = """(async () => {
     return 'FAIL: sin botón cerrar sesión en Cuenta';
   }
 
-  // pestaña Chat: apagar sonido
+  // pestaña Notificaciones: apagar el sonido (W63/W65: el toggle se mudó
+  // de Chat a Notificaciones). Se busca por su ETIQUETA, no por posición,
+  // para que no se rompa si añaden más toggles delante.
   const tabs = Array.prototype.slice.call(modal.querySelectorAll('.m-tab'));
-  const chatTab = tabs.find(function (t) { return t.textContent.trim() === 'Chat'; });
-  if (!chatTab) return 'FAIL: sin pestaña Chat';
-  chatTab.click();
+  const nTab = tabs.find(function (t) { return t.textContent.trim() === 'Notificaciones'; });
+  if (!nTab) return 'FAIL: sin pestaña Notificaciones';
+  nTab.click();
   await sleep(200);
-  const snd = document.querySelector('.tgl input');
-  if (!snd) return 'FAIL: sin toggles de chat';
+  const srow = Array.prototype.slice.call(modal.querySelectorAll('.st-row'))
+    .find(function (r) {
+      return (r.textContent || '').indexOf('Sonido de notificaciones') >= 0;
+    });
+  const snd = srow ? srow.querySelector('.tgl input') : null;
+  if (!snd) return 'FAIL: sin toggle de sonido';
   if (!snd.checked) return 'FAIL: el sonido ya estaba apagado';
   snd.click();
   await sleep(200);
@@ -148,11 +154,16 @@ JS_PERSISTE = """(async () => {
   if (!modal) return 'FAIL: no abrió Ajustes';
   const tabs = Array.prototype.slice.call(modal.querySelectorAll('.m-tab'));
 
-  // sonido sigue apagado en la nueva carga → lo restauramos
-  tabs.find(function (t) { return t.textContent.trim() === 'Chat'; }).click();
+  // sonido sigue apagado en la nueva carga → lo restauramos (W63/W65:
+  // el toggle vive en Notificaciones, y se busca por su etiqueta)
+  tabs.find(function (t) { return t.textContent.trim() === 'Notificaciones'; }).click();
   await sleep(200);
-  const snd = document.querySelector('.tgl input');
-  if (!snd) return 'FAIL: sin toggles';
+  const srow = Array.prototype.slice.call(modal.querySelectorAll('.st-row'))
+    .find(function (r) {
+      return (r.textContent || '').indexOf('Sonido de notificaciones') >= 0;
+    });
+  const snd = srow ? srow.querySelector('.tgl input') : null;
+  if (!snd) return 'FAIL: sin toggle de sonido';
   if (snd.checked) return 'FAIL: el sonido se reactivó en la recarga';
   snd.click();
   await sleep(150);
@@ -288,12 +299,8 @@ JS_PANEL = """(async () => {
   if (itxt.indexOf('Beto W6') < 0) return 'FAIL: info sin nombre de B';
   if (itxt.indexOf('@' + '__BUSER__') < 0) return 'FAIL: info sin @usuario';
   if (itxt.indexOf('Bio de prueba B') < 0) return 'FAIL: info sin bio';
-  // W39: el panel ya NO tiene botón "Ver perfil completo" — queda la
-  // nota centrada "Cifrado de extremo a extremo" con la llave.
+  // W39/W67: el panel ya NO tiene ni el botón "Ver perfil completo".
   if (info.querySelector('.pp-foot')) return 'FAIL: quedó botón Ver perfil';
-  if (!info.querySelector('.pp-e2e-center')) return 'FAIL: sin nota de cifrado';
-  if (itxt.indexOf('Cifrado de extremo a extremo') < 0)
-    return 'FAIL: nota de cifrado sin texto';
 
   // El clic en la cabecera abre la VENTANA FLOTANTE con el perfil completo.
   document.querySelector('.chat-head .ch-col').click();

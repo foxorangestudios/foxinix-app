@@ -425,9 +425,9 @@ def main():
       if(!item) return 'FAIL sin chat';
       item.click();
       const n=await wait(()=>{const k=Object.keys(__fm.store.dlSaved||{}).length; return k>=2?k:null;},35000);
-      const texts=Array.from(document.querySelectorAll('.msgs .msg .b-dl-state')).map(e=>e.textContent.trim());
+      const inline=document.querySelectorAll('.msgs .msg .b-dl-state').length;
       return JSON.stringify({saved:n, begin:calls.begin, open:calls.open,
-        states:texts.length, downloaded:texts.filter(x=>x.indexOf('Descargado')===0).length,
+        states:inline,
         anchors:document.querySelectorAll('.msgs .msg a[download]').length});
     })()""".replace("{CID}", str(cid))
     ok, res, log = shot(a.base + "/?v=w59-auto", SHOTS / "w59-8-autodl.png",
@@ -437,8 +437,8 @@ def main():
          ok and (d.get("saved") or 0) >= 2 and d.get("begin") == 0, d or log[-400:])
     step("automático: no abre pestañas ni deja botones antiguos",
          d.get("open") == 0 and d.get("anchors") == 0, d)
-    step("automático: el estado visible es Descargado y hay un control por mensaje",
-         (d.get("downloaded") or 0) >= 2 and (d.get("states") or 0) >= 2, d)
+    step("automático: los adjuntos no muestran pastillas de descarga",
+         (d.get("saved") or 0) >= 2 and (d.get("states") or 0) == 0, d)
 
     js_manual = """(async () => {
       const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -471,15 +471,20 @@ def main():
       const nm=await wait(()=>{const arr=__fm.store.msgs[{CID}]||[];
         return arr.find(m=>!beforeIds.has(m.id)&&m.media&&m.media.id==={MID})||null;},12000);
       if(!nm) return 'FAIL mensaje nuevo';
-      const el=document.querySelector('.msg[data-msg-id="'+nm.id+'"] .b-dl-state');
-      if(!el) return 'FAIL estado';
-      const beforeTxt=el.textContent.trim();
-      el.click();
+      const msgEl=document.querySelector('.msg[data-msg-id="'+nm.id+'"]');
+      if(!msgEl) return 'FAIL fila';
+      msgEl.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,
+        clientX:120,clientY:120}));
+      const menu=await wait(()=>document.querySelector('.ctx-menu'),6000);
+      const dlBtn=menu?Array.from(menu.querySelectorAll('.ctx-item'))
+        .find(b=>b.textContent.indexOf('Descargar archivo')>=0):null;
+      if(!dlBtn) return 'FAIL sin menú de descarga';
+      dlBtn.click();
       const key=await wait(()=>{const ks=Object.keys(__fm.store.dlSaved||{});
         return ks.find(k=>beforeKeys.indexOf(k)<0)||null;},20000);
       const appCalls={begin:calls.begin,open:calls.open};
       const exp=key?await __fm.dl.saveDownloadToDevice(key,'w59.png','image/png'):null;
-      return JSON.stringify({st:st,before:beforeTxt,key:key,appCalls:appCalls,
+      return JSON.stringify({st:st,key:key,appCalls:appCalls,
         exp:exp,exportCalls:{begin:calls.begin,append:calls.append,finish:calls.finish},
         open:calls.open,states:document.querySelectorAll('.msgs .msg .b-dl-state').length,
         msgs:document.querySelectorAll('.msgs .msg').length,
@@ -495,8 +500,8 @@ def main():
          (d.get("exp") or {}).get("native") is True and
          (d.get("exportCalls") or {}).get("begin") == 1 and
          (d.get("exportCalls") or {}).get("finish") == 1, d)
-    step("adjuntos: un solo control y sin enlaces de descarga",
-         (d.get("states") == d.get("msgs")) and d.get("anchors") == 0, d)
+    step("adjuntos: sin botones incrustados ni enlaces de descarga",
+         (d.get("states") or 0) == 0 and d.get("anchors") == 0, d)
 
     # Lightbox: tampoco exporta al dispositivo.
     js_lb = """(async () => {
@@ -544,16 +549,29 @@ def main():
       if(b) b.click();
       await wait(()=>document.querySelector('.reply-bar'),5000);
       const msgs=document.querySelector('.msgs');
-      if (msgs && msgs.scrollHeight <= msgs.clientHeight + 40) {
+      /* W64: hacen falta más de 80 px de recorrido (el umbral de
+         "pegado al final"); con 40 px el botón debe seguir oculto. */
+      if (msgs && msgs.scrollHeight - msgs.clientHeight < 240) {
         for (let i = 0; i < 8; i++) {
           const d = document.createElement('div');
           d.className = 'msg';
+          /* W63: altura mínima para garantizar overflow real también en
+             una conversación con un solo mensaje. */
+          d.style.minHeight = '110px';
           d.innerHTML = '<div class="bubble"><div class="b-text">relleno W59 ' + i + '</div></div>';
           msgs.appendChild(d);
         }
         await sleep(120);
       }
-      if(msgs) msgs.scrollTop=0;
+      if(msgs){
+        /* W64: si el chat era más bajo que el viewport, scrollTop ya era
+           0 y asignar 0 otra vez NO dispara 'scroll'. Hay que bajar
+           primero para que el gesto de subir sea real. */
+        msgs.scrollTop=msgs.scrollHeight;
+        await sleep(120);
+        msgs.scrollTop=0;
+        msgs.dispatchEvent(new Event('scroll'));
+      }
       await sleep(700);
       const jump=document.querySelector('.jump-bottom');
       const comp=document.querySelector('.composer');

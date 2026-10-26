@@ -8,7 +8,9 @@
 (function () {
   try {
     var t = localStorage.getItem('fm.theme');
-    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    if (t === 'light' || t === 'dark' || t === 'black') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
     var a = localStorage.getItem('fm.accent');
     if (a && /^#[0-9a-fA-F]{6}$/.test(a)) {
       var n = parseInt(a.slice(1), 16);

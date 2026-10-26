@@ -8,8 +8,8 @@ con la sesión de A:
   1. el arranque real avanza por las fases de BOOT_PHASES en orden y
      termina en 'ready' con la app abierta.
   2. el overlay .app-boot muestra la pantalla compartida: icono de la
-     app, sello "Cifrado de extremo a extremo" con el icono i-key,
-     barra de progreso y texto de fase (position: fixed, w27 intacto).
+     app, barra de progreso y texto de fase (position: fixed, w27
+     intacto).
   3. cada fase pinta SU texto (es) y mueve la barra (scaleX creciente
      hasta 1); en inglés el texto cambia ("Loading users…").
   4. la carga de la conversación (.msgs-load) usa la animación de
@@ -119,17 +119,12 @@ JS_SPLASH = """(async () => {
   if (!el) return 'FAIL: sin .bp-screen';
   const logo = el.querySelector('.bp-logo');
   const logoUse = logo ? logo.querySelector('use') : null;
-  const e2e = el.querySelector('.bp-e2e');
-  const use = e2e ? e2e.querySelector('use') : null;
   const out = {
     logo: logo ? (logo.getAttribute('src') || '') : '',
     logoMark: logoUse ? (logoUse.getAttribute('href') || '') : '',
-    e2eTxt: e2e ? e2e.textContent.trim() : '',
-    key: use ? (use.getAttribute('href') || '') : '',
     bar: !!el.querySelector('.bp-bar'),
     status: !!el.querySelector('.bp-status'),
     pos: app ? getComputedStyle(app).position : '',
-    ikey: !!document.querySelector('svg symbol#i-key'),
   };
   __fm.store.booting = false;
   await sleep(200);
@@ -256,10 +251,8 @@ def main():
         r = json.loads(res)
     except Exception:
         pass
-    step("el overlay lleva icono de la app + sello de cifrado + i-key",
-         ok and r.get("logoMark") == "#i-logo-mark"
-         and r.get("e2eTxt") == "Cifrado de extremo a extremo"
-         and r.get("key") == "#i-key" and r.get("ikey") is True,
+    step("el overlay lleva el icono de la app",
+         ok and r.get("logoMark") == "#i-logo-mark",
          f"res={res!r}")
     step("barra de progreso y texto de fase; fixed y se retira al terminar",
          ok and r.get("bar") is True and r.get("status") is True

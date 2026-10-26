@@ -1,18 +1,18 @@
 #!/usr/bin/env python
-"""E2E W37: cifrado en edición/citas, players, menciones globales,
+"""E2E W37: edición/citas, players, menciones globales,
 título/seen con pestaña oculta y fixes de la auditoría de seguridad.
 
 Siembra A, B y C: DM A↔B, DM B↔C y grupo A+B. Firefox headless (BiDi
 vía scripts/shot.py) con la sesión de A.
 
   API:
-  1. edición E2E: A cifra→edita (blob nuevo); B-WS recibe el evento con
-     el blob y B descifra el texto editado. Mezclar claro/cifrado → 400.
+  1. edición en claro: A edita; B-WS recibe el evento con el texto y la
+     lista de B lo muestra ya editado.
   2. IDOR reply_to: citar un mensaje de un chat ajeno → 400.
   3. IDOR /api/media: dueño 200; ajeno 404; miembro del chat 200.
   4. IDOR favoritos de GIFs: media sin enviar → 404; tras enviarse → 201.
   5. unreact con message_id de OTRO chat → 404.
-  6. forward de un mensaje E2E → 400 (la clave es por par de usuarios).
+  6. forward de un mensaje al grupo → 201.
   7. health ya no publica nº de usuarios ni cuota.
   8. subida de HTML/JS → 415 (XSS almacenado).
   9. CREATIONS activo: el 7º chat seguido → 429.
@@ -31,14 +31,11 @@ vía scripts/shot.py) con la sesión de A.
  17. video con MIME roto → bloque de error con i-alert.
  18. mención "@everyone" mostrada localizada ("@todos" en es,
      "@everyone" en en).
- 19. E2E en la UI: A envía, responde (cita con texto descifrado) y
-     edita; B descifra el texto editado re-cifrado por el server.
+ 19. en la UI: A envía, responde (cita con el texto) y edita; el server
+     guarda el texto editado.
 """
 
 import argparse
-import base64
-import hashlib
-import hmac
 import json
 import math
 import os
@@ -55,9 +52,6 @@ import uuid
 import wave
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from websockets.sync.client import connect as wsconnect
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -159,40 +153,6 @@ def send_ok(base, tok, chat_id, payload):
 PNG1 = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108020000009077"
     "53de0000000c4944415408d763f8cfc000000301010018dd8db00000000049454e44ae426082")
-
-
-# ------------------------------------------- W29f: lado "B" del E2E (API)
-
-def e2e_keypair():
-    """Par ECDH P-256; devuelve (privada, pública base64 de 65 B)."""
-    priv = ec.generate_private_key(ec.SECP256R1())
-    raw = priv.public_key().public_bytes(Encoding.X962,
-                                         PublicFormat.UncompressedPoint)
-    return priv, base64.b64encode(raw).decode()
-
-
-def e2e_derive(priv, peer_pub_b64, uid_me, uid_you):
-    """HKDF-SHA256 manual idéntico al del cliente (e2e.js)."""
-    peer = ec.EllipticCurvePublicKey.from_encoded_point(
-        ec.SECP256R1(), base64.b64decode(peer_pub_b64))
-    ikm = priv.exchange(ec.ECDH(), peer)
-    lo, hi = sorted((uid_me, uid_you))
-    info = f"foxinix-e2e-v1|{lo}|{hi}".encode()
-    prk = hmac.new(b"foxinix-e2e-v1-salt", ikm, hashlib.sha256).digest()
-    return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:32]
-
-
-def e2e_dec(key, blob):
-    raw_iv = base64.b64decode(blob["iv"])
-    raw_ct = base64.b64decode(blob["ct"])
-    return AESGCM(key).decrypt(raw_iv, raw_ct, None).decode()
-
-
-def e2e_enc(key, text):
-    nonce = os.urandom(12)
-    ct_blob = AESGCM(key).encrypt(nonce, text.encode(), None)
-    return {"iv": base64.b64encode(nonce).decode(),
-            "ct": base64.b64encode(ct_blob).decode()}
 
 
 # ------------------------------------------------- WS en background
@@ -391,8 +351,36 @@ JS_PLAYERS = """(async () => {
   rate.click();
   await sleep(200);
   out.rate1 = rate.textContent.trim();
-  /* --- audio adjunto: W59 deja un solo control de descarga bajo el
-     mensaje, no otro botón dentro del reproductor. */
+  /* --- W63: el círculo de la barra de tiempo se arrastra y busca. */
+  const wave = document.querySelector('.b-player .wave');
+  const thumb = wave ? wave.querySelector('.wave-thumb') : null;
+  const voz = document.querySelector('.b-player audio.b-audio');
+  out.voiceThumb = !!thumb && thumb.offsetWidth > 0 &&
+    getComputedStyle(thumb).backgroundColor !== 'rgba(0, 0, 0, 0)';
+  let vdur = 0;
+  for (let i = 0; i < 60; i++) {
+    vdur = voz ? (voz.duration || 0) : 0;
+    if (isFinite(vdur) && vdur > 0) break;
+    await sleep(100);
+  }
+  out.voiceDur = vdur;
+  if (wave && thumb && voz && isFinite(vdur) && vdur > 0) {
+    const wr = wave.getBoundingClientRect();
+    const x0 = wr.left + wr.width * 0.2;
+    const x1 = wr.left + wr.width * 0.7;
+    thumb.dispatchEvent(new MouseEvent('mousedown', {
+      bubbles: true, cancelable: true, clientX: x0 }));
+    window.dispatchEvent(new MouseEvent('mousemove', {
+      bubbles: true, cancelable: true, clientX: x1 }));
+    window.dispatchEvent(new MouseEvent('mouseup', {
+      bubbles: true, cancelable: true, clientX: x1 }));
+    await sleep(450);
+    out.voiceSeek = voz.currentTime;
+    out.voicePct = vdur ? (voz.currentTime / vdur) * 100 : 0;
+    out.voiceThumbLeft = thumb.style.left;
+  }
+  /* --- audio adjunto: W62 quitó las pastillas de descarga; el menú del
+     mensaje y el visor son los únicos accesos. */
   const af = await wait('.b-afile', 8000);
   const afMsg = af ? af.closest('.msg') : null;
   out.afDl = !!(afMsg && afMsg.querySelector('.b-dl-state'));
@@ -464,20 +452,15 @@ JS_MENTION = """(async () => {
   return JSON.stringify({ es: es, en: en });
 })()"""
 
-JS_E2E = """(async () => {
+JS_UI = """(async () => {
   await boot();
   const dm = findChat('«BU»');
   if (!dm) return 'FAIL: sin DM con B';
   dm.click();
   if (!await wait('.msgs .msg', 12000)) return 'FAIL: no abrió la DM';
-  /* esperar la auto-activación del cifrado (B ya publicó su clave) */
-  const t0 = Date.now();
-  while (Date.now() - t0 < 12000 && !__fm.store.e2e[«DM»]) await sleep(150);
-  if (!__fm.store.e2e[«DM»]) return 'FAIL: el cifrado no se activó';
-  /* enviar un mensaje cifrado */
   const inp = document.querySelector('.composer-input');
   if (!inp) return 'FAIL: sin compositor';
-  inp.value = 'cifrado w37 ui';
+  inp.value = 'en claro w37 ui';
   inp.dispatchEvent(new Event('input', { bubbles: true }));
   await sleep(150);
   const send = document.querySelector('.send-btn');
@@ -488,14 +471,14 @@ JS_E2E = """(async () => {
   while (Date.now() - t1 < 10000) {
     const rows = Array.from(document.querySelectorAll('.msgs .msg'));
     for (let i = rows.length - 1; i >= 0; i--) {
-      if (rows[i].textContent.indexOf('cifrado w37 ui') >= 0) { row = rows[i]; break; }
+      if (rows[i].textContent.indexOf('en claro w37 ui') >= 0) { row = rows[i]; break; }
     }
     if (row) break;
     await sleep(200);
   }
-  if (!row) return 'FAIL: no apareció el mensaje cifrado';
+  if (!row) return 'FAIL: no apareció el mensaje';
   const midUI = row.getAttribute('data-mid');
-  /* responder: la cita debe mostrar el TEXTO DESCIFRADO (W37) */
+  /* responder: la cita debe mostrar el TEXTO del mensaje (W37) */
   const more = row.querySelector('.b-more');
   if (!more) return 'FAIL: sin ⋯ del mensaje';
   more.click();
@@ -512,7 +495,7 @@ JS_E2E = """(async () => {
   const xb = rb.querySelector('.icon-btn');
   if (xb) xb.click();
   await sleep(200);
-  /* editar: el server debe recibir SÓLO el blob nuevo (W37a) */
+  /* editar: el server recibe el TEXTO en claro (W67) */
   more.click();
   const mi2 = await wait('.ctx-menu', 4000);
   if (!mi2) return 'FAIL: sin menú para editar';
@@ -568,62 +551,36 @@ def main():
     grp = r["chat"]["id"]
     print(f"· dm={dm} dmBC={dm_bc} grp={grp}")
 
-    # claves E2E (A y B publican; el shared secret es simétrico)
-    b_priv, b_pub = e2e_keypair()
-    st, r = ct.http("PUT", a.base + "/api/users/me/e2e-key",
-                    {"public_key": b_pub}, token=B["access"])
-    assert st == 200, (st, r)
-    a_priv, a_pub = e2e_keypair()
-    st, r = ct.http("PUT", a.base + "/api/users/me/e2e-key",
-                    {"public_key": a_pub}, token=A["access"])
-    assert st == 200, (st, r)
-    shared = e2e_derive(a_priv, b_pub, AID, BID)
-
-    # ============ 1. edición E2E ===================================
-    print("→ paso1 edición E2E (server re-cifra; B descifra)")
+    # ============ 1. edición de un mensaje en claro ================
+    print("→ paso1 edición en claro (WS message_edited)")
     bws = WSq(a.base, B["access"])
     bws.start()
     bws.ready.wait(8)
-    blob1 = e2e_enc(shared, "secreto original w37")
     msg1 = send_ok(a.base, A["access"], dm,
-                   {"kind": "text", "body": "", "e2e": blob1,
+                   {"kind": "text", "body": "original w37",
                     "client_msg_id": f"w37{tag}-1"})
     mid = msg1["id"]
-    step("A envía un mensaje E2E (server sólo ve el marcador)",
-         bool(mid) and msg1["body"].startswith("[")
-         and bool(msg1.get("e2e")), msg1)
-    blob2 = e2e_enc(shared, "secreto editado w37")
+    step("A envía un mensaje en claro",
+         bool(mid) and msg1["body"] == "original w37", msg1)
     st, r = ct.http("PUT", f"{a.base}/api/chats/{dm}/messages/{mid}",
-                    {"body": "", "e2e": blob2}, token=A["access"])
-    step("la edición E2E re-cifra (200 con blob nuevo)",
-         st == 200 and r["message"]["e2e"]["ct"] != blob1["ct"], f"{st} {r}")
+                    {"body": "editado w37"}, token=A["access"])
+    step("la edición devuelve 200 con el texto nuevo",
+         st == 200 and r["message"]["body"] == "editado w37", f"{st} {r}")
     ev = bws.wait_type("message_edited", 8)
-    step("el evento WS message_edited lleva el blob",
-         bool(ev) and ev.get("e2e") and ev["e2e"]["ct"] == blob2["ct"],
-         f"ev={ev}")
+    step("el evento WS message_edited trae el texto",
+         bool(ev) and ev.get("body") == "editado w37", f"ev={ev}")
     st, g = ct.http("GET", f"{a.base}/api/chats/{dm}/messages?limit=50",
                     token=B["access"])
     m1 = next((x for x in g.get("messages", []) if x["id"] == mid), None)
-    plain = ""
-    try:
-        plain = e2e_dec(shared, m1["e2e"]) if m1 and m1.get("e2e") else ""
-    except Exception:
-        pass
-    step("B descifra el TEXTO EDITADO (no el original)",
-         plain == "secreto editado w37", plain)
-    st, r = ct.http("PUT", f"{a.base}/api/chats/{dm}/messages/{mid}",
-                    {"body": "en claro"}, token=A["access"])
-    step("mezclar cifrado→claro da 400", st == 400, st)
+    step("B ve el TEXTO EDITADO en claro",
+         bool(m1) and m1.get("body") == "editado w37", m1)
     msg2 = send_ok(a.base, A["access"], dm,
                    {"kind": "text", "body": "hola claro",
                     "client_msg_id": f"w37{tag}-2"})
     m2 = msg2["id"]
     st, r = ct.http("PUT", f"{a.base}/api/chats/{dm}/messages/{m2}",
-                    {"e2e": blob2}, token=A["access"])
-    step("mezclar claro→cifrado da 400", st == 400, st)
-    st, r = ct.http("PUT", f"{a.base}/api/chats/{dm}/messages/{m2}",
                     {"body": "hola claro 2"}, token=A["access"])
-    step("la edición en claro sigue funcionando (200)", st == 200, st)
+    step("una segunda edición también funciona (200)", st == 200, st)
     bws.close()
     time.sleep(0.8)
 
@@ -696,13 +653,13 @@ def main():
     step("borrar la reacción en SU chat → 200 (regresión)",
          st == 200, st)
 
-    # ============ 6. forward de un mensaje E2E ====================
-    print("→ paso6 forward E2E")
+    # ============ 6. forward de un mensaje =========================
+    print("→ paso6 forward")
     st, r = ct.http("POST",
                     f"{a.base}/api/chats/{dm}/messages/{mid}/forward",
                     {"target_chat_id": grp}, token=A["access"])
-    step("reenviar un mensaje E2E → 400 (la clave es por par)",
-         st == 400, f"{st} {r}")
+    step("reenviar un mensaje en claro al grupo (201)",
+         st == 201, f"{st} {r}")
 
     # ============ 7. health sin fugas =============================
     print("→ paso7 /api/health sin nº de usuarios")
@@ -925,12 +882,18 @@ def main():
          ok and r.get("rate0", "").replace("×", "").strip() == "1"
          and "1.5" in (r.get("rate1") or ""),
          f"res={res!r}")
-    step("el audio adjunto tiene un solo control de descarga (afDl)",
-         ok and r.get("afDl") is True and r.get("afDlOld") is False,
+    step("nota de voz: círculo relleno y arrastre que busca ~70%",
+         ok and r.get("voiceThumb") is True and
+         (r.get("voiceDur") or 0) > 0 and
+         55 <= (r.get("voicePct") or 0) <= 85 and
+         r.get("voiceThumbLeft") not in (None, "", "0%"),
+         f"res={res!r}")
+    step("el audio adjunto no lleva botones de descarga incrustados (afDl)",
+         ok and r.get("afDl") is False and r.get("afDlOld") is False,
          f"res={res!r}")
     if vol:
-        step("el video válido tiene barra y un solo control de descarga",
-             ok and r.get("vBar") is True and r.get("vDl") is True and
+        step("el video válido tiene barra y sin botones de descarga incrustados",
+             ok and r.get("vBar") is True and r.get("vDl") is False and
              r.get("vDlOld") is False, f"res={res!r}")
         step("el popup de volumen abre con su slider",
              ok and r.get("volBtn") is True and r.get("volOpen") is True
@@ -961,42 +924,31 @@ def main():
     step("en inglés la misma mención se muestra como @everyone",
          ok and r.get("en") == "@everyone", f"res={res!r}")
 
-    # ============ 19. E2E en la UI (enviar/responder/editar) ======
-    print("→ paso19 E2E en la UI: enviar, citar y editar")
-    ok, res, log = shot(a.base + "/", SHOTS / "w37-7-e2e.png",
-                        js=js(JS_E2E, BU=BU, DM=str(dm)))
+    # ============ 19. en la UI (enviar/responder/editar) ==========
+    print("→ paso19 UI: enviar, citar y editar")
+    ok, res, log = shot(a.base + "/", SHOTS / "w37-7-ui.png",
+                        js=js(JS_UI, BU=BU, DM=str(dm)))
     r = {}
     try:
         r = json.loads(res)
     except Exception:
         pass
     mid_ui = r.get("mid")
-    step("A envía un mensaje cifrado y la burbuja muestra el texto",
+    step("A envía un mensaje en claro y la burbuja muestra el texto",
          ok and bool(mid_ui), f"res={res!r}")
-    step("la cita en el compositor muestra el TEXTO DESCIFRADO",
-         r.get("replyPrev") == "cifrado w37 ui", f"res={res!r}")
+    step("la cita en el compositor muestra el texto del mensaje",
+         r.get("replyPrev") == "en claro w37 ui", f"res={res!r}")
     step("la edición en la UI actualiza la burbuja",
          r.get("edited") is True, f"res={res!r}")
-    # verificación fuerte: B descifra lo que el server guardó
-    st, keyr = ct.http("GET", f"{a.base}/api/users/{AU}/e2e-key",
-                       token=B["access"])
-    plain_ui = ""
+    # verificación fuerte: el server guardó el texto (ya sin cifrar)
     m_ui = None
-    if st == 200 and keyr.get("public_key") and mid_ui:
-        shared2 = e2e_derive(b_priv, keyr["public_key"], BID, AID)
+    if mid_ui:
         st, g = ct.http("GET", f"{a.base}/api/chats/{dm}/messages?limit=50",
                         token=B["access"])
         m_ui = next((x for x in g.get("messages", [])
                      if x["id"] == int(mid_ui)), None)
-        try:
-            plain_ui = e2e_dec(shared2, m_ui["e2e"]) if m_ui else ""
-        except Exception:
-            pass
-    step("el server guardó SÓLO el blob (marcador, nunca el texto)",
-         bool(m_ui) and m_ui["body"].startswith("[")
-         and bool(m_ui.get("e2e")), f"m={m_ui}")
-    step("B descifra el TEXTO EDITADO re-cifrado por el server",
-         plain_ui == "editado w37 ui", plain_ui)
+    step("el server guardó el TEXTO EDITADO en claro",
+         bool(m_ui) and m_ui.get("body") == "editado w37 ui", f"m={m_ui}")
 
     # ============ limpieza ========================================
     if ct.cleanup_db():

@@ -377,7 +377,7 @@ def change_username(
     (@usuario). Por eso:
       - se exige la contraseña actual, igual que para el correo;
       - solo se permite un cambio cada 12 horas;
-      - no se toca el id ni las claves E2E (los chats siguen intactos).
+      - no se toca el id (los chats siguen intactos).
     """
     _rate_limit(f"uname:{user['id']}", max_hits=10)
     new_name = body.username

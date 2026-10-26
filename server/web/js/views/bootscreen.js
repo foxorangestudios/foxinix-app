@@ -1,7 +1,8 @@
 /* W38: pantalla de arranque compartida (BootView de auth.js y overlay
-   .app-boot del chat): icono de la app, sello de cifrado de extremo a
-   extremo, barra de progreso y el texto de la fase real del arranque
-   (store.bootPhase → BOOT_PHASES). Vue global build. */
+   .app-boot del chat): icono de la app, barra de progreso y el texto
+   de la fase real del arranque (store.bootPhase → BOOT_PHASES).
+   W67: se quitó el sello "Cifrado de extremo a extremo". Vue global
+   build. */
 import { store, BOOT_PHASES } from '../store.js';
 
 export const BootScreen = {
@@ -23,10 +24,6 @@ export const BootScreen = {
     '<div class="bp-screen">' +
       '<svg class="bp-logo" viewBox="-7 -30 334 362" role="img" aria-label="Foxinix">' +
         '<use href="#i-logo-mark"></use></svg>' +
-      '<div class="bp-e2e">' +
-        '<svg class="ic ic-sm"><use href="#i-key"></use></svg>' +
-        '<span>{{ t(\'Cifrado de extremo a extremo\') }}</span>' +
-      '</div>' +
       '<div class="bp-bar"><i :style="{ transform: \'scaleX(\' + prog + \')\' }"></i></div>' +
       '<div class="bp-status">{{ t(txt) }}</div>' +
     '</div>',

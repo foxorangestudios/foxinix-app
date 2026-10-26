@@ -115,7 +115,9 @@ try {
    (W5). El caso histórico: `gap` en flexbox recién llegó en FF84, así
    que en XP los huecos colapsaban — hoy todo va por márgenes. */
 const CSS_BAD = [
-  [/\bgap\s*:/, 'gap en flex (FF84+; en XP colapsa — usar márgenes, ver bloque W5)'],
+  /* `grid-gap`/`row-gap`/`column-gap` sí existen en FF78; lo que no
+     existe es la propiedad corta `gap` en flexbox. */
+  [/(?:^|[^-\w])gap\s*:/m, 'gap en flex (FF84+; en XP colapsa — usar márgenes, ver bloque W5)'],
   [/backdrop-filter/, 'backdrop-filter (FF103+)'],
   [/:has\(/, ':has() (FF121+)'],
   [/:focus-visible/, ':focus-visible (FF85+)'],

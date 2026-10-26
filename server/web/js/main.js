@@ -19,7 +19,6 @@ import {
   DL_TYPES,
 } from './downloads.js';
 import { prefetchEmojis } from './emoji.js';
-import { ensurePublishedKey } from './e2e.js';
 
 const views = {
   boot: BootView,
@@ -71,7 +70,7 @@ app.config.globalProperties.t = t;
 /* W15: v-dl="url" → descarga con anillo de progreso, ✕ de cancelar y
    reintento (mediadl.js); en imágenes empieza difuminada con la miniatura. */
 app.directive('dl', dlDirective);
-/* W38: la pantalla de arranque (icono + cifrado + barra + fase) se
+/* W38: la pantalla de arranque (icono + barra + fase) se
    usa en BootView (auth.js) y en el overlay .app-boot del chat. */
 app.component('boot-screen', BootScreen);
 app.mount('#app');
@@ -102,14 +101,12 @@ document.addEventListener('visibilitychange', function () {
   if (store.activeChatId) markChatRead(store.activeChatId);
 });
 
-/* W30b/W30d: tras iniciar sesión se precacenan los SVG del selector de
-   emojis en idle y se publica MI clave E2E (una sola vez por pestaña;
-   sin re-enviar la misma clave). Así los contactos pueden cifrarme. */
+/* W30b: tras iniciar sesión se precacenan los SVG del selector de
+   emojis en idle (una sola vez por pestaña). */
 Vue.watch(function () { return store.user && store.user.id; },
   function (uid) {
     if (!uid) return;
     prefetchEmojis();
-    ensurePublishedKey().catch(function () {});
   });
 
 /* PWA (W4): el SW da shell offline + caché con actualización en segundo
