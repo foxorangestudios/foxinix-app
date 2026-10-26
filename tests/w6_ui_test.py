@@ -200,13 +200,15 @@ JS_PERFIL = """(async () => {
   if (!view) return 'FAIL: no abrió Tu perfil';
 
   // W27b: la vista es SOLO lectura (ficha); el formulario vive en otro
-  // modal y el lápiz es la puerta de entrada.
+  // modal. W58: la puerta ya no es un lápiz suelto sino un botón ancho
+  // "Editar perfil" con icono de lápiz, dentro de .m-foot.
   if (!view.querySelector('.mp-view')) return 'FAIL: sin ficha de solo lectura';
   if (view.querySelector('input[placeholder="Tu nombre"]')) {
     return 'FAIL: el formulario no debería estar en la vista';
   }
-  const pencil = view.querySelector('.mp-edit-open');
-  if (!pencil) return 'FAIL: sin botón lápiz de editar';
+  const pencil = Array.prototype.slice.call(view.querySelectorAll('.m-foot .btn'))
+    .find(function (b) { return (b.textContent || '').indexOf('Editar perfil') >= 0; });
+  if (!pencil) return 'FAIL: sin botón Editar perfil';
   pencil.click();
   const modal = await wait('.modal.mp-edit', 4000);
   if (!modal) return 'FAIL: no abrió Editar perfil';
