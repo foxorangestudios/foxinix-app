@@ -133,8 +133,46 @@ if 'android:windowSoftInputMode="adjustResize"' not in manifest:
     else:
         print("Aviso: no se encontró MainActivity para ajustar el teclado")
 
+# Rendimiento: el WebView se dibuja en la GPU. Aunque hardwareAccelerated
+# suele ser true por defecto, se declara explícito para forzar el render por
+# hardware en todos los dispositivos (evita software rendering en algunos).
+if "android:hardwareAccelerated" not in manifest:
+    manifest = manifest.replace(
+        "<application",
+        '<application\n        android:hardwareAccelerated="true"',
+        1,
+    )
+    print("hardwareAccelerated=true agregado al <application>")
+
 MANIFEST.write_text(manifest, encoding="utf-8")
 print("AndroidManifest.xml listo")
+
+# Arranque en frío: el tema base no define windowBackground, así que Android
+# pinta un fondo blanco hasta que el WebView baja la web (que es oscura,
+# #1e1f22). Se fija el color de la ventana al de la app para evitar ese flash.
+# Vale para valores/ y values-night/: la web arranca en oscuro por defecto
+# (boot.js solo cambia de tema si hay uno guardado en localStorage).
+for themes_path in (
+    ROOT / "app/src/main/res/values/themes.xml",
+    ROOT / "app/src/main/res/values-night/themes.xml",
+):
+    if not themes_path.exists():
+        continue
+    themes = themes_path.read_text(encoding="utf-8")
+    if "windowBackground" in themes:
+        continue
+    style_match = re.search(r"<style\b[^>]*>", themes)
+    if not style_match:
+        print(f"Aviso: no se encontró <style> en {themes_path.name}")
+        continue
+    insert_at = style_match.end()
+    themes = (
+        themes[:insert_at]
+        + '\n        <item name="android:windowBackground">#1e1f22</item>'
+        + themes[insert_at:]
+    )
+    themes_path.write_text(themes, encoding="utf-8")
+    print(f"windowBackground=#1e1f22 agregado a {themes_path.name}")
 
 # W54d: con edge-to-edge (Android 15+) adjustResize no achica el WebView.
 # Aplicamos el inset del teclado al contenedor para que la página reciba
@@ -263,6 +301,10 @@ if main_activity:
             "\n  override fun onWebViewCreate(webView: WebView) {\n"
             "    super.onWebViewCreate(webView)\n"
             "    appWebView = webView\n"
+            # W66: el WebView se pinta en la GPU (más fluido al desplazar)
+            # y aprovecha la caché HTTP del sistema en el arranque en frío.
+            "    webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)\n"
+            "    webView.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT\n"
             '    webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
             "    webView.post { ViewCompat.requestApplyInsets(webView) }\n"
             "  }\n"
