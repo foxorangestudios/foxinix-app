@@ -2224,7 +2224,7 @@ const MessageRow = {
          cara (foto/letra) solo donde se ve el nombre del emisor */
       '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
-        '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" @error="avErr = true">' +
+        '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="avErr = true">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
       '</span>' +
       '<div v-if="row.ref.kind === \'system\'" class="sys-msg">{{ row.ref.body }}</div>' +

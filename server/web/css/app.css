@@ -6433,3 +6433,28 @@ button.dl-group .dl-group-head { pointer-events: none; }
 }
 
 .att-btn { cursor: pointer; }
+
+/* W62: overlay sin conexión / servidor caído */
+.offline-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+.offline-box {
+  background: var(--panel);
+  border: 1px solid var(--panel2);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 360px;
+  text-align: center;
+  color: var(--t1);
+}
+.offline-box .ic-lg { width: 48px; height: 48px; margin-bottom: 12px; opacity: .8; }
+.offline-box h3 { margin: 0 0 8px; font-size: 18px; }
+.offline-box p { margin: 0 0 16px; color: var(--t2); font-size: 14px; }

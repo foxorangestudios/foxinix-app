@@ -40,6 +40,20 @@ const Root = {
       loadSession();
       syncPath();
       bootstrap();
+      // W62: check for new version
+      setTimeout(() => {
+        fetch('/api/health').then(r => r.json()).then(h => {
+          const srv = h.version || '';
+          const local = localStorage.getItem('fm.appVersion') || '0.0.0';
+          if (srv && srv !== local) {
+            localStorage.setItem('fm.appVersion', srv);
+            // Show simple alert; replace with modal later
+            if (confirm('Hay una nueva versión de Foxinix disponible. ¿Actualizar ahora?')) {
+              window.location.reload(true);
+            }
+          }
+        }).catch(()=>{});
+      }, 5000);
     });
     return { comp, store };
   },
@@ -47,6 +61,15 @@ const Root = {
     <transition name="fade" mode="out-in">
       <component :is="comp" :key="store.route"></component>
     </transition>
+    <!-- W62: overlay sin conexión / servidor caído -->
+    <div v-if="store.ws !== 'on' && store.ws !== 'connecting'" class="offline-overlay">
+      <div class="offline-box">
+        <svg class="ic ic-lg"><use href="#i-wifi-off"></use></svg>
+        <h3>{{ navigator.onLine ? $t('Servidor caído') : $t('Sin conexión') }}</h3>
+        <p>{{ navigator.onLine ? $t('No se puede conectar con el servidor. Reintentando...') : $t('Comprueba tu conexión a Internet.') }}</p>
+        <button class="btn" type="button" @click="store.ws = 'connecting'">{{ $t('Reintentar') }}</button>
+      </div>
+    </div>
     <transition-group name="pop" tag="div" class="toasts">
       <div v-for="tw in store.toasts" :key="tw.id" class="toast"
            :class="'toast-' + tw.kind" role="status">
