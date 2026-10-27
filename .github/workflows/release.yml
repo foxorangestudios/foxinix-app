@@ -278,33 +278,37 @@ jobs:
             - **Android 7 o superior (64 bits):** `Foxinix-*-android-arm64.apk`
             - **Android 7 o superior (32 bits):** `Foxinix-*-android-armv7.apk`
 
-            La app usa la misma interfaz web y el mismo cifrado E2E que
+            La app usa la misma interfaz web que
             https://chat.foxinix.qzz.io/. Los APK de Android están firmados
             y cubren dispositivos arm64 y armv7 (32 bits).
 
-            ## Novedades W59
-            - **Descargar** guarda únicamente en los datos privados de la app
-              y nunca abre una pestaña. **Guardar en el dispositivo** es la
-              única acción que crea una copia en `Downloads/Foxinix`.
-            - Cada adjunto tiene un solo control: “Descargar · tamaño” o
-              “Descargado · tamaño”. Se eliminaron los botones duplicados de
-              imágenes, videos, audios, documentos y notas de voz.
-            - Descargas automáticas: Wi-Fi activado por defecto y datos
-              móviles desactivados para no gastar el plan. Al abrir un chat
-              se completan solo los 12 adjuntos más recientes; los mensajes
-              nuevos se descargan al llegar. Las preferencias W58 se migran
-              una vez sin pisar las elecciones posteriores.
-            - Perfil: el avatar queda montado **sobre** la portada, también
-              en el editor, y las fotos PNG transparentes ya no muestran un
-              círculo de fondo.
-            - Móvil: el botón de bajar queda anclado al compositor, por
-              encima de la barra de respuesta; avisos, llamadas y barras
-              respetan el área de navegación de Android.
-            - Android: en tema claro los iconos de las barras de estado y
-              navegación son oscuros; en tema oscuro, claros.
-            - **Cambiar @usuario** desde Editar perfil, con contraseña actual,
-              aviso explícito y un límite real de 12 horas aplicado en el
-              servidor. Los chats y las claves E2E no cambian.
+            ## Novedades v0.2.0
+            - **Multi-adjuntos en cola:** varios archivos se ponen en
+              `pendingAtts` y se envían juntos; el cap-strip muestra el
+              contador.
+            - **Botón “+” con cursor manito en PC:** clase `.att-btn`
+              con `cursor: pointer`.
+            - **Fotos de perfil en grupos y notificaciones:** avatares con
+              `crossorigin="anonymous"` y reintento automático si fallan.
+            - **Vídeo fullscreen móvil:** se quitó `playsinline` del visor.
+            - **Permisos sin nag:** solo en primer arranque vía
+              `fm.perm.booted`.
+            - **Zoom desactivado en móvil:** viewport `user-scalable=no`.
+            - **App viva para notificaciones y llamadas:** notificación
+              persistente de Android y WebView sin pausa en segundo plano.
+            - **Icono adaptativo sin recorte:** inset 10 % y color de acento
+              estático configurable por `FOXMSG_ACCENT_COLOR`.
+            - **Pantalla sin conexión / servidor caído:** overlay global con
+              estado de WebSocket y `navigator.onLine`.
+            - **Actualización automática de APK:** endpoint `/api/version`,
+              splash de comprobación, modal con progreso de descarga,
+              `DownloadManager` e instalación automática al terminar.
+              Botón **Reintentar** si el usuario cancela la instalación.
+            - **E2E eliminado:** toda la comunicación viaja en claro tras
+              migración de BD y backups.
+            - **Reintento de avatar:** Android `loadAvatar` reintenta una
+              vez y la web reintenta con cache-busting antes de mostrar
+              iniciales.
 
             ## Notas
             - El AppImage incluye GStreamer para reproducir audio y video; los
