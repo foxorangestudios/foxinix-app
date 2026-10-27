@@ -76,6 +76,7 @@ manifest = MANIFEST.read_text(encoding="utf-8")
 for permission in (
     "android.permission.INTERNET",
     "android.permission.RECORD_AUDIO",
+    "android.permission.FOREGROUND_SERVICE",
     # W54d: Wry pide este permiso junto con RECORD_AUDIO al conceder el
     # micrófono al WebView. Si no está declarado, Android rechaza el
     # paquete de permisos y la nota de voz queda sin acceso.
