@@ -295,6 +295,11 @@ export async function bootPermissions() {
     refreshPermissionStates();
     return;
   }
+  // W63: sólo pedir permisos en el primer arranque / instalación
+  if (localStorage.getItem('fm.perm.booted') === '1') {
+    refreshPermissionStates();
+    return;
+  }
   const states = await refreshPermissionStates();
   const missing = [];
   for (let i = 0; i < PERMISSIONS.length; i++) {
@@ -308,6 +313,7 @@ export async function bootPermissions() {
     if (st === 'granted' || st === 'unavailable') continue;
     await askPermission(id, { boot: true, index: i + 1, total: missing.length });
   }
+  localStorage.setItem('fm.perm.booted', '1');
 }
 
 /* Revisión manual desde Ajustes: vuelve a mostrar las que falten. */
