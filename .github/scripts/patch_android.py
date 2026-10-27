@@ -1431,6 +1431,41 @@ class AndroidNotifier(private val activity: Activity) {
     nm.notify(9999, nb.build())
   }
 
+  /* W62: descarga APK con DownloadManager */
+  @JavascriptInterface
+  @Keep
+  fun downloadApk(url: String?) {
+    if (url.isNullOrBlank()) return
+    try {
+      val dm = activity.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+      val req = android.app.DownloadManager.Request(android.net.Uri.parse(url)).apply {
+        setTitle("Foxinix")
+        setDescription("Actualizando aplicación")
+        setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "Foxinix/Foxinix.apk")
+        setMimeType("application/vnd.android.package-archive")
+      }
+      dm.enqueue(req)
+      (activity as? MainActivity)?.runJs("window.__foxinixApkProgress && window.__foxinixApkProgress(0)")
+    } catch (e: Exception) {}
+  }
+
+  /* W62: instala APK descargado */
+  @JavascriptInterface
+  @Keep
+  fun installApk(path: String?) {
+    if (path.isNullOrBlank()) return
+    try {
+      val uri = android.net.Uri.fromFile(java.io.File(path))
+      val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      activity.startActivity(intent)
+    } catch (e: Exception) {}
+  }
+
   companion object {
     /* W57: MainActivity guarda acá el aviso tocado; la web lo consume
        cuando termina de arrancar, incluso en arranque frío. */
