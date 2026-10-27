@@ -201,6 +201,7 @@ if main_activity:
             print("Aviso: no se encontró onCreate en MainActivity.kt")
         else:
             inset_code = (
+                "    AndroidNotifier.startPersistent(this)\n"
                 "    val content = findViewById<View>(android.R.id.content)\n"
                 "    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->\n"
                 "      val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom\n"
@@ -1410,6 +1411,24 @@ class AndroidNotifier(private val activity: Activity) {
       "document" -> "Documento"
       else -> "Archivo"
     }
+  }
+
+  fun startPersistent(activity: Activity) {
+    // W62: notificación persistente para mantener la app viva y recibir avisos
+    val channelId = "foxinix_persistent"
+    val nm = activity.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+      val ch = android.app.NotificationChannel(channelId, "Foxinix", android.app.NotificationManager.IMPORTANCE_LOW)
+      ch.description = "Mantiene la conexión y las notificaciones activas"
+      nm.createNotificationChannel(ch)
+    }
+    val nb = androidx.core.app.NotificationCompat.Builder(activity, channelId)
+      .setSmallIcon(R.drawable.ic_stat_foxinix)
+      .setContentTitle("Foxinix")
+      .setContentText("Conectado")
+      .setOngoing(true)
+      .setOnlyAlertOnce(true)
+    nm.notify(9999, nb.build())
   }
 
   companion object {
