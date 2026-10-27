@@ -1065,11 +1065,13 @@ class AndroidNotifier(private val activity: Activity) {
   private fun loadAvatar(url: String): Bitmap? {
     avatarCache.get(url)?.let { return it }
     var lastErr: Exception? = null
+    var result: Bitmap? = null
     for (attempt in 0 until 2) {
+      if (result != null) break
       var conn: HttpURLConnection? = null
       try {
         val parsed = URL(url)
-        if (parsed.protocol != "https" && parsed.protocol != "http") return null
+        if (parsed.protocol != "https" && parsed.protocol != "http") break
         val connection = (parsed.openConnection() as HttpURLConnection).apply {
           connectTimeout = 3000
           readTimeout = 4000
@@ -1082,17 +1084,16 @@ class AndroidNotifier(private val activity: Activity) {
         if (connection.responseCode !in 200..299) break
         val bytes = connection.inputStream.use { it.readBytes() }
         if (bytes.size > 3 * 1024 * 1024) break
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: break
-        avatarCache.put(url, bitmap)
-        return bitmap
+        result = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        if (result != null) avatarCache.put(url, result)
       } catch (e: Exception) {
         lastErr = e
       } finally {
         conn?.disconnect()
       }
-      if (attempt == 0) Thread.sleep(200)
+      if (attempt == 0 && result == null) Thread.sleep(200)
     }
-    null
+    return result
   }
 
   /* W57: destino pendiente de una notificación (se vacía al leerlo). */
