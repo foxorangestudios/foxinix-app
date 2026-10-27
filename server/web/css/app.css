@@ -6431,3 +6431,5 @@ button.dl-group .dl-group-head { pointer-events: none; }
   .modal.settings .tone-play { flex: none; }
   .modal.settings .tone-select { flex: 1 1 auto; }
 }
+
+.att-btn { cursor: pointer; }

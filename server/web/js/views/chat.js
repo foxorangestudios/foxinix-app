@@ -4241,7 +4241,7 @@ const DownloadViewer = {
           <img v-if="store.dlViewer.kind === 'image'" :src="store.dlViewer.url"
             :alt="store.dlViewer.name">
           <video v-else-if="store.dlViewer.kind === 'video'" :src="store.dlViewer.url"
-            controls autoplay playsinline></video>
+            controls autoplay ref="dlVideo"></video>
           <audio v-else-if="store.dlViewer.kind === 'audio'" :src="store.dlViewer.url"
             controls autoplay></audio>
           <iframe v-else-if="store.dlViewer.mime === 'application/pdf'"
@@ -7785,7 +7785,32 @@ export const ChatShell = {
 
     const send = async function () {
       const text = shortcodesToEmoji(draft.value);   // W17: :fire: → 🔥
-      /* W23: con adjunto, el texto (aunque sea vacío) viaja como mensaje */
+      /* W62: enviar todos los adjuntos en cola */
+      if (pendingAtts.value.length > 0) {
+        const src = replyTo.value;
+        const spo = spoilNext.value || spoilOnce;
+        spoilOnce = false;
+        replyTo.value = null;
+        stick.value = true;
+        const items = pendingAtts.value.slice();
+        pendingAtts.value = [];
+        if (att.value) { cancelAtt(); }
+        for (let i = 0; i < items.length; i++) {
+          const a = items[i];
+          att.value = a;
+          const cap = i === 0 ? (text.trim() ? text : '') : '';
+          await sendAtt(cap);
+          att.value = null;
+        }
+        draft.value = '';
+        store.emoOpen = false;
+        clearAc();
+        mOpen.value = false;
+        if (input.value) input.value.style.height = 'auto';
+        if (spo && !draft.value.trim()) spoilNext.value = false;
+        return;
+      }
+      /* W23: con adjunto único (compatibilidad), el texto (aunque sea vacío) viaja como mensaje */
       if (att.value) { await sendAtt(text.trim() ? text : ''); return; }
       if (!text.trim()) return;
       const src = replyTo.value;
@@ -7824,6 +7849,7 @@ export const ChatShell = {
     /* ---------- W11/W23: adjuntar (ficha con datos + texto del compositor) ---------- */
 
     const att = Vue.ref(null);   // {file, thumb} antes de enviar
+    const pendingAtts = Vue.ref([]);   // lista de adjuntos en cola (W62)
 
     /* Ficha: nombre con extensión, tipo y tamaño. */
     const attName = Vue.computed(function () {
@@ -7842,6 +7868,12 @@ export const ChatShell = {
     const cancelAtt = function () {
       const a = att.value;
       att.value = null;
+      // W62: limpiar también la cola
+      for (let i = 0; i < pendingAtts.value.length; i++) {
+        const p = pendingAtts.value[i];
+        if (p.thumb) { try { URL.revokeObjectURL(p.thumb); } catch (e) {} }
+      }
+      pendingAtts.value = [];
       spoilNext.value = false;   /* W29g: el interruptor vive con el adjunto */
       if (a && a.thumb) { try { URL.revokeObjectURL(a.thumb); } catch (e) {} }
     };
@@ -7902,29 +7934,22 @@ export const ChatShell = {
           return;
         }
       }
-      if (files.length === 1 && /^(image|video)\//.test(files[0].type || '')) {
-        cancelAtt();
-        const f = files[0];
-        att.value = {
+      // W62: añadir todos los archivos a la cola, nunca enviar de una vez
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const obj = {
           file: f,
           thumb: (/^image\//.test(f.type || '') && window.URL && URL.createObjectURL)
             ? URL.createObjectURL(f) : '',
         };
-        /* W23: el foco queda en el compositor: Enter envía ya mismo */
-        Vue.nextTick(function () {
-          if (input.value) input.value.focus();
-        });
-        return;
+        pendingAtts.value.push(obj);
       }
-      const src = replyTo.value;
-      const spo = spoilNext.value;   // W29d
-      replyTo.value = null;
-      stick.value = true;
-      for (let j = 0; j < files.length; j++) {
-        sendMedia(store.activeChatId, files[j], null, src, null, null, null,
-          { spoiler: spo }).catch(function () {});
+      // Mantener compatibilidad visual: si hay un solo archivo imagen/vídeo, también lo ponemos en att para la previsualización clásica
+      if (files.length === 1 && /^(image|video)\//.test(files[0].type || '')) {
+        cancelAtt();
+        att.value = pendingAtts.value[pendingAtts.value.length - 1];
+        Vue.nextTick(() => { if (input.value) input.value.focus(); });
       }
-      if (spo && !draft.value.trim()) spoilNext.value = false;
     };
 
     /* Ctrl+V: pegar una imagen (o lo que traiga el portapapeles como archivo) */
@@ -9717,11 +9742,11 @@ export const ChatShell = {
           '</div>' +
           /* W23: ficha del archivo (nombre + tipo/tamaño); el texto del
              mensaje se escribe en el compositor de abajo */
-          '<div class="cap-strip" v-if="att">' +
+          '<div class="cap-strip" v-if="att || pendingAtts.length">' +
             '<img v-if="att.thumb" class="cs-thumb" :src="att.thumb" alt="">' +
             '<svg v-else class="ic cs-ic"><use href="#i-file"></use></svg>' +
             '<span class="cs-col">' +
-              '<span class="cs-name">{{ attName }}</span>' +
+              '<span class="cs-name">{{ pendingAtts.length > 1 ? pendingAtts.length + " archivos" : attName }}</span>' +
               '<span class="cs-meta">' +
                 '<span class="cs-type">{{ attType }}</span>' +
                 '<span class="cs-size">{{ attSize }}</span>' +
@@ -9737,9 +9762,9 @@ export const ChatShell = {
             '<span>{{ t(\'Se enviará como archivo de texto\') }} · {{ draftCount }}/{{ maxText }}</span>' +
           '</div>' +
           '<div class="comp-row" v-if="rec === \'off\'">' +
-            '<label class="icon-btn" :title="t(\'Adjuntar archivo\')">' +
+            '<label class="icon-btn att-btn" :title="t(\'Adjuntar archivo\')">' +
               '<svg class="ic"><use href="#i-clip"></use></svg>' +
-              '<input type="file" hidden ref="fileInput" ' +
+              '<input type="file" hidden multiple ref="fileInput" ' +
                 'accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.xls,.xlsx" @change="onAttach">' +
             '</label>' +
             '<textarea class="composer-input" ref="input" rows="1" v-model="draft" ' +
@@ -9753,7 +9778,7 @@ export const ChatShell = {
               '<svg class="ic"><use href="#i-smile"></use></svg>' +
             '</button>' +
             /* W29d/g: "Mensaje Spoiler: On/Off" — SOLO con adjunto */
-            '<button class="icon-btn comp-spoil" v-if="att" :class="{ on: spoilNext }" type="button" ' +
+            '<button class="icon-btn comp-spoil" v-if="att || pendingAtts.length" :class="{ on: spoilNext }" type="button" ' +
               ':title="t(\'Mensaje Spoiler\') + \': \' + (spoilNext ? \'On\' : \'Off\')" ' +
               '@click="spoilNext = !spoilNext">' +
               '<svg class="ic"><use href="#i-eye-off"></use></svg>' +
