@@ -1431,7 +1431,7 @@ class AndroidNotifier(private val activity: Activity) {
     nm.notify(9999, nb.build())
   }
 
-  /* W62: descarga APK con DownloadManager */
+  /* W62: descarga APK con DownloadManager y lanza instalador automático */
   @JavascriptInterface
   @Keep
   fun downloadApk(url: String?) {
@@ -1445,9 +1445,29 @@ class AndroidNotifier(private val activity: Activity) {
         setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "Foxinix/Foxinix.apk")
         setMimeType("application/vnd.android.package-archive")
       }
-      dm.enqueue(req)
+      val downloadId = dm.enqueue(req)
       (activity as? MainActivity)?.runJs("window.__foxinixApkProgress && window.__foxinixApkProgress(0)")
-    } catch (e: Exception) {}
+      val receiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+          val id = intent.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+          if (id == downloadId) {
+            try { context.unregisterReceiver(this) } catch (e: Exception) {}
+            // Intenta instalar automáticamente
+            val file = java.io.File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "Foxinix/Foxinix.apk")
+            if (file.exists()) {
+              installApk(file.absolutePath)
+              (activity as? MainActivity)?.runJs("window.__foxinixApkProgress && window.__foxinixApkProgress(100)")
+            } else {
+              (activity as? MainActivity)?.runJs("window.__foxinixApkDone && window.__foxinixApkDone(false)")
+            }
+          }
+        }
+      }
+      val filter = android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+      activity.registerReceiver(receiver, filter)
+    } catch (e: Exception) {
+      (activity as? MainActivity)?.runJs("window.__foxinixApkDone && window.__foxinixApkDone(false)")
+    }
   }
 
   /* W62: instala APK descargado */

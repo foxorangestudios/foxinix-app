@@ -210,6 +210,20 @@ def health() -> dict:
         "uptime": int(time.time()) - _started_at,
     }
 
+@app.get("/api/version")
+def version_info() -> dict:
+    # W62: información de versión de la app web y del APK
+    # apk_version y apk_url se leen de variables de entorno
+    import os
+    apk_version = os.getenv("FOXMSG_APK_VERSION", app.version)
+    apk_url = os.getenv("FOXMSG_APK_URL", "")
+    return {
+        "web_version": app.version,
+        "apk_version": apk_version,
+        "apk_url": apk_url,
+        "min_version": os.getenv("FOXMSG_MIN_VERSION", app.version),
+    }
+
 
 # ATENCIÓN: el catch-all de la SPA va AL FINAL — Starlette compara las
 # rutas en orden de registro y esto no debe tapar /api/* ni /static/*.

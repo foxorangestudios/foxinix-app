@@ -40,19 +40,69 @@ const Root = {
       loadSession();
       syncPath();
       bootstrap();
-      // W62: check for new version
+      // W62: check for new version (web + APK)
       setTimeout(() => {
-        fetch('/api/health').then(r => r.json()).then(h => {
-          const srv = h.version || '';
-          const local = localStorage.getItem('fm.appVersion') || '0.0.0';
-          if (srv && srv !== local) {
-            localStorage.setItem('fm.appVersion', srv);
-            store.versionUpdate = true;
+        fetch('/api/version').then(r => r.json()).then(v => {
+          const isAndroid = !!(window.FoxinixAndroid);
+          const srvWeb = v.web_version || '';
+          const srvApk = v.apk_version || '';
+          const localWeb = localStorage.getItem('fm.appVersion') || '0.0.0';
+          // Web update is automatic on reload
+          if (srvWeb && srvWeb !== localWeb) {
+            localStorage.setItem('fm.appVersion', srvWeb);
+            // For web, just reload
+            window.location.reload(true);
+          }
+          if (isAndroid && srvApk) {
+            const localApk = localStorage.getItem('fm.apkVersion') || '0.0.0';
+            if (srvApk && srvApk !== localApk) {
+              store.versionInfo = v;
+              store.versionUpdate = true;
+            }
           }
         }).catch(()=>{});
       }, 5000);
     });
-    return { comp, store };
+        const startApkDownload = async () => {
+      const v = store.versionInfo;
+      if (!v || !v.apk_url) return;
+      store.versionDownloading = true;
+      store.versionProgress = 0;
+      store.versionError = false;
+      window.__foxinixApkProgress = (p) => { store.versionProgress = p; if (p >= 100) { store.versionDownloading = false; store.versionUpdate = false; localStorage.setItem('fm.apkVersion', v.apk_version); } };
+      window.__foxinixApkDone = (ok) => { store.versionDownloading = false; if (!ok) { store.versionError = true; } else { store.versionUpdate = false; localStorage.setItem('fm.apkVersion', v.apk_version); } };
+      if (window.FoxinixAndroid && window.FoxinixAndroid.downloadApk) {
+        window.FoxinixAndroid.downloadApk(v.apk_url);
+        return;
+      }
+      try {
+        const res = await fetch(v.apk_url);
+        const total = +res.headers.get('Content-Length') || 0;
+        const reader = res.body.getReader();
+        let received = 0;
+        const chunks = [];
+        while (True) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (total) store.versionProgress = Math.round((received/total)*100);
+        }
+        const blob = new Blob(chunks);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Foxinix.apk';
+        a.click();
+        URL.revokeObjectURL(url);
+        store.versionUpdate = false;
+        localStorage.setItem('fm.apkVersion', v.apk_version);
+      } catch(e) {
+        store.versionDownloading = false;
+        store.toasts.push({id: Date.now(), kind: 'err', msg: 'Error al descargar actualización' });
+      }
+    };
+    return { comp, store, startApkDownload };
   },
   template: `
     <transition name="fade" mode="out-in">
@@ -71,10 +121,16 @@ const Root = {
       <div class="version-box">
         <svg class="ic ic-lg"><use href="#i-update"></use></svg>
         <h3>{{$t('Actualización disponible')}}</h3>
-        <p>{{$t('Hay una nueva versión de Foxinix. Actualiza para seguir usando la app.')}}</p>
+        <p v-if="!store.versionDownloading && !store.versionError">{{$t('Hay una nueva versión de Foxinix.')}}</p>
+        <p v-if="store.versionError" class="err">{{$t('La instalación fue cancelada o falló.')}}</p>
+        <div v-if="store.versionDownloading">
+          <p>{{$t('Descargando...')}} {{store.versionProgress}}%</p>
+          <div class="progress-bar"><div class="progress-fill" :style="{width: store.versionProgress + '%'}"></div></div>
+        </div>
         <div class="version-actions">
-          <button class="btn btn-primary" type="button" @click="store.versionUpdate = null; window.location.reload(true)">{{$t('Actualizar ahora')}}</button>
-          <button class="btn btn-ghost" type="button" @click="store.versionUpdate = null">{{$t('Recordar más tarde')}}</button>
+          <button v-if="!store.versionDownloading" class="btn btn-primary" type="button" @click="startApkDownload()">{{$t('Actualizar ahora')}}</button>
+          <button v-if="store.versionError" class="btn btn-primary" type="button" @click="store.versionError=false; startApkDownload()">{{$t('Reintentar')}}</button>
+          <button class="btn btn-ghost" type="button" @click="store.versionUpdate = null; store.versionError = false">{{$t('Recordar más tarde')}}</button>
         </div>
       </div>
     </div>
