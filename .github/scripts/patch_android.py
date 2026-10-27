@@ -1065,7 +1065,7 @@ class AndroidNotifier(private val activity: Activity) {
   private fun loadAvatar(url: String): Bitmap? {
     avatarCache.get(url)?.let { return it }
     var lastErr: Exception? = null
-    repeat(2) { attempt ->
+    for (attempt in 0 until 2) {
       var conn: HttpURLConnection? = null
       try {
         val parsed = URL(url)
@@ -1079,10 +1079,10 @@ class AndroidNotifier(private val activity: Activity) {
           CookieManager.getInstance().getCookie(url)?.let { setRequestProperty("Cookie", it) }
         }
         conn = connection
-        if (connection.responseCode !in 200..299) return@repeat
+        if (connection.responseCode !in 200..299) break
         val bytes = connection.inputStream.use { it.readBytes() }
-        if (bytes.size > 3 * 1024 * 1024) return@repeat
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@repeat
+        if (bytes.size > 3 * 1024 * 1024) break
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: break
         avatarCache.put(url, bitmap)
         return bitmap
       } catch (e: Exception) {
