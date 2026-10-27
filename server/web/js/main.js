@@ -47,10 +47,7 @@ const Root = {
           const local = localStorage.getItem('fm.appVersion') || '0.0.0';
           if (srv && srv !== local) {
             localStorage.setItem('fm.appVersion', srv);
-            // Show simple alert; replace with modal later
-            if (confirm('Hay una nueva versión de Foxinix disponible. ¿Actualizar ahora?')) {
-              window.location.reload(true);
-            }
+            store.versionUpdate = true;
           }
         }).catch(()=>{});
       }, 5000);
@@ -68,6 +65,17 @@ const Root = {
         <h3>{{ navigator.onLine ? $t('Servidor caído') : $t('Sin conexión') }}</h3>
         <p>{{ navigator.onLine ? $t('No se puede conectar con el servidor. Reintentando...') : $t('Comprueba tu conexión a Internet.') }}</p>
         <button class="btn" type="button" @click="store.ws = 'connecting'">{{ $t('Reintentar') }}</button>
+      </div>
+    </div>
+    <div v-if="store.versionUpdate" class="version-overlay">
+      <div class="version-box">
+        <svg class="ic ic-lg"><use href="#i-update"></use></svg>
+        <h3>{{$t('Actualización disponible')}}</h3>
+        <p>{{$t('Hay una nueva versión de Foxinix. Actualiza para seguir usando la app.')}}</p>
+        <div class="version-actions">
+          <button class="btn btn-primary" type="button" @click="store.versionUpdate = null; window.location.reload(true)">{{$t('Actualizar ahora')}}</button>
+          <button class="btn btn-ghost" type="button" @click="store.versionUpdate = null">{{$t('Recordar más tarde')}}</button>
+        </div>
       </div>
     </div>
     <transition-group name="pop" tag="div" class="toasts">

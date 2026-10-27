@@ -76,7 +76,8 @@ export const store = reactive({
   dlRev: 0,
   dlAutoRev: 0,
   /* W58: puerta de permisos a pantalla completa. */
-  permGate: null,         // {kind, icon, title, text, state, index, total, busy, error}
+  permGate: null,
+  versionUpdate: false,         // {kind, icon, title, text, state, index, total, busy, error}
   permStates: {},         // kind → granted | denied | prompt | unavailable
   readSeqs: {},           // chatId → {userId: seq} (eventos 'read' recibidos)
   deliveredSeqs: {},      // chatId → {userId: seq} (eventos 'delivered', W12)
