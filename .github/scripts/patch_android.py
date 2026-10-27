@@ -148,6 +148,21 @@ if "android:hardwareAccelerated" not in manifest:
 MANIFEST.write_text(manifest, encoding="utf-8")
 print("AndroidManifest.xml listo")
 
+# W62: color de acento para icono adaptativo
+import os
+accent = os.getenv("FOXMSG_ACCENT_COLOR", "#1e90ff")
+colors_xml = ROOT / "app/src/main/res/values/colors.xml"
+if colors_xml.exists():
+    colors = colors_xml.read_text(encoding="utf-8")
+    if "<color name="accent">" not in colors:
+        colors = colors.replace(
+            "<resources>",
+            f"<resources>\n    <color name="accent">{accent}</color>"
+        )
+        colors_xml.write_text(colors, encoding="utf-8")
+        print(f"color accent agregado a colors.xml: {accent}")
+
+
 # Arranque en frío: el tema base no define windowBackground, así que Android
 # pinta un fondo blanco hasta que el WebView baja la web (que es oscura,
 # #1e1f22). Se fija el color de la ventana al de la app para evitar ese flash.
@@ -1049,30 +1064,35 @@ class AndroidNotifier(private val activity: Activity) {
 
   private fun loadAvatar(url: String): Bitmap? {
     avatarCache.get(url)?.let { return it }
-    var conn: HttpURLConnection? = null
-    return try {
-      val parsed = URL(url)
-      if (parsed.protocol != "https" && parsed.protocol != "http") return null
-      val connection = (parsed.openConnection() as HttpURLConnection).apply {
-        connectTimeout = 3000
-        readTimeout = 4000
-        instanceFollowRedirects = true
-        setRequestProperty("Accept", "image/*")
-        setRequestProperty("User-Agent", "Foxinix-Android")
-        CookieManager.getInstance().getCookie(url)?.let { setRequestProperty("Cookie", it) }
+    var lastErr: Exception? = null
+    repeat(2) { attempt ->
+      var conn: HttpURLConnection? = null
+      try {
+        val parsed = URL(url)
+        if (parsed.protocol != "https" && parsed.protocol != "http") return null
+        val connection = (parsed.openConnection() as HttpURLConnection).apply {
+          connectTimeout = 3000
+          readTimeout = 4000
+          instanceFollowRedirects = true
+          setRequestProperty("Accept", "image/*")
+          setRequestProperty("User-Agent", "Foxinix-Android")
+          CookieManager.getInstance().getCookie(url)?.let { setRequestProperty("Cookie", it) }
+        }
+        conn = connection
+        if (connection.responseCode !in 200..299) return@repeat
+        val bytes = connection.inputStream.use { it.readBytes() }
+        if (bytes.size > 3 * 1024 * 1024) return@repeat
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return@repeat
+        avatarCache.put(url, bitmap)
+        return bitmap
+      } catch (e: Exception) {
+        lastErr = e
+      } finally {
+        conn?.disconnect()
       }
-      conn = connection
-      if (connection.responseCode !in 200..299) return null
-      val bytes = connection.inputStream.use { it.readBytes() }
-      if (bytes.size > 3 * 1024 * 1024) return null
-      val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-      avatarCache.put(url, bitmap)
-      bitmap
-    } catch (e: Exception) {
-      null
-    } finally {
-      conn?.disconnect()
+      if (attempt == 0) Thread.sleep(200)
     }
+    null
   }
 
   /* W57: destino pendiente de una notificación (se vacía al leerlo). */

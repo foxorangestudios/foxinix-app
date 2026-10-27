@@ -2019,8 +2019,23 @@ const MessageRow = {
        a la inicial en vez de dejar el hueco roto. Al cambiar la URL se
        reintenta sola. */
     const avErr = Vue.ref(false);
+    const avRetried = Vue.ref(false);
+    const onAvatarError = () => {
+      if (!avRetried.value && props.row.avatar && props.row.avatar.url) {
+        avRetried.value = true;
+        // Reintenta con parámetro de cache-busting
+        try {
+          const url = new URL(props.row.avatar.url, location.href);
+          url.searchParams.set('retry', Date.now().toString());
+          // Actualiza la URL en el objeto avatar para que Vue la relea
+          props.row.avatar.url = url.href;
+        } catch(e) {}
+        return;
+      }
+      avErr.value = true;
+    };
     Vue.watch(function () { return props.row.avatar && props.row.avatar.url; },
-      function () { avErr.value = false; });
+      function () { avErr.value = false; avRetried.value = false; });
 
     /* W41/W61: 1–3 emojis en el cuerpo → el mensaje se pinta como
        sticker (emoji grande, sin caja y con la hora en pastillita).
@@ -2224,7 +2239,7 @@ const MessageRow = {
          cara (foto/letra) solo donde se ve el nombre del emisor */
       '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
-        '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="avErr = true">' +
+        '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="onAvatarError()">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
       '</span>' +
       '<div v-if="row.ref.kind === \'system\'" class="sys-msg">{{ row.ref.body }}</div>' +
