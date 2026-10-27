@@ -154,10 +154,10 @@ accent = os.getenv("FOXMSG_ACCENT_COLOR", "#1e90ff")
 colors_xml = ROOT / "app/src/main/res/values/colors.xml"
 if colors_xml.exists():
     colors = colors_xml.read_text(encoding="utf-8")
-    if "<color name="accent">" not in colors:
+    if '<color name="accent">' not in colors:
         colors = colors.replace(
             "<resources>",
-            f"<resources>\n    <color name="accent">{accent}</color>"
+            f'<resources>\n    <color name="accent">{accent}</color>'
         )
         colors_xml.write_text(colors, encoding="utf-8")
         print(f"color accent agregado a colors.xml: {accent}")
