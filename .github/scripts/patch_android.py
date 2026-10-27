@@ -1433,24 +1433,6 @@ class AndroidNotifier(private val activity: Activity) {
     }
   }
 
-  fun startPersistent(activity: Activity) {
-    // W62: notificación persistente para mantener la app viva y recibir avisos
-    val channelId = "foxinix_persistent"
-    val nm = activity.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-      val ch = android.app.NotificationChannel(channelId, "Foxinix", android.app.NotificationManager.IMPORTANCE_LOW)
-      ch.description = "Mantiene la conexión y las notificaciones activas"
-      nm.createNotificationChannel(ch)
-    }
-    val nb = androidx.core.app.NotificationCompat.Builder(activity, channelId)
-      .setSmallIcon(R.drawable.ic_stat_foxinix)
-      .setContentTitle("Foxinix")
-      .setContentText("Conectado")
-      .setOngoing(true)
-      .setOnlyAlertOnce(true)
-    nm.notify(9999, nb.build())
-  }
-
   /* W62: descarga APK con DownloadManager y lanza instalador automático */
   @JavascriptInterface
   @Keep
@@ -1507,6 +1489,26 @@ class AndroidNotifier(private val activity: Activity) {
   }
 
   companion object {
+    /* W62: notificación persistente para mantener la app viva y recibir avisos.
+       Se llama como AndroidNotifier.startPersistent(activity) desde MainActivity
+       antes de que exista una instancia de AndroidNotifier, por eso va acá. */
+    fun startPersistent(activity: Activity) {
+      val channelId = "foxinix_persistent"
+      val nm = activity.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        val ch = android.app.NotificationChannel(channelId, "Foxinix", android.app.NotificationManager.IMPORTANCE_LOW)
+        ch.description = "Mantiene la conexión y las notificaciones activas"
+        nm.createNotificationChannel(ch)
+      }
+      val nb = androidx.core.app.NotificationCompat.Builder(activity, channelId)
+        .setSmallIcon(R.drawable.ic_stat_foxinix)
+        .setContentTitle("Foxinix")
+        .setContentText("Conectado")
+        .setOngoing(true)
+        .setOnlyAlertOnce(true)
+      nm.notify(9999, nb.build())
+    }
+
     /* W57: MainActivity guarda acá el aviso tocado; la web lo consume
        cuando termina de arrancar, incluso en arranque frío. */
     @Volatile
