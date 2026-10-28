@@ -39,7 +39,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-linux-android
+          targets: x86_64-linux-android,armv7-linux-androideabi,aarch64-linux-android
 
       - name: Preparar y compilar
         working-directory: desktop
@@ -59,14 +59,34 @@ jobs:
           storeFile=${RUNNER_TEMP}/foxinix-release.jks
           EOF
           python3 ../.github/scripts/patch_android.py
-          npx tauri android build --apk --target x86_64
           mkdir -p dist
-          cp "$(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' | sort | head -1)" dist/foxinix-x86_64.apk
+          for target in x86_64-linux-android armv7-linux-androideabi aarch64-linux-android; do
+            npx tauri android build --apk --target "$target"
+            case "$target" in
+              x86_64*) abi="x86_64" ;;
+              armv7*)  abi="armeabi-v7a" ;;
+              aarch64*) abi="arm64-v8a" ;;
+            esac
+            apk="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' | sort | tail -1)"
+            cp "$apk" "dist/foxinix-$abi.apk"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
           name: foxinix-android-x86_64
           path: desktop/dist/foxinix-x86_64.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foxinix-android-armv7
+          path: desktop/dist/foxinix-armeabi-v7a.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foxinix-android-arm64
+          path: desktop/dist/foxinix-arm64-v8a.apk
           if-no-files-found: error
 
   emulator:
