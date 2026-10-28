@@ -8,15 +8,16 @@
         con XHR (progreso real: loaded/total) y pinta un anillo; ✕ cancela y
         si falla el ✕ se convierte en ↻ de reintento.
    Para archivos sueltos está startDownload(): mismo flujo, guarda los
-   bytes en los datos de la app y crea la copia pública solo cuando el
-   usuario pide "Guardar en el dispositivo".
+   bytes en los datos de la app Y deja una copia en el dispositivo
+   (Descargas del navegador en PC; en Android avisa "Descargando archivo"
+   y guarda en Downloads/Foxinix).
 
    Sin dependencias. FF78: XHR + Blob + IntersectionObserver (todo disponible). */
 import { t } from './i18n.js';
 import { toast } from './store.js';
 import {
   getDownloadBlob, saveDownload, requestPersistence,
-  fetchBlob,
+  fetchBlob, saveBlobToDevice, androidBridge,
   dlCategory, dlTypeInfo,
 } from './downloads.js';
 
@@ -504,9 +505,9 @@ export const dlDirective = {
   },
 };
 
-/* W59: descarga manual a los datos de la app. NO crea una copia pública
-   en Descargas/Foxinix: eso solo lo hace el botón explícito "Guardar en
-   el dispositivo" de Ajustes → Descargas. */
+/* W59: descarga manual. Además de los datos de la app (disponible sin
+   red), deja una copia en el dispositivo: Descargas del navegador en PC;
+   en Android avisa "Descargando archivo" y guarda en Downloads/Foxinix. */
 export function startDownload(url, filename, frame, mime, kind) {
   if (!url) return;
   const type = dlCategory(kind, mime, filename);
@@ -521,14 +522,34 @@ export function startDownload(url, filename, frame, mime, kind) {
       return Promise.resolve(null);
     }
     requestPersistence();
-    return saveDownload(url, filename, blob, type, false).then(function (meta) {
+
+    /* Copia en el dispositivo, no solo en los datos de la app:
+       PC/navegador → Descargas del navegador (<a download>);
+       Android → notificación "Descargando archivo" + Downloads/Foxinix. */
+    const dev = (function () {
+      const a = androidBridge();
+      if (a && typeof a.beginSave === 'function') {
+        try {
+          a.notify('Descargando archivo', String(filename || 'archivo'), null, null);
+        } catch (e) {}
+        return saveBlobToDevice(blob, filename, mime).then(function (r) {
+          if (r.ok) toast(t('Guardado en Descargas/Foxinix'), 'ok');
+          else if (r.permission) toast(t('Permiso de almacenamiento necesario para guardar en el dispositivo'), 'err');
+          else toast(t('No se pudo guardar en el dispositivo'), 'err');
+          return r;
+        });
+      }
+      saveBlobToDisk(blob, filename || 'archivo');
+      return Promise.resolve({ ok: true, native: false });
+    })();
+
+    const appDone = saveDownload(url, filename, blob, type, false).then(function (meta) {
       if (meta) toast(doneMsg, 'ok');
       else toast(t('No se pudo guardar en la app'), 'err');
-      return meta;
     }).catch(function () {
       toast(t('No se pudo guardar en la app'), 'err');
-      return null;
     });
+    return Promise.all([appDone, dev]).then(function () { return null; });
   };
 
   /* Si ya está en los datos de la app no se vuelve a bajar ni se

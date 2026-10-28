@@ -123,7 +123,7 @@ export function autoDlEnabled(type, network) {
   return !!(prefs[type] && prefs[type][network]);
 }
 
-function androidBridge() {
+export function androidBridge() {
   try {
     const a = window.FoxinixAndroid;
     return a || null;
@@ -319,6 +319,8 @@ export function saveBlobToDisk(blob, name) {
   const a = document.createElement('a');
   a.href = obj;
   a.download = name || 'archivo';
+  a.style.display = 'none';
+  a.target = '_self';           /* nunca abrir pestaña nueva */
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
