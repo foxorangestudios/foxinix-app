@@ -185,10 +185,12 @@ for themes_path in (
     themes = (
         themes[:insert_at]
         + '\n        <item name="android:windowBackground">#1e1f22</item>'
+        + '\n        <item name="android:statusBarColor">#1e1f22</item>'
+        + '\n        <item name="android:navigationBarColor">#1e1f22</item>'
         + themes[insert_at:]
     )
     themes_path.write_text(themes, encoding="utf-8")
-    print(f"windowBackground=#1e1f22 agregado a {themes_path.name}")
+    print(f"windowBackground/statusBarColor/navigationBarColor=#1e1f22 agregado a {themes_path.name}")
 
 # W54d: con edge-to-edge (Android 15+) adjustResize no achica el WebView.
 # Aplicamos el inset del teclado al contenedor para que la página reciba
@@ -231,6 +233,12 @@ if main_activity:
                 "      val safeTop = (bars.top / d).toInt()\n"
                 "      val safeLeft = (bars.left / d).toInt()\n"
                 "      val safeRight = (bars.right / d).toInt()\n"
+                "      /* W66: el contenido nunca se dibuja detrás de la barra de\n"
+                "         estado ni de los botones de navegación: se aplica el\n"
+                "         inset de systemBars como padding del contenedor. Con el\n"
+                "         teclado abierto se conserva el padding del teclado. */\n"
+                "      val sysBottom = if (ime > 0) view.paddingBottom else bars.bottom\n"
+                "      view.setPadding(bars.left, bars.top, bars.right, sysBottom)\n"
                 "      AndroidNotifier.rememberInsets(safeTop, safeBottom, safeLeft, safeRight)\n"
                 "      val js = \"window.foxinixSetNativeInsets&&window.foxinixSetNativeInsets(\" +\n"
                 "        safeTop + \",\" + safeBottom + \",\" + safeLeft + \",\" + safeRight + \")\"\n"
@@ -289,8 +297,10 @@ if main_activity:
                 inject += "appWebView = webView\n"
             if "addJavascriptInterface" not in segment:
                 inject += (
+                    'val notifier = AndroidNotifier(this)\n'
+                    'notifier.setSystemBars(false)\n'
                     'webView.addJavascriptInterface('
-                    'AndroidNotifier(this), "FoxinixAndroid")\n'
+                    'notifier, "FoxinixAndroid")\n'
                 )
             if "ViewCompat.requestApplyInsets(webView)" not in segment:
                 inject += "webView.post { ViewCompat.requestApplyInsets(webView) }\n"
@@ -322,7 +332,9 @@ if main_activity:
             # y aprovecha la caché HTTP del sistema en el arranque en frío.
             "    webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)\n"
             "    webView.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT\n"
-            '    webView.addJavascriptInterface(AndroidNotifier(this), "FoxinixAndroid")\n'
+            '    val notifier = AndroidNotifier(this)\n'
+            '    notifier.setSystemBars(false)\n'
+            '    webView.addJavascriptInterface(notifier, "FoxinixAndroid")\n'
             "    webView.post { ViewCompat.requestApplyInsets(webView) }\n"
             "  }\n"
         )
