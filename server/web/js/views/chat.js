@@ -9114,8 +9114,13 @@ export const ChatShell = {
 
     /* W28a: doble clic en un mensaje = reacciona con tu emoji reciente
        (o 👍 si aún no usas ninguno). No cuenta sobre imagen/video/
-       enlace: ahí el clic ya hace zoom o descarga. */
+       enlace: ahí el clic ya hace zoom o descarga.
+       W66d: en PC el doble clic NO reacciona — molesta al doble-clic para
+       seleccionar texto o por accidente. El clic de ratón trae su
+       contador en detail (1, 2…); el doble toque táctil llega con
+       detail 0, que es el único caso en el que sigue activo. */
     const quickReact = function (ev, r) {
+      if (ev && ev.detail > 0) return;
       const t = ev && ev.target;
       if (t && t.closest && t.closest('img, video, a')) return;
       const m = r && r.ref;
