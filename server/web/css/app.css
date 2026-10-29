@@ -1155,7 +1155,7 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
   right: -8px;
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
-  border-right: 9px solid var(--bubble-me);
+  border-left: 9px solid var(--bubble-me);
 }
 .msg.mine .bubble {
   background: var(--bubble-me);
