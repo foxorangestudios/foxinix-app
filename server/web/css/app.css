@@ -1136,22 +1136,15 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
   min-width: 74px;
 }
 /* W66: flechita en la burbuja que apunta al avatar del remitente.
-   En mensajes ajenos sobresale por la izquierda; en los propios, por
-   la derecha. El color coincide con el fondo de la burbuja. */
-.bubble::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  width: 0;
-  height: 0;
-}
-.msg:not(.mine) .bubble::after {
+   Solo en mensajes con hora (clase .tail en .msg). En mensajes ajenos
+   sobresale por la izquierda; en los propios, por la derecha. */
+.msg.tail:not(.mine) .bubble::after {
   left: -8px;
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;
   border-right: 9px solid var(--bubble-you);
 }
-.msg.mine .bubble::after {
+.msg.tail.msg.mine .bubble::after {
   right: -8px;
   border-top: 7px solid transparent;
   border-bottom: 7px solid transparent;

@@ -2234,12 +2234,13 @@ const MessageRow = {
     };
   },
   template:
-    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in }" @animationend="animEnd">' +
+    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in, tail: row.avCol && row.showTime }" @animationend="animEnd">' +
       /* W66: avatar del remitente junto a cada mensaje (propios y ajenos,
-         grupos y MDs). Para los entrantes va a la izquierda de la
-         burbuja; para los propios, a la derecha. La burbuja lleva una
-         flechita que apunta al avatar. */
-      '<span class="msg-av" v-if="row.avCol && !row.mine" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
+         grupos y MDs). Solo se muestra cuando hay hora (no en mensajes
+         continuos del mismo remitente sin hora). Para los entrantes va a
+         la izquierda de la burbuja; para los propios, a la derecha.
+         La burbuja lleva una flechita que apunta al avatar. */
+      '<span class="msg-av" v-if="row.avCol && !row.mine && row.showTime" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
         '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="onAvatarError()">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
@@ -2609,8 +2610,9 @@ const MessageRow = {
         '</div>' +
       '</div>' +
       /* W66: avatar del remitente a la derecha de la burbuja para los
-         mensajes propios (la flechita apunta hacia él). */
-      '<span class="msg-av" v-if="row.avCol && row.mine" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
+         mensajes propios (la flechita apunta hacia él). Solo cuando hay
+         hora (no en mensajes continuos del mismo remitente sin hora). */
+      '<span class="msg-av" v-if="row.avCol && row.mine && row.showTime" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
         '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="onAvatarError()">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
