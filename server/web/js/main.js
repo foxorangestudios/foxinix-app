@@ -62,6 +62,20 @@ const Root = {
         }, 5000);
       }
     });
+    /* Sonda de desarrollo: reproducir el overlay sin cortar la red.
+       En la consola:
+         Foxinix.probe.offline('internet')  → "Sin conexión a internet"
+         Foxinix.probe.offline('server')    → "Servidor caído"
+         Foxinix.probe.offline('hide')       → cerrarlo
+       Cancela el timer real para que no se cruce con una caída de verdad. */
+    window.Foxinix = window.Foxinix || {};
+    window.Foxinix.probe = window.Foxinix.probe || {};
+    window.Foxinix.probe.offline = function (reason) {
+      if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
+      if (reason === 'hide') { offlineVisible.value = false; return; }
+      offlineReason.value = reason === 'internet' ? 'internet' : 'server';
+      offlineVisible.value = true;
+    };
     Vue.onMounted(() => {
       // Orden: sesión → URL inicial (deep links) → arranque.
       loadSession();
@@ -138,8 +152,9 @@ const Root = {
     <!-- W62: overlay sin conexión / servidor caído -->
     <div v-if="offlineVisible" class="offline-overlay">
       <div class="offline-box offline-warning">
-        <svg class="ic ic-lg" v-if="offlineReason === 'internet'"><use href="#i-wifi-off"></use></svg>
-        <svg class="ic ic-lg" v-else><use href="#i-alert"></use></svg>
+        <!-- "!" en círculo (i-alert de Material) para ambos casos:
+             el motivo lo dice el título, no el glifo. -->
+        <svg class="ic ic-lg"><use href="#i-alert"></use></svg>
         <h3>{{ offlineReason === 'internet' ? t('Sin conexión a internet') : t('Servidor caído') }}</h3>
         <p>{{ offlineReason === 'internet' ? t('Comprueba tu conexión a Internet.') : t('Conéctate más tarde, puede que estemos resolviendo un problema.') }}</p>
         <button class="btn" type="button" @click="store.ws = 'connecting'">{{ t('Reintentar') }}</button>

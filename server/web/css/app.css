@@ -6605,7 +6605,14 @@ button.dl-group .dl-group-head { pointer-events: none; }
 .offline-box p { margin: 0 0 16px; color: var(--t2); font-size: 14px; }
 .offline-warning { border: 2px solid #e6a23c; }
 .offline-warning .ic-lg { color: #e6a23c; opacity: 1; }
-.offline-warning .ic-lg[href="#i-wifi-off"] { color: #e5534b; }
+/* El botón es ámbar como el borde y el icono (no el acento del tema,
+   que el usuario puede tener de otro color). Texto oscuro: sobre ámbar
+   el blanco no llega a contraste AA. */
+.offline-warning .btn {
+  background: #e6a23c;
+  color: #23252a;
+}
+.offline-warning .btn:hover { background: #f0b24d; }
 
 /* W62: modal de actualización de versión */
 .version-overlay {
