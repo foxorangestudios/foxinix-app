@@ -833,6 +833,21 @@ input[type="range"].wp-range::-moz-range-thumb {
   margin: 0;
   max-width: 300px;
 }
+/* W66f: subtexto gris por debajo de la frase aleatoria */
+.empty-mood .mood-sub {
+  margin: -2px 0 0;
+  max-width: 300px;
+  font-size: 12.5px;
+  color: var(--t2);
+  opacity: .78;
+}
+/* W66f: iconito delante del texto en las pestañas de Personas */
+.ppl-tab .tab-ic {
+  width: 15px;
+  height: 15px;
+  margin-right: 5px;
+  vertical-align: -3px;
+}
 
 /* W57: en segundo plano el APK oculta el WebView; además congelamos las
    animaciones para no gastar CPU (solo se reanudan al volver). */
@@ -5655,6 +5670,11 @@ body { font-size: calc(15px * var(--fs)); }
   /* Mismas métricas que .side-head > .icon-btn (40px + 4px de hueco). */
   .mobile-page-head > .icon-btn { width: 40px; height: 40px; }
   .mobile-page-head > .icon-btn + .icon-btn { margin-left: 4px; }
+  /* W66f: en .side-head el word-logo oculto sigue contando como hermano
+     previo y el mark hereda el hueco de 4px de `> * + *`; aquí el mark
+     es el primer hijo, así que se lo damos a mano para que el icono de
+     la app quede en la MISMA posición que en Chats/Archivados. */
+  .mobile-page-head > .side-logo-mark { margin-left: 4px; }
   .mobile-page-logo {
     display: block;
     flex: none;

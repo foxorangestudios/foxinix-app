@@ -3020,7 +3020,13 @@ const SettingsModal = {
       store.settingsAtHome = false;
     });
 
-    const close = function () { stopPreview(); store.settingsOpen = false; };
+    const close = function () {
+      stopPreview();
+      store.settingsOpen = false;
+      /* W66f: abrir Ajustes desde Archivados dejó la lista detrás (para
+         no parpadear); al cerrar se vuelve a Chats como siempre. */
+      store.showArchived = false;
+    };
     const setTab = function (tv) { stopPreview(); store.settingsTab = tv; };
     const openCat = function (tv) {
       stopPreview();
@@ -3037,6 +3043,7 @@ const SettingsModal = {
        en el panel dedicado, que se abre donde está la lista de chats. */
     const openWallPanel = function () {
       store.settingsOpen = false;
+      store.showArchived = false;   /* W66f: el panel se abre sobre Chats */
       store.wallPanelOpen = true;
     };
     /* W20: micrófono — dispositivo preferido + prueba de nivel */
@@ -7130,11 +7137,16 @@ const PeoplePanel = {
   },
   template: `
     <div class="ppl">
+      <!-- W66f: iconito delante del texto en cada pestaña -->
       <div class="ppl-tabs">
         <button class="ppl-tab" type="button" :class="{ on: tab === 'active' }"
-          @click="tab = 'active'">{{ t('Activos') }}</button>
+          @click="tab = 'active'">
+          <svg class="ic tab-ic" aria-hidden="true"><use href="#i-users"></use></svg>
+          {{ t('Activos') }}</button>
         <button class="ppl-tab" type="button" :class="{ on: tab === 'req' }"
-          @click="tab = 'req'">{{ t('Solicitudes') }}
+          @click="tab = 'req'">
+          <svg class="ic tab-ic" aria-hidden="true"><use href="#i-userplus"></use></svg>
+          {{ t('Solicitudes') }}
           <i class="ppl-badge" v-if="nReq">{{ nReq }}</i></button>
       </div>
 
@@ -7190,6 +7202,7 @@ const PeoplePanel = {
           <div class="list-empty empty-mood" v-else-if="nobodyOnline">
             <svg class="ic mood-ic" aria-hidden="true"><use href="#i-users"></use></svg>
             <p class="mood-line">{{ t(emptyLine) }}</p>
+            <p class="mood-sub">{{ t('Cuando tus contactos se conecten, aparecerán en esta lista.') }}</p>
           </div>
         </div>
       </template>
@@ -7246,8 +7259,14 @@ const PeoplePanel = {
               </span>
             </div>
           </template>
-          <div class="list-empty" v-if="!sentF.length && !recF.length">
-            {{ qReq.trim() ? t('Sin resultados') : t('No hay solicitudes pendientes') }}
+          <div class="list-empty" v-if="!sentF.length && !recF.length && qReq.trim()">
+            {{ t('Sin resultados') }}
+          </div>
+          <!-- W66f: sin solicitudes → icono + frase amable (la búsqueda
+               vacía se queda con "Sin resultados" de siempre). -->
+          <div class="list-empty empty-mood" v-else-if="!sentF.length && !recF.length">
+            <svg class="ic mood-ic" aria-hidden="true"><use href="#i-userplus"></use></svg>
+            <p class="mood-line">{{ t('Parece que aún no hay solicitudes. ¡Pronto serás famoso!') }}</p>
           </div>
         </div>
       </template>
@@ -8439,10 +8458,10 @@ export const ChatShell = {
          W65: en móvil la URL ?settings=main abre la portada de categorías;
          un enlace a una categoría concreta entra directo a ella. */
       if (tab) store.settingsTab = tab;
-      /* La lista de Archivados queda detrás de Ajustes; si sobrevive, el
-         siguiente toque en la pestaña solo la apaga (doble pulsación).
-         Igual que mobileChats/goPeople: abrir Ajustes reinicia la lista. */
-      store.showArchived = false;
+      /* W66f: Archivados NO se apaga aquí. La velada del modal (0,16 s)
+         deja ver el fondo y pasar de Archivados a Chats de golpe
+         parpadeaba: la lista se queda detrás mientras Ajustes entra y se
+         limpia al cerrar (close/openWallPanel), igual que antes. */
       store.settingsAtHome = !tab && window.innerWidth <= 760;
       store.settingsOpen = true;
     };
@@ -8816,7 +8835,17 @@ export const ChatShell = {
        Archivados el toque se queda ahí (salir es trabajo de la
        flecha "Volver a Chats"). */
     const goArchived = function () {
-      if (store.archiveLockPrompt || store.showArchived) return;
+      /* W66f: con Ajustes abierto ENCIMA de Archivados (la lista ya no se
+         apaga al abrir Ajustes para no parpadear), el toque en la pestaña
+         cierra Ajustes y deja ver la lista tal cual estaba. */
+      if (store.showArchived) {
+        if (store.settingsOpen) {
+          store.settingsOpen = false;
+          store.settingsAtHome = false;
+        }
+        return;
+      }
+      if (store.archiveLockPrompt) return;
       enterArchived();
     };
     const goPeople = function () {

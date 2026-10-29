@@ -669,6 +669,10 @@ const EN = {
     'Zero activity! Everyone is offline or hunting for coffee.',
   'Parece que el servidor está solo en este momento.':
     'Looks like the server is all alone right now.',
+  'Cuando tus contactos se conecten, aparecerán en esta lista.':
+    'When your contacts come online, they will appear in this list.',
+  'Parece que aún no hay solicitudes. ¡Pronto serás famoso!':
+    'No requests just yet. You will be famous soon!',
   'No hay solicitudes pendientes': 'No pending requests',
   'Administrar': 'Manage',
   'Enviar solicitud de amistad': 'Send friend request',
