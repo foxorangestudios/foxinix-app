@@ -17,7 +17,7 @@ import { t } from './i18n.js';
 import { toast } from './store.js';
 import {
   getDownloadBlob, saveDownload, requestPersistence,
-  fetchBlob, saveBlobToDevice, androidBridge,
+  fetchBlob, saveBlobToDevice, saveBlobToDisk, androidBridge,
   dlCategory, dlTypeInfo,
 } from './downloads.js';
 
@@ -252,14 +252,25 @@ function ensureOverlay(frame) {
   return ov;
 }
 
-/* Pinta el estado de error/cancelado: anillo fuera, botón como ↻. */
+/* W66g: tamaño legible para el título del botón de reintento. */
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1).replace('.', ',') + ' MB';
+}
+
+/* Pinta el estado de error/cancelado: anillo fuera, botón como ⤓.
+   W66g: icono de DESCARGA (antes ↻ "Reintentar") y, si se llegó a saber
+   el total, el título lleva el tamaño del archivo. */
 function paintErr(frame, st) {
   st.dead = true;
   if (st.xhr) { try { st.xhr.abort(); } catch (e) {} }
   /* W22: si el marco era "sin anillo" (imagen sin resolución conocida)
      el overlay aparece aquí igual, para poder reintentar. */
   ensureOverlay(frame);
-  setBtnIcon(frame.querySelector('.mf-btn'), '#i-refresh', t('Reintentar descarga'));
+  const sz = st.total > 0 ? ' (' + fmtBytes(st.total) + ')' : '';
+  setBtnIcon(frame.querySelector('.mf-btn'), '#i-download',
+    t('Reintentar descarga') + sz);
   setDlCls(frame, 'dl-err');
 }
 
@@ -311,7 +322,7 @@ function runDl(url, frame, onDone, explicit) {
   }
   setDlCls(frame, 'dl-on');
 
-  const state = { url: url, xhr: null, dead: false, onRetry: null };
+  const state = { url: url, xhr: null, dead: false, onRetry: null, total: 0 };
   frame.__dlState = state;
   state.onRetry = function () { runDl(url, frame, onDone, explicit); };
 
@@ -325,6 +336,7 @@ function runDl(url, frame, onDone, explicit) {
     try { xhr.setRequestHeader('X-Fox-Download', '1'); } catch (e) {}
   }
   xhr.onprogress = function (ev) {
+    if (ev.lengthComputable && ev.total > 0) state.total = ev.total;
     if (fg && ev.lengthComputable && ev.total > 0) {
       if (svg) svg.classList.remove('indet');
       fg.setAttribute('stroke-dashoffset',
@@ -557,7 +569,11 @@ export function startDownload(url, filename, frame, mime, kind) {
      archivo (openAppDownload) en vez de llamar aquí. */
   getDownloadBlob(url).then(function (saved) {
     if (saved) {
-      toast(t('Ya está descargado en la app'), 'info');
+      /* W66g: el archivo ya está en los datos de la app, pero el botón
+         de DESCARGAR debe exportarla al dispositivo igual: antes solo
+         avisaba "Ya está descargado en la app" y el archivo nunca
+         llegaba al PC (visores y descargas explícitas). */
+      saveOne(saved);
       return;
     }
     const raw = getBlob(url);

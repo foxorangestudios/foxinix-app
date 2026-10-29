@@ -471,6 +471,14 @@ export async function bootstrap() {
      usuario al server (con retry401: refresca el token si venció). */
   await resourcesReady();
   store.bootPhase = 'session';
+  /* W66g: en un login normal el access solo vive en memoria (el refresh
+     es cookie HttpOnly): al recargar, la primera petición salía SIN
+     Bearer, devolvía 401 y se auto-resolvía con retry401 —funcionaba,
+     pero la consola se llenaba de 401s. Se renueva ANTES. Si falla, el
+     /users/me de abajo replica el comportamiento de siempre. */
+  if (!session.access) {
+    try { await renewSession(); } catch (e) {}
+  }
   try {
     const r = await api('GET', '/api/users/me', undefined, { retry401: true });
     // W6: si la sesión se cerró durante el arranque, no revivir el usuario

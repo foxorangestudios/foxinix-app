@@ -6209,7 +6209,11 @@ const ProfilePanel = {
             <svg class="ic"><use href="#i-x"></use></svg>
           </button>
         </header>
-        <div class="pp-loading" v-if="store.profile.loading">{{ t('Cargando perfil…') }}</div>
+        <!-- W66g: misma animación de "cuadritos" que al cargar un chat,
+             aquí SIN el texto de "Cargando…" -->
+        <div class="pp-loading" v-if="store.profile.loading">
+          <span class="cubes"><span class="cube"></span><span class="cube"></span></span>
+        </div>
         <div class="pp-loading" v-else-if="store.profile.error">{{ t(store.profile.error) }}</div>
         <template v-else-if="store.profile.user">
           <div class="pp-body pf-body">
@@ -6692,7 +6696,10 @@ const ChatInfoPanel = {
           <div class="pp-loading">{{ t(infoError) }}</div>
         </div>
         <div class="pp-body pp-left" v-else-if="loading">
-          <div class="pp-loading">{{ t('Cargando miembros…') }}</div>
+          <!-- W66g: cuadritos animados como al cargar un chat (sin texto) -->
+          <div class="pp-loading">
+            <span class="cubes"><span class="cube"></span><span class="cube"></span></span>
+          </div>
         </div>
         <div class="pp-body pp-left" v-else-if="members.length">
           <!-- W27: foto del grupo; subirla solo owner/admin. W27b: al
@@ -7816,9 +7823,18 @@ export const ChatShell = {
       }
       try {
         /* W20: si hay un micrófono elegido en Ajustes → Chat, se usa ese
-           (deviceId exact); si ya no existe o falla, el del sistema. */
+           (deviceId exact); si ya no existe o falla, el del sistema.
+           W66g: AGC/ruido/eco explícitos: sin autoGainControl muchos
+           móviles graban las notas de voz bajísimas y no se escuchan. */
+        const recAudio = {
+          autoGainControl: true,
+          noiseSuppression: true,
+          echoCancellation: true,
+        };
         recStream = await navigator.mediaDevices.getUserMedia({
-          audio: store.micDev ? { deviceId: { exact: store.micDev } } : true,
+          audio: store.micDev
+            ? Object.assign({ deviceId: { exact: store.micDev } }, recAudio)
+            : recAudio,
         });
       } catch (e) {
         let lastErr = e;

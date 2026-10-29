@@ -1435,7 +1435,11 @@ audio.b-audio { display: none; }
 .msg.mine .bubble.emo-big .b-meta .t-read,
 .msg.mine .bubble.gif .b-meta .t-read,
 .msg.mine .bubble.sticker .b-meta .t-read {
-  color: #4a90e2;
+  /* W66g: azul CLARO + sombra fina: sobre burbujas de acento fuerte
+     (naranja, rojo…) el azul medio se perdía; el claro destaca en
+     cualquier color y la sombra lo separa también de fondos claros. */
+  color: #a9d4ff;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .3));
   width: 17px;
   height: 17px;
 }
@@ -4885,10 +4889,18 @@ body { font-size: calc(15px * var(--fs)); }
 .call-participants.group {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-auto-rows: minmax(105px, 1fr);
+  /* W66g: filas HORIZONTALES fijas: antes (minmax(105px, 1fr)) una fila
+     suelta —p. ej. un grupo con un solo miembro "esperando a que se
+     unan"— se estiraba ~500 px de alto y quedaba un rectángulo
+     vertical feo. */
+  grid-auto-rows: 160px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   grid-gap: 8px;   /* grid-gap sí existe en FF78; gap flex no */
 }
 .call-participants.group > * + * { margin-top: 0; }
+.call-participants.group > .call-tile:only-child { grid-column: 1 / -1; }
 .call-participants.group.solo { grid-template-columns: minmax(0, 1fr); }
 .call-participants.group .call-tile { min-height: 105px; }
 .call-peer-video {
@@ -5436,6 +5448,17 @@ body { font-size: calc(15px * var(--fs)); }
   border-color: rgba(255, 255, 255, .35);
   color: #fff;
 }
+/* W66g: lo mismo para el play, la hora y la barra: en tema claro
+   var(--t1)/var(--t2) salían casi NEGROS sobre el acento (el hover con
+   --panel2 pintaba un disco gris encima de la burbuja de color). */
+.msg.mine .b-player .au-btn,
+.msg.mine .b-afile .au-btn { color: rgba(255, 255, 255, .92); }
+.msg.mine .b-player .au-btn:hover,
+.msg.mine .b-afile .au-btn:hover { background: rgba(255, 255, 255, .16); }
+.msg.mine .b-player .au-time,
+.msg.mine .b-afile .au-time { color: rgba(255, 255, 255, .7); }
+.msg.mine .b-afile .au-seek { background: rgba(255, 255, 255, .25); }
+.msg.mine .b-afile .au-seek i { background: rgba(255, 255, 255, .92); }
 
 /* ---- W36e: la pelotica del modal "Tu perfil" al doble de tamaño ---- */
 .meprof .mp-view .av-wrap.on::after {
