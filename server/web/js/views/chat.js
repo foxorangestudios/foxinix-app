@@ -6961,6 +6961,26 @@ const WallPreview = {
    Panel Personas/Amigos del sidebar: pestañas "Activos" (amigos, en
    línea primero) y "Solicitudes" (bloques Enviados y Recibidas con
    Aceptar / Rechazar / Cancelar). La app arranca en esta vista. */
+/* W66e: frases del estado vacío de "Activos" cuando no hay nadie en
+   línea — las tres primeras van directas y el resto con un toque de
+   humor; se elige una al azar (nunca la misma dos veces seguidas). */
+const OFFLINE_LINES = [
+  'No hay nadie en línea por ahora.',
+  'Parece que no hay contactos activos en este momento.',
+  'Sin conexiones activas.',
+  'Todo muy silencioso por aquí... No hay nadie en línea.',
+  'Silencio total. Tus contactos están desconectados.',
+  '¡Cero actividad! Todos andan desconectados o buscando café.',
+  'Parece que el servidor está solo en este momento.',
+];
+function _pickOffLine(prev) {
+  let i = Math.floor(Math.random() * OFFLINE_LINES.length);
+  if (OFFLINE_LINES[i] === prev && OFFLINE_LINES.length > 1) {
+    i = (i + 1) % OFFLINE_LINES.length;
+  }
+  return OFFLINE_LINES[i];
+}
+
 const PeoplePanel = {
   name: 'PeoplePanel',
   setup: function () {
@@ -7000,6 +7020,18 @@ const PeoplePanel = {
       const out = [];
       for (let i = 0; i < fs.length; i++) if (friendOn(fs[i])) out.push(fs[i]);
       return out;
+    });
+
+    /* W66e: "nadie en línea" (con amigos pero todos desconectados) →
+       frase aleatoria con icono grande. Se renueva cada vez que la lista
+       queda vacía; la inicial ya viene al azar en cada carga. */
+    const nobodyOnline = Vue.computed(function () {
+      return loaded.value && people.value.friends.length > 0
+        && !activeOnline.value.length;
+    });
+    const emptyLine = Vue.ref(_pickOffLine());
+    Vue.watch(nobodyOnline, function (on) {
+      if (on) emptyLine.value = _pickOffLine(emptyLine.value);
     });
 
     /* Búsqueda de personas para enviar solicitud (mismo debounce que la
@@ -7090,6 +7122,7 @@ const PeoplePanel = {
 
     return {
       store, tab, q, results, people, nReq, loaded, activeOnline,
+      nobodyOnline, emptyLine,   /* W66e: frase aleatoria "sin nadie" */
       lineOf, isFriend, sentTo, openFriend, send, cancel, reject, accept,
       qReq, sentF, recF, buscarPersonas,
       dotClass, mediaUrl,
@@ -7153,8 +7186,10 @@ const PeoplePanel = {
           <div class="list-empty" v-if="loaded && !people.friends.length">
             {{ t('Aún no tienes amigos. ¡Busca personas arriba para empezar!') }}
           </div>
-          <div class="list-empty" v-else-if="loaded && !activeOnline.length">
-            {{ t('Ningún amigo en línea') }}
+          <!-- W66e: icono grande + frase aleatoria (directa o con humor) -->
+          <div class="list-empty empty-mood" v-else-if="nobodyOnline">
+            <svg class="ic mood-ic" aria-hidden="true"><use href="#i-users"></use></svg>
+            <p class="mood-line">{{ t(emptyLine) }}</p>
           </div>
         </div>
       </template>

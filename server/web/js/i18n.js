@@ -657,6 +657,18 @@ const EN = {
   'Aún no tienes amigos. ¡Busca personas arriba para empezar!':
     'You have no friends yet. Search for people above to get started!',
   'Ningún amigo en línea': 'No friends online',
+  'No hay nadie en línea por ahora.': 'No one is online right now.',
+  'Parece que no hay contactos activos en este momento.':
+    'Looks like there are no active contacts at this moment.',
+  'Sin conexiones activas.': 'No active connections.',
+  'Todo muy silencioso por aquí... No hay nadie en línea.':
+    'All very quiet around here... No one is online.',
+  'Silencio total. Tus contactos están desconectados.':
+    'Total silence. Your contacts are offline.',
+  '¡Cero actividad! Todos andan desconectados o buscando café.':
+    'Zero activity! Everyone is offline or hunting for coffee.',
+  'Parece que el servidor está solo en este momento.':
+    'Looks like the server is all alone right now.',
   'No hay solicitudes pendientes': 'No pending requests',
   'Administrar': 'Manage',
   'Enviar solicitud de amistad': 'Send friend request',
