@@ -1053,8 +1053,7 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
 }
 .msg.anim { animation: msgIn .2s ease-out; }
 .msg.tight { margin-top: 2px; }
-.msg.mine { }
-.msg.mine.has-av { justify-content: flex-end; }
+.msg.mine { justify-content: flex-end; }
 .msg.system { justify-content: center; }
 /* W29c/W66: columna junto a cada mensaje (propios y ajenos); la cara —
    foto o letra— va al lado de la burbuja, con una flechita que apunta
@@ -1152,13 +1151,8 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
   border-bottom: 7px solid transparent;
   border-left: 9px solid var(--bubble-me);
 }
-/* W66: el avatar propio se empuja al borde derecho con margin-right:auto;
-   la burbuja queda a su izquierda. */
-.msg.mine.has-av .msg-av { margin-right: auto; }
-/* W66: cuando NO hay avatar ni hora, el mensaje propio no deja hueco
-   vacío para el avatar/flecha: la burbuja va a la derecha ocupando el
-   espacio con margin-left:auto, sin margen izquierdo de sobra. */
-.msg.mine:not(.has-av) .bubble { margin-left: auto; }
+/* W66: la burbuja propia se alinea a la derecha; el avatar va a su
+   derecha (justo después, con el gap del flex). */
 .msg.mine .bubble {
   background: var(--bubble-me);
   color: var(--bubble-me-fg, #fff);
