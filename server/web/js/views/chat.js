@@ -2234,13 +2234,13 @@ const MessageRow = {
     };
   },
   template:
-    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in, \'has-av\': row.avCol && row.showTime }" @animationend="animEnd">' +
+    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in, \'has-av\': row.avCol && (row.mine ? row.showTime : (row.showTime || row.showSender)) }" @animationend="animEnd">' +
       /* W66: avatar del remitente junto a cada mensaje (propios y ajenos,
-         grupos y MDs). Solo se muestra cuando hay hora (no en mensajes
-         continuos del mismo remitente sin hora). Para los entrantes va a
-         la izquierda de la burbuja; para los propios, a la derecha.
-         La burbuja lleva una flechita que apunta al avatar. */
-      '<span class="msg-av" v-if="row.avCol && !row.mine && row.showTime" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
+         grupos y MDs). En los entrantes aparece cuando hay nombre (primero
+         de la tanda) u hora —nunca un nombre sin cara—; en los propios,
+         cuando hay hora. Para los entrantes va a la izquierda de la
+         burbuja; para los propios, a la derecha. */
+      '<span class="msg-av" v-if="row.avCol && !row.mine && (row.showTime || row.showSender)" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
         '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="onAvatarError()">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +

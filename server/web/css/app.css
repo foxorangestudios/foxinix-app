@@ -1156,6 +1156,10 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
    se reserva el mismo espacio (28px avatar + 8px gap) para que la
    burbuja quede en la misma línea que los mensajes con avatar. */
 .msg.mine:not(.has-av) .bubble { margin-right: 36px; }
+/* W66: los entrantes sin avatar (continuaciones sin nombre ni hora)
+   reservan la misma columna para que TODAS las burbujas del remitente
+   arranquen en la misma línea. */
+.msg:not(.mine):not(.system):not(.has-av) .bubble { margin-left: 36px; }
 .msg.mine .bubble {
   background: var(--bubble-me);
   color: var(--bubble-me-fg, #fff);
