@@ -918,6 +918,12 @@ html.native-bg *::after {
   flex: none;
   user-select: none;
 }
+.avatar-initial {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%;
+  font-weight: 600;
+  font-size: inherit;
+}
 /* W59: si hay foto, el fondo del contenedor desaparece. Así un PNG con
    transparencia muestra el fondo real (portada, chat o panel), no un
    círculo de color. Las iniciales conservan el fondo porque no llevan
@@ -1038,7 +1044,7 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
 }
 .day-pill:first-child { margin-top: 0; }
 
-.msg { display: flex; margin-top: 6px; }
+.msg { display: flex; gap: 8px; margin-top: 6px; }
 /* W29a: los mensajes nuevos aparecen "agrandándose" (sólo
    transform/opacity: FF78 no permite otras propiedades animables) */
 @keyframes msgIn {
@@ -1049,14 +1055,13 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
 .msg.tight { margin-top: 2px; }
 .msg.mine { justify-content: flex-end; }
 .msg.system { justify-content: center; }
-/* W29c: columna junto a cada mensaje entrante de grupo (burbujas
-   alineadas); la cara —foto o letra— solo en el primero de la tanda,
-   a la altura del nombre del emisor. */
+/* W29c/W66: columna junto a cada mensaje (propios y ajenos); la cara —
+   foto o letra— va al lado de la burbuja, con una flechita que apunta
+   al avatar desde la burbuja. */
 .msg-av {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  margin-right: 6px;
   flex: none;
   align-self: flex-start;
   display: flex;
@@ -1067,7 +1072,7 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
 .msg-av.is-av { background: var(--panel2); color: var(--t2); }
 .msg-av.is-av.has-photo { background: transparent; }
 .msg-av img { width: 100%; height: 100%; object-fit: cover; }
-.msg-av i { font-style: normal; line-height: 1; font-size: 11px; font-weight: 700; }
+.msg-av i { font-style: normal; line-height: 1; font-size: 12px; font-weight: 700; }
 /* W29c: fila de "escribiendo…" con nombre (+ avatares apilados) */
 .typ-row { align-items: flex-end; }
 /* W37a: aparece/desaparece con desvanecido + leve impulso (sin brusco) */
@@ -1129,6 +1134,28 @@ button.load-older:hover { color: var(--t1); background: var(--row-hover); }
   /* W7: un poco más anchas para que la hora entre cómoda */
   max-width: min(72%, 620px);
   min-width: 74px;
+}
+/* W66: flechita en la burbuja que apunta al avatar del remitente.
+   En mensajes ajenos sobresale por la izquierda; en los propios, por
+   la derecha. El color coincide con el fondo de la burbuja. */
+.bubble::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  width: 0;
+  height: 0;
+}
+.msg:not(.mine) .bubble::after {
+  left: -8px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 9px solid var(--bubble-you);
+}
+.msg.mine .bubble::after {
+  right: -8px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 9px solid var(--bubble-me);
 }
 .msg.mine .bubble {
   background: var(--bubble-me);
@@ -2484,7 +2511,7 @@ html.wallimg .chat-pane.people-pane::after { content: none; }
 .ap-sw:hover { transform: scale(1.1); }
 .ap-sw.on { border-color: var(--t1); }
 
-.ap-walls { display: flex; flex-wrap: wrap; padding: 4px 16px 16px; }
+.ap-walls { display: flex; flex-wrap: wrap; padding: 4px 16px 16px; gap: 8px; }
 .ap-wl {
   display: inline-flex;
   align-items: center;
@@ -3689,14 +3716,41 @@ body { font-size: calc(15px * var(--fs)); }
   touch-action: none;
   transition: transform .12s ease-out;
 }
-.lightbox .lb-img:active { transition: none; }  /* sin "resbalón" al arrastrar */
-.lb-close {
+.lightbox .lb-img:active { transition: none; }
+.lb-btn {
   position: absolute;
-  top: 12px; right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
   color: #fff;
-  background: rgba(0, 0, 0, .35);
+  background: rgba(0, 0, 0, .45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background .15s ease;
+  z-index: 2;
 }
-.lb-close:hover { background: rgba(0, 0, 0, .55); color: #fff; }
+.lb-btn:hover { background: rgba(0, 0, 0, .65); }
+.lb-close { top: 12px; right: 12px; }
+.lb-download { top: 12px; right: 60px; width: auto; padding: 0 12px; border-radius: 20px; }
+.lb-filename {
+  position: absolute;
+  top: 16px; left: 16px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0,0,0,.5);
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 2;
+}
 .lb-hint {
   position: absolute;
   bottom: 16px; left: 0; right: 0;
@@ -3881,6 +3935,31 @@ body { font-size: calc(15px * var(--fs)); }
 }
 .cs-meta > * + * { margin-left: 8px; }
 .cap-strip .icon-btn { flex: none; }
+/* W62: con varios archivos la ficha es una lista real — cada archivo
+   con su miniatura/icono, nombre, tipo/tamaño y su quitar individual
+   (sin flex-gap: Mypal 78 no lo entiende). */
+.cap-strip.multi {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 4px 8px 4px 8px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.cap-strip.multi > * + * { margin-left: 0; }
+.cap-strip.multi .cs-item {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 0;
+}
+.cap-strip.multi .cs-item + .cs-item {
+  border-top: 1px solid var(--border);
+}
+.cap-strip.multi .cs-item > .cs-thumb,
+.cap-strip.multi .cs-item > .cs-ic { margin-right: 10px; }
+.cap-strip.multi .cs-thumb { width: 34px; height: 34px; }
+.cap-strip.multi .cs-name { font-size: 13.5px; }
+.cap-strip.multi .cs-item > .icon-btn { margin-left: auto; flex: none; }
 
 /* soltar archivos sobre la conversación */
 .drop-hint {
@@ -3897,20 +3976,11 @@ body { font-size: calc(15px * var(--fs)); }
   pointer-events: none;
 }
 
-/* descarga directa en el lightbox */
-.lb-dl {
-  position: absolute;
-  top: 12px; right: 52px;
-  color: #fff;
-  background: rgba(0, 0, 0, .35);
-}
-.lb-dl:hover { background: rgba(0, 0, 0, .55); color: #fff; }
 /* W54c: con la foto ampliada los controles solo estorban; vuelven al
    ajustar (o al reducir la pinza hasta 1x). */
-.lightbox .lb-close,
-.lightbox .lb-dl { transition: opacity .12s ease-out; }
-.lightbox.lb-zoomed .lb-close,
-.lightbox.lb-zoomed .lb-dl {
+.lightbox .lb-btn { transition: opacity .12s ease-out; }
+.lightbox.lb-zoomed .lb-btn,
+.lightbox.lb-zoomed .lb-filename {
   opacity: 0;
   pointer-events: none;
 }
@@ -5026,8 +5096,10 @@ body { font-size: calc(15px * var(--fs)); }
   border: 1px solid rgba(255, 255, 255, .18);
   box-shadow: 0 4px 16px rgba(0, 0, 0, .45);
 }
-/* W29k: burbuja corta que quepa "[ojo] Mostrar Spoiler" sin cortar */
-.bubble.is-spoiled { min-width: 160px; }
+/* W29k: burbuja corta que quepa "[ojo] Mostrar Spoiler" sin cortar.
+   W63: el fondo difuminado va 8px por fuera + blur(16px) + scale(1.06);
+   SIN recortar el halo se salía del marco de la burbuja. */
+.bubble.is-spoiled { min-width: 160px; overflow: hidden; }
 .b-spoil-ov:active { background: rgba(0, 0, 0, .84); }
 .b-spoil-ov.has-bg:active { background: rgba(0, 0, 0, .28); }
 /* Mientras la capa tapa, el contenido NO se pinta (aunque sea con
@@ -5544,22 +5616,23 @@ body { font-size: calc(15px * var(--fs)); }
   .call-action,
   .add-member-action { display: none; }
 
-  /* Personas: app bar propio en vez de una flecha suelta de web. */
+  /* Personas: reutiliza la MISMA barra que Chats/Archivados (.side-head);
+     aquí sólo cambia el contenido del título. */
   .mobile-page-head {
     display: flex;
     align-items: center;
     flex: none;
     height: 56px;
     height: calc(56px + env(safe-area-inset-top, 0px));
-    padding: env(safe-area-inset-top, 0px) 16px 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: calc(14px + env(safe-area-inset-left, 0px));
+    padding-right: calc(6px + env(safe-area-inset-right, 0px));
     background: var(--panel);
     border-bottom: 1px solid var(--border);
   }
-  .mobile-page-head b {
-    color: var(--t0);
-    font-size: 19px;
-    font-weight: 700;
-  }
+  /* Mismas métricas que .side-head > .icon-btn (40px + 4px de hueco). */
+  .mobile-page-head > .icon-btn { width: 40px; height: 40px; }
+  .mobile-page-head > .icon-btn + .icon-btn { margin-left: 4px; }
   .mobile-page-logo {
     display: block;
     flex: none;
@@ -5730,6 +5803,22 @@ body { font-size: calc(15px * var(--fs)); }
     font-size: 18px;
   }
   .modal.settings > header .icon-btn { display: none; }
+  .modal.settings > header .m-head-title { display: flex; align-items: center; gap: 4px; }
+  .st-back {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: none;
+    color: var(--accent);
+    cursor: pointer;
+    border-radius: 50%;
+    margin-right: 4px;
+    flex: none;
+  }
+  .st-back:active { background: var(--accent-wash); }
   .modal.settings .m-tabs { padding-top: 6px; }
 
   /* ---------- login/registro a pantalla completa ---------- */
@@ -6036,7 +6125,9 @@ body { font-size: calc(15px * var(--fs)); }
   color: var(--t2);
   transform: rotate(180deg);
 }
-.st-back { display: none; }
+@media (min-width: 761px) {
+  .st-back { display: none; }
+}
 .st-privacy-state {
   display: flex;
   align-items: center;
@@ -6274,23 +6365,12 @@ button.dl-group .dl-group-head { pointer-events: none; }
     padding-bottom: 58px;
     padding-bottom: calc(58px + var(--sab, 0px));
   }
-  .modal.settings > header .icon-btn { display: inline-flex; }
+  .modal.settings > header .icon-btn { display: none; }
+  .modal.settings > header .m-head-title { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+  /* El título de la categoría ya está en la barra superior */
+  .modal.settings .st-body > .st-title { display: none; }
   .modal.settings .m-tabs { display: none; }
   .st-cols { flex-direction: column; }
-  .st-back {
-    display: flex;
-    align-items: center;
-    width: 100%;
-    padding: 11px 16px 3px;
-    border: 0;
-    background: none;
-    color: var(--accent);
-    font: inherit;
-    font-size: 13.5px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .st-back .ic { margin-right: 6px; }
   .st-title { padding-top: 6px; }
 
   /* El visor multimedia ocupa toda la pantalla en el teléfono. */
@@ -6458,6 +6538,9 @@ button.dl-group .dl-group-head { pointer-events: none; }
 .offline-box .ic-lg { width: 48px; height: 48px; margin-bottom: 12px; opacity: .8; }
 .offline-box h3 { margin: 0 0 8px; font-size: 18px; }
 .offline-box p { margin: 0 0 16px; color: var(--t2); font-size: 14px; }
+.offline-warning { border: 2px solid #e6a23c; }
+.offline-warning .ic-lg { color: #e6a23c; opacity: 1; }
+.offline-warning .ic-lg[href="#i-wifi-off"] { color: #e5534b; }
 
 /* W62: modal de actualización de versión */
 .version-overlay {

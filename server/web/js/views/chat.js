@@ -1103,7 +1103,7 @@ let currentAudioEl = null;
 const MessageRow = {
   components: { EmojiPicker },
   props: { row: { type: Object, required: true } },
-  emits: ['imgload', 'reply', 'react', 'openprofile', 'zoom', 'saveedit', 'upcancel', 'upretry', 'menu'],
+  emits: ['imgload', 'reply', 'react', 'openprofile', 'zoom', 'saveedit', 'upcancel', 'upretry', 'menu', 'scrolltoreply'],
   setup: function (props, ctx) {
     const emit = ctx.emit;
     /* W17: el picker vive en store.reactFor (antes era un ref local por
@@ -2235,9 +2235,11 @@ const MessageRow = {
   },
   template:
     '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in }" @animationend="animEnd">' +
-      /* W29c: columna de avatar en todos los entrantes de grupo; la
-         cara (foto/letra) solo donde se ve el nombre del emisor */
-      '<span class="msg-av" v-if="row.avCol" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
+      /* W66: avatar del remitente junto a cada mensaje (propios y ajenos,
+         grupos y MDs). Para los entrantes va a la izquierda de la
+         burbuja; para los propios, a la derecha. La burbuja lleva una
+         flechita que apunta al avatar. */
+      '<span class="msg-av" v-if="row.avCol && !row.mine" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
         ':title="row.avatar ? row.avatar.name : \'\'">' +
         '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="onAvatarError()">' +
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
@@ -2316,7 +2318,7 @@ const MessageRow = {
         '</div>' +
         /* W13: etiqueta de mensaje reenviado (estilo WhatsApp) */
         '<div class="b-fwd" v-if="row.ref.forwarded">{{ t(\'Reenviado\') }}</div>' +
-        '<div v-if="row.ref.reply_to" class="b-reply">' +
+        '<div v-if="row.ref.reply_to" class="b-reply" style="cursor:pointer" @click="$emit(\'scrolltoreply\', row.ref.reply_to.id)">' +
           '<span class="br-name">{{ replyName(row) }}</span>' +
           '<span class="br-text">{{ replyText(row) }}</span>' +
         '</div>' +
@@ -2606,6 +2608,13 @@ const MessageRow = {
           '</button>' +
         '</div>' +
       '</div>' +
+      /* W66: avatar del remitente a la derecha de la burbuja para los
+         mensajes propios (la flechita apunta hacia él). */
+      '<span class="msg-av" v-if="row.avCol && row.mine" :class="{ \'is-av\': row.avatar, \'has-photo\': !!(row.avatar && row.avatar.url) }" ' +
+        ':title="row.avatar ? row.avatar.name : \'\'">' +
+        '<img v-if="row.avatar && row.avatar.url && !avErr" :src="mediaUrl(row.avatar.url)" alt="" loading="lazy" decoding="async" crossorigin="anonymous" @error="onAvatarError()">' +
+        '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
+      '</span>' +
     '</div>',
 };
 
@@ -2929,7 +2938,7 @@ function askDeleteAccount() {
 const SettingsModal = {
   setup: function () {
     /* Acentos/fondos: viven en el dispositivo, no en la cuenta (W4). */
-    const accents = ['#ff751f', '#1f9dfa', '#7c6cf0', '#e64980', '#f59f00', '#e8590c'];
+    const accents = ['#ff751f', '#1f9dfa', '#7c6cf0', '#e64980', '#f59f00', '#e8590c', '#2f9e44'];
     const walls = [
       { val: '', name: 'Auto' },
       { val: '#0d1614', name: 'Petróleo' },
@@ -2978,6 +2987,13 @@ const SettingsModal = {
     const settingsHome = Vue.computed(function () {
       return settingsMobile.value && !!store.settingsAtHome;
     });
+    const currentTabName = Vue.computed(function () {
+      const tab = store.settingsTab;
+      for (let i = 0; i < tabs.length; i++) {
+        if (tabs[i].val === tab) return t(tabs[i].name);
+      }
+      return t('Ajustes');
+    });
     const setSettingsHome = function (v) {
       store.settingsAtHome = !!(v && settingsMobile.value);
     };
@@ -2991,9 +3007,15 @@ const SettingsModal = {
       store.settingsAtHome = false;
     });
 
-    const close = function () { store.settingsOpen = false; };
-    const setTab = function (tv) { store.settingsTab = tv; };
-    const openCat = function (tv) { setTab(tv); setSettingsHome(false); };
+    const close = function () { stopPreview(); store.settingsOpen = false; };
+    const setTab = function (tv) { stopPreview(); store.settingsTab = tv; };
+    const openCat = function (tv) {
+      stopPreview();
+      /* Sin categoría → portada de ajustes (?settings=main en móvil) */
+      if (!tv) { setSettingsHome(true); return; }
+      setTab(tv);
+      setSettingsHome(false);
+    };
     const goSettingsHome = function () { setSettingsHome(true); };
     const pickTheme = function (m) { setTheme(m); };
     const pickAccent = function (c) { setAccent(c); };
@@ -3094,10 +3116,10 @@ const SettingsModal = {
        se actualice en el acto al subir uno (localStorage no es reactivo). */
     const customMsgTone = Vue.ref(customTone('message'));
     const customCallTone = Vue.ref(customTone('call'));
-    const saveCustomTone = function (kind, dataUrl) {
+    const saveCustomTone = function (kind, dataUrl, fileName) {
       const obj = {
         id: 'custom-' + kind,
-        name: kind === 'call' ? t('Tono de llamada') : t('Tono de mensaje'),
+        name: fileName || (kind === 'call' ? t('Tono de llamada') : t('Tono de mensaje')),
         file: dataUrl,
       };
       try { localStorage.setItem('fm.p.customTone.' + kind, JSON.stringify(obj)); } catch (e) {}
@@ -3124,9 +3146,15 @@ const SettingsModal = {
     });
     let previewAudio = null;
     let previewTimer = null;
+    const previewingId = Vue.ref(null);   // id del tono reproduciéndose
+    const previewingKind = Vue.ref(null); // 'message' | 'call' — evita que ambos botones cambien con el mismo id
+    const msgToneInput = Vue.ref(null);
+    const callToneInput = Vue.ref(null);
     const stopPreview = function () {
       if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
       if (previewAudio) { try { previewAudio.pause(); previewAudio.src = ''; } catch (e) {} previewAudio = null; }
+      previewingId.value = null;
+      previewingKind.value = null;
     };
     /* Tono "predeterminado": pitido generado con Web Audio (no depende de archivos). */
     const playBeep = function () {
@@ -3143,25 +3171,28 @@ const SettingsModal = {
       ctx.close().catch(function () {});
     };
     const previewTone = function (id, kind) {
+      /* Si ya se reproduce este tono, detener */
+      if (previewingId.value === id && previewingKind.value === kind) { stopPreview(); return; }
       stopPreview();
       const tone = (kind === 'call' ? callTones.value : messageTones.value).find(function (t) { return t.id === id; });
       if (!tone) return;
-      if (!tone.file) { playBeep(); return; }
+      previewingId.value = id;
+      previewingKind.value = kind;
+      if (!tone.file) { playBeep(); previewingId.value = null; previewingKind.value = null; return; }
       previewAudio = new Audio(toneSrc(tone.file));
       previewAudio.play().catch(function () {});
-      /* Un tono de llamada completo puede durar 30 s: la previsualización
-         se corta a los 8 s para no quedar sonando mientras se navega. */
-      previewTimer = setTimeout(stopPreview, 8000);
+      previewAudio.onended = function () { previewingId.value = null; previewingKind.value = null; };
+      /* Sin límite de tiempo: el tono suena hasta terminar */
     };
     const pickMessageTone = function (e) {
       const id = e && e.target ? e.target.value : messageTone.value;
       messageTone.value = id;
-      previewTone(id, 'message');
+      /* No auto-previsualizar: el usuario usa el botón */
     };
     const pickCallTone = function (e) {
       const id = e && e.target ? e.target.value : callTone.value;
       callTone.value = id;
-      previewTone(id, 'call');
+      /* No auto-previsualizar: el usuario usa el botón */
     };
     /* En el APK, target="_blank" no abre el navegador: usamos el puente
        nativo. En web/escritorio se deja el comportamiento normal (nueva
@@ -3181,27 +3212,59 @@ const SettingsModal = {
         r.readAsDataURL(file);
       });
     };
+    /* Valida duración y tamaño del archivo de audio */
+    const validateAudio = function (file, maxSec, maxKB) {
+      return new Promise(function (resolve, reject) {
+        if (file.size > maxKB * 1024) {
+          reject(new Error('El archivo supera ' + maxKB + ' KB'));
+          return;
+        }
+        const url = URL.createObjectURL(file);
+        const audio = new Audio();
+        audio.onloadedmetadata = function () {
+          URL.revokeObjectURL(url);
+          if (audio.duration > maxSec) {
+            reject(new Error('La duración maxima es ' + maxSec + ' segundos'));
+          } else {
+            resolve();
+          }
+        };
+        audio.onerror = function () {
+          URL.revokeObjectURL(url);
+          reject(new Error('Archivo de audio no valido'));
+        };
+        audio.src = url;
+      });
+    };
     const uploadMessageTone = async function (e) {
       const file = e.target && e.target.files && e.target.files[0];
       if (!file) return;
       try {
+        await validateAudio(file, 5, 200);
         const data = await readFileDataUrl(file);
-        saveCustomTone('message', data);
+        const name = file.name.replace(/\.[^.]+$/, '');
+        saveCustomTone('message', data, name);
         messageTone.value = 'custom-message';
-        previewTone('custom-message', 'message');
-        toast(t('Tono guardado'));
-      } catch (err) { toast(t('No se pudo subir el tono')); }
+        toast(t('Tono de mensaje guardado'));
+      } catch (err) {
+        toast(err.message || t('No se pudo subir el tono'), 'err');
+      }
+      e.target.value = '';
     };
     const uploadCallTone = async function (e) {
       const file = e.target && e.target.files && e.target.files[0];
       if (!file) return;
       try {
+        await validateAudio(file, 120, 1024);
         const data = await readFileDataUrl(file);
-        saveCustomTone('call', data);
+        const name = file.name.replace(/\.[^.]+$/, '');
+        saveCustomTone('call', data, name);
         callTone.value = 'custom-call';
-        previewTone('custom-call', 'call');
-        toast(t('Tono guardado'));
-      } catch (err) { toast(t('No se pudo subir el tono')); }
+        toast(t('Tono de llamada guardado'));
+      } catch (err) {
+        toast(err.message || t('No se pudo subir el tono'), 'err');
+      }
+      e.target.value = '';
     };
 
     /* ---- cambiar contraseña ---- */
@@ -3593,7 +3656,7 @@ const SettingsModal = {
 
     return {
       store, tabs, close, setTab, openCat, goSettingsHome,
-      settingsMobile, settingsHome,
+      settingsMobile, settingsHome, currentTabName,
       accents, walls, themes,
       pickTheme, pickAccent, pickWall, pickFont, pickLang, langs, toggle, setH12,
       setEmo,   /* W40 */
@@ -3616,8 +3679,9 @@ const SettingsModal = {
       /* W58: permisos del dispositivo */
       permRows, permReview, permRefresh,
       /* W63: tonos de mensaje y llamada */
-      messageTones, callTones, messageTone, callTone, previewTone,
+      messageTones, callTones, messageTone, callTone, previewTone, previewingId, previewingKind,
       pickMessageTone, pickCallTone, openToneNote, uploadMessageTone, uploadCallTone,
+      msgToneInput, callToneInput,
       doLogout: askLogout, doDelete: askDeleteAccount,
     };
   },
@@ -3627,8 +3691,15 @@ const SettingsModal = {
         role="dialog" :aria-label="t('Ajustes')">
         <header>
           <span class="m-head-title">
-            <svg class="mobile-page-logo" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
-            <b>{{ t('Ajustes') }}</b>
+            <template v-if="settingsMobile && !settingsHome">
+              <button class="st-back" type="button" @click="openCat(null)">
+                <svg class="ic"><use href="#i-back"></use></svg>
+              </button>
+              <b>{{ currentTabName }}</b>
+            </template>
+            <template v-else>
+              <b>{{ t('Ajustes') }}</b>
+            </template>
           </span>
           <button class="icon-btn" type="button" :title="t('Cerrar')" @click="close">
             <svg class="ic"><use href="#i-x"></use></svg>
@@ -3658,10 +3729,6 @@ const SettingsModal = {
         </div>
 
         <div class="st-body">
-          <button class="st-back" type="button" v-if="settingsMobile" @click="goSettingsHome">
-            <svg class="ic ic-sm"><use href="#i-back"></use></svg>
-            <span>{{ t('Ajustes') }}</span>
-          </button>
           <!-- ============ cuenta ============ -->
           <template v-if="store.settingsTab === 'cuenta'">
             <div class="st-title">{{ t('Cuenta') }}</div>
@@ -3839,19 +3906,14 @@ const SettingsModal = {
             <div class="st-sec">
               <div class="st-h">{{ t('Avisos') }}</div>
               <div class="st-row">
-                <div class="st-col"><b>{{ t('Sonido de notificaciones') }}</b><span>{{ t('Bip cuando llega un mensaje') }}</span></div>
+                <div class="st-col"><b>{{ t('Habilitar notificaciones') }}</b><span>{{ t('Hace sonar los mensajes') }}</span></div>
                 <label class="tgl"><input type="checkbox" :checked="store.prefs.sound"
                   @change="toggle('sound')"><span class="tgl-track"><span class="tgl-knob"></span></span></label>
               </div>
-              <div class="st-row" v-if="notifOn">
-                <div class="st-col"><b>{{ t('Avisos del sistema') }}</b><span>{{ notifLabel }}</span></div>
+              <div class="st-row" v-if="notifOn && nativeNotifAvail && notifPerm === 'denied'">
+                <div class="st-col"><b>{{ t('Permiso de notificaciones') }}</b><span>{{ t('Bloqueado por el sistema') }}</span></div>
                 <button class="btn btn-ghost btn-sm" type="button"
-                  v-if="nativeNotifAvail && notifPerm === 'denied'"
                   @click="openNotifSettings">{{ t('Abrir ajustes') }}</button>
-                <button class="btn btn-ghost btn-sm" type="button"
-                  v-else-if="notifPerm !== 'granted'"
-                  @click="askNotif">{{ t('Activar') }}</button>
-                <span class="st-ok" v-else>{{ t('Activas ✓') }}</span>
               </div>
             </div>
 
@@ -3862,35 +3924,40 @@ const SettingsModal = {
                 <div class="st-col"><b>{{ t('Tono de mensaje') }}</b><span>{{ t('Suena cuando llega un mensaje nuevo') }}</span></div>
                 <div class="tone-pick">
                   <select class="input tone-select" :value="messageTone" @change="pickMessageTone">
-                    <option v-for="t in messageTones" :key="t.id" :value="t.id">{{ t.name }}</option>
+                    <option v-for="tm in messageTones" :key="tm.id" :value="tm.id">{{ tm.name }}</option>
                   </select>
                   <button class="btn btn-ghost btn-sm tone-play" type="button"
-                    @click="previewTone(messageTone, 'message')">{{ t('Previsualizar') }}</button>
+                    :title="(previewingId === messageTone && previewingKind === 'message') ? t('Detener') : t('Previsualizar')"
+                    @click="previewTone(messageTone, 'message')">
+                    <svg class="ic ic-sm"><use :href="(previewingId === messageTone && previewingKind === 'message') ? '#i-pause' : '#i-play'"></use></svg>
+                  </button>
                 </div>
               </div>
               <div class="st-row">
                 <div class="st-col"><b>{{ t('Tono de llamada') }}</b><span>{{ t('Suena cuando te llaman') }}</span></div>
                 <div class="tone-pick">
                   <select class="input tone-select" :value="callTone" @change="pickCallTone">
-                    <option v-for="t in callTones" :key="t.id" :value="t.id">{{ t.name }}</option>
+                    <option v-for="tc in callTones" :key="tc.id" :value="tc.id">{{ tc.name }}</option>
                   </select>
                   <button class="btn btn-ghost btn-sm tone-play" type="button"
-                    @click="previewTone(callTone, 'call')">{{ t('Previsualizar') }}</button>
+                    :title="(previewingId === callTone && previewingKind === 'call') ? t('Detener') : t('Previsualizar')"
+                    @click="previewTone(callTone, 'call')">
+                    <svg class="ic ic-sm"><use :href="(previewingId === callTone && previewingKind === 'call') ? '#i-pause' : '#i-play'"></use></svg>
+                  </button>
                 </div>
               </div>
               <div class="st-row tone-upload">
-                <label class="tone-up">
-                  <input type="file" accept="audio/mpeg, audio/wav, audio/ogg" @change="uploadCallTone" style="display: none">
-                  <button class="btn btn-ghost btn-sm" type="button">{{ t('Subir tono de llamada') }}</button>
-                </label>
-                <label class="tone-up">
-                  <input type="file" accept="audio/mpeg, audio/wav, audio/ogg" @change="uploadMessageTone" style="display: none">
-                  <button class="btn btn-ghost btn-sm" type="button">{{ t('Subir tono de mensaje') }}</button>
-                </label>
+                <input type="file" ref="msgToneInput" accept="audio/mpeg, audio/wav, audio/ogg" @change="uploadMessageTone" style="display: none">
+                <input type="file" ref="callToneInput" accept="audio/mpeg, audio/wav, audio/ogg" @change="uploadCallTone" style="display: none">
+                <button class="btn btn-ghost btn-sm" type="button" @click="msgToneInput && msgToneInput.click()">
+                  <svg class="ic ic-sm"><use href="#i-plus"></use></svg>
+                  {{ t('Subir tono de mensaje') }} (max 5s, 200KB)
+                </button>
+                <button class="btn btn-ghost btn-sm" type="button" @click="callToneInput && callToneInput.click()">
+                  <svg class="ic ic-sm"><use href="#i-plus"></use></svg>
+                  {{ t('Subir tono de llamada') }} (max 120s, 1MB)
+                </button>
               </div>
-              <p class="st-hint tone-note">
-                <a href="https://tonosdellamada.es" target="_blank" rel="noopener" @click="openToneNote">{{ t('Si quieres más tonos de llamada graciosos puedes descargar en: https://tonosdellamada.es') }}</a>
-              </p>
             </div>
           </template>
 
@@ -4009,6 +4076,7 @@ const SettingsModal = {
             <div class="st-title">{{ t('Atajos') }}</div>
             <div class="st-sec">
               <div class="st-h">{{ t('Atajos de teclado') }}</div>
+              <p style="margin-bottom:10px;color:var(--txt-2);font-size:.85em;">NOTA: Estos atajos solamente funcionan en teclado físico.</p>
               <div class="kbd-row"><span class="kbd">Enter</span><span>{{ t('Enviar mensaje') }}</span></div>
               <div class="kbd-row"><span class="kbd">Shift + Enter</span><span>{{ t('Salto de línea') }}</span></div>
               <div class="kbd-row"><span class="kbd">Ctrl + Enter</span><span>{{ t('Enviar con “Enter para enviar” apagado') }}</span></div>
@@ -4425,7 +4493,7 @@ const MeProfileModal = {
                   <img v-if="store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)"
                     alt="" class="pf-zoom" :title="t('Ver foto')"
                     @click="viewMedia(store.user.avatar_url, 'foto')">
-                  <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
+                  <span v-else class="avatar-initial">{{ (store.user.display_name || store.user.username || '?').charAt(0).toUpperCase() }}</span>
                 </span>
               </span>
               <div class="pf-status-wrap">
@@ -4748,7 +4816,7 @@ const MeProfileEditModal = {
                 <img v-if="preview" :src="preview" alt="">
                 <img v-else-if="hasPhoto && store.user && store.user.avatar_url"
                   :src="mediaUrl(store.user.avatar_url)" alt="">
-                <svg v-else class="fox" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>
+                <span v-else class="avatar-initial">{{ (store.user.display_name || store.user.username || '?').charAt(0).toUpperCase() }}</span>
               </div>
               <label class="av-btn" :title="t('Elegir foto')">
                 <svg class="ic ic-sm"><use href="#i-image"></use></svg>
@@ -7316,8 +7384,8 @@ export const ChatShell = {
              (burbujas alineadas); foto/letra solo en el primero de la
              tanda —donde se ve el nombre del emisor—, estilo WhatsApp.
              Los mensajes del sistema van centrados: sin columna. */
-          avCol: isGroup && !mine && m.kind !== 'system',
-          avatar: (withName && m.sender) ? {
+          avCol: m.kind !== 'system',
+          avatar: m.sender ? {
             url: m.sender.avatar_url || '',
             ini: (m.sender.display_name || m.sender.username || '?')
               .charAt(0).toUpperCase(),
@@ -7809,12 +7877,15 @@ export const ChatShell = {
         stick.value = true;
         const items = pendingAtts.value.slice();
         pendingAtts.value = [];
-        if (att.value) { cancelAtt(); }
+        /* OJO: aquí NO va cancelAtt() — ese reset ponía spoilNext=false y
+           sendAtt releía el interruptor ya apagado (la imagen salía sin
+           spoiler). La cola ya está vacía; cada item revoca su thumb. */
+        att.value = null;
         for (let i = 0; i < items.length; i++) {
           const a = items[i];
           att.value = a;
           const cap = i === 0 ? (text.trim() ? text : '') : '';
-          await sendAtt(cap);
+          await sendAtt(cap, spo);
           att.value = null;
         }
         draft.value = '';
@@ -7866,18 +7937,31 @@ export const ChatShell = {
     const att = Vue.ref(null);   // {file, thumb} antes de enviar
     const pendingAtts = Vue.ref([]);   // lista de adjuntos en cola (W62)
 
-    /* Ficha: nombre con extensión, tipo y tamaño. */
-    const attName = Vue.computed(function () {
-      return (att.value && att.value.file.name) || t('Archivo');
-    });
-    const attType = Vue.computed(function () {
-      const mime = (att.value && att.value.file.type) || '';
+    /* Ficha: nombre con extensión, tipo y tamaño. Si no hay
+       previsualización suelta (att), manda el primer ítem de la cola. */
+    const typeLabel = function (mime) {
+      mime = mime || '';
       if (/^image\//.test(mime)) return t('Imagen');
       if (/^video\//.test(mime)) return t('Video');
+      if (/^audio\//.test(mime)) return t('Audio');
       return t('Archivo');
+    };
+    const sizeOf = function (f) { return fmtSize((f && f.size) || 0); };
+    const attFile = function () {
+      return (att.value && att.value.file) ||
+        (pendingAtts.value[0] && pendingAtts.value[0].file) || null;
+    };
+    const attName = Vue.computed(function () {
+      const f = attFile();
+      return (f && f.name) || t('Archivo');
+    });
+    const attType = Vue.computed(function () {
+      const f = attFile();
+      return typeLabel(f && f.type);
     });
     const attSize = Vue.computed(function () {
-      return att.value ? fmtSize(att.value.file.size || 0) : '';
+      const f = attFile();
+      return f ? sizeOf(f) : '';
     });
 
     const cancelAtt = function () {
@@ -7893,7 +7977,27 @@ export const ChatShell = {
       if (a && a.thumb) { try { URL.revokeObjectURL(a.thumb); } catch (e) {} }
     };
 
-    const sendAtt = async function (cap) {
+    /* Quitar UN archivo de la cola (la lista de adjuntos permite quitar
+       cada ítem por separado sin vaciar todo). */
+    const removeAtt = function (i) {
+      const p = pendingAtts.value[i];
+      if (!p) return;
+      if (p.thumb) { try { URL.revokeObjectURL(p.thumb); } catch (e) {} }
+      pendingAtts.value.splice(i, 1);
+      if (att.value === p) att.value = null;
+      /* Con un solo ítem que sí se previsualiza, vuelve la ficha clásica. */
+      const last = pendingAtts.value[pendingAtts.value.length - 1];
+      if (pendingAtts.value.length === 1 && last &&
+          /^(image|video)\//.test(last.file.type || '')) {
+        att.value = last;
+      }
+      if (!pendingAtts.value.length) {
+        att.value = null;
+        spoilNext.value = false;
+      }
+    };
+
+    const sendAtt = async function (cap, spoArg) {
       const a = att.value;
       if (!a) return;
       const src = replyTo.value;
@@ -7902,8 +8006,11 @@ export const ChatShell = {
       /* W61: si el pie supera 3000, el adjunto va sin pie y el texto se
          archiva aparte como mensaje.txt/message.txt. */
       const longBody = charCount(body) > MAX_TEXT_CHARS;
-      /* W29d/h: el interruptor (o el long-press) marca este adjunto. */
-      const spo = spoilNext.value || spoilOnce;
+      /* W29d/h: el interruptor (o el long-press) marca este adjunto. El
+         lote de envío (send) pasa el spoiler ya calculado para que todos
+         los ítems salgan igual. */
+      const spo = typeof spoArg === 'boolean' ? spoArg
+        : (spoilNext.value || spoilOnce);
       spoilOnce = false;
       replyTo.value = null;
       att.value = null;
@@ -7959,11 +8066,15 @@ export const ChatShell = {
         };
         pendingAtts.value.push(obj);
       }
-      // Mantener compatibilidad visual: si hay un solo archivo imagen/vídeo, también lo ponemos en att para la previsualización clásica
+      // Mantener compatibilidad visual: si hay un solo archivo imagen/vídeo, también lo ponemos en att para la previsualización clásica. OJO: antes aquí se llamaba cancelAtt() y borraba la cola recién cargada (el archivo desaparecía).
       if (files.length === 1 && /^(image|video)\//.test(files[0].type || '')) {
-        cancelAtt();
         att.value = pendingAtts.value[pendingAtts.value.length - 1];
         Vue.nextTick(() => { if (input.value) input.value.focus(); });
+      } else {
+        /* Cola múltiple (o archivo no-imagen): la ficha se arma desde la
+           cola; no queda una previsualización suelta apuntando a un
+           archivo que ya no es el único. */
+        att.value = null;
       }
     };
 
@@ -8263,6 +8374,10 @@ export const ChatShell = {
          W65: en móvil la URL ?settings=main abre la portada de categorías;
          un enlace a una categoría concreta entra directo a ella. */
       if (tab) store.settingsTab = tab;
+      /* La lista de Archivados queda detrás de Ajustes; si sobrevive, el
+         siguiente toque en la pestaña solo la apaga (doble pulsación).
+         Igual que mobileChats/goPeople: abrir Ajustes reinicia la lista. */
+      store.showArchived = false;
       store.settingsAtHome = !tab && window.innerWidth <= 760;
       store.settingsOpen = true;
     };
@@ -8599,6 +8714,22 @@ export const ChatShell = {
       store.archiveLockPrompt = false;
       store.archiveLockErr = '';
     };
+    const enterArchived = function () {
+      /* Salir de Ajustes (si estaba abierto) para ver la lista */
+      store.settingsOpen = false;
+      store.settingsAtHome = false;
+      store.peopleMobile = false;
+      store.search = '';
+      if (isNarrow.value && store.activeChatId) closeChat();
+      /* W60: si está bloqueada, la lista NO se revela detrás del modal
+         de escritorio. Al desbloquear (o si no hay clave) se muestra. */
+      const locked = store.archiveHasLock && !store.archiveUnlocked;
+      store.showArchived = !locked;
+      if (locked) {
+        store.archiveLockErr = '';
+        store.archiveLockPrompt = true;
+      }
+    };
     const toggleArchived = function () {
       /* W60: la sección es privada. Si está bloqueada, primero se abre
          la pantalla/modal de desbloqueo; la lista queda detrás. */
@@ -8612,17 +8743,14 @@ export const ChatShell = {
         store.search = '';
         return;
       }
-      store.peopleMobile = false;
-      store.search = '';
-      if (isNarrow.value && store.activeChatId) closeChat();
-      /* W60: si está bloqueada, la lista NO se revela detrás del modal
-         de escritorio. Al desbloquear (o si no hay clave) se muestra. */
-      const locked = store.archiveHasLock && !store.archiveUnlocked;
-      store.showArchived = !locked;
-      if (locked) {
-        store.archiveLockErr = '';
-        store.archiveLockPrompt = true;
-      }
+      enterArchived();
+    };
+    /* La pestaña/botón de navegación NO alternar: estando ya en
+       Archivados el toque se queda ahí (salir es trabajo de la
+       flecha "Volver a Chats"). */
+    const goArchived = function () {
+      if (store.archiveLockPrompt || store.showArchived) return;
+      enterArchived();
     };
     const goPeople = function () {
       store.settingsOpen = false;
@@ -8794,6 +8922,34 @@ export const ChatShell = {
         if (tries > 0) setTimeout(function () { attempt(tries - 1); }, 250);
       };
       attempt(6);
+    };
+    /* Clic en una cita → salta al mensaje original */
+    const jumpToReply = function (replyId) {
+      if (!replyId) return;
+      const cid = store.activeChatId;
+      const arr = store.msgs[cid] || [];
+      let found = false;
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i].id === replyId) { found = true; break; }
+      }
+      if (found) { scrollToMsg(replyId); return; }
+      /* Si no está cargado, intenta traerlo */
+      api('GET', '/api/chats/' + cid + '/messages?around=' + replyId + '&limit=1')
+        .then(function (r) {
+          const msgs = r.messages || [];
+          if (msgs.length) {
+            /* Merge into store */
+            const existing = store.msgs[cid] || [];
+            const ids = new Set(existing.map(function (m) { return m.id; }));
+            for (let i = 0; i < msgs.length; i++) {
+              if (!ids.has(msgs[i].id)) existing.unshift(msgs[i]);
+            }
+            existing.sort(function (a, b) { return a.id - b.id; });
+            store.msgs[cid] = existing;
+            Vue.nextTick(function () { scrollToMsg(replyId); });
+          }
+        })
+        .catch(function () {});
     };
     /* W22: el salto deja su permalink en la URL (?m=<id>) al final de
        jumpResult; tryJump es el camino inverso (URL → scroll) para
@@ -9144,13 +9300,6 @@ export const ChatShell = {
       const v = lb.value;
       if (!v) return;
       const orig = v.orig || v.url;
-      const key = downloadKey(orig);
-      if (key && store.dlSaved[key]) {
-        openAppDownload(key).then(function (ok) {
-          if (!ok) toast(t('El archivo ya no está disponible'), 'err');
-        });
-        return;
-      }
       startDownload(orig, v.name || 'imagen', null, v.mime || '', v.kind || 'image');
     };
     const closeLb = function () {
@@ -9477,17 +9626,20 @@ export const ChatShell = {
       holdOn, holdDown, holdUp, clickSend,
       /* W17: autocompletado :código: */
       acEl, acList, acIdx, pickAc, updAc,
+      jumpToReply,
       /* W8 */
       lb, lbStyle, openLb, closeLb, lbZoom, lbWheel, lbDown, lbDl,
       lbTouchStart, lbTouchMove, lbTouchEnd,   /* W54c: pinza y arrastre */
       lbScale,   // W22: la ayuda (v-if) se va cuando hay zoom
       onSaveEdit,
       /* W11 */
-      att, attName, attType, attSize, cancelAtt, sendAtt, dropping, onUpCancel, onUpRetry,
+      att, attName, attType, attSize, cancelAtt, removeAtt, typeLabel, sizeOf,
+      sendAtt, dropping, onUpCancel, onUpRetry,
+      pendingAtts,   /* W62: cola de adjuntos múltiples */
       /* W19: sidebar colapsable */
       toggleSide, unfoldSide,
       /* W27c: "Personas" en el panel de chats (sidebar) */
-      goPeople, closePeople, toggleArchived, peopleActive, reqCount,
+      goPeople, closePeople, toggleArchived, goArchived, peopleActive, reqCount,
       /* W54: barra inferior y menú ⋮ de la cabecera en móvil */
       mobileChats, chatMore,
     };
@@ -9541,7 +9693,7 @@ export const ChatShell = {
             '{{ reqCount > 9 ? \'9+\' : reqCount }}</i>' +
         '</button>' +
         '<button class="side-people side-archive" type="button" v-if="!store.showArchived" ' +
-          ':title="t(\'Archivados\')" @click="toggleArchived">' +
+          ':title="t(\'Archivados\')" @click="goArchived">' +
           '<svg class="ic ic-sm"><use href="#i-archive"></use></svg>' +
           '<span>{{ t(\'Archivados\') }}</span>' +
         '</button>' +
@@ -9717,6 +9869,7 @@ export const ChatShell = {
               '@react="onReact" @openprofile="openProfile" ' +
               '@zoom="openLb" @saveedit="onSaveEdit" ' +
               '@upcancel="onUpCancel" @upretry="onUpRetry" ' +
+              '@scrolltoreply="jumpToReply" ' +
               '@menu="msgMenu($event.ev, $event.row)" ' +
               '@contextmenu.prevent="msgMenu($event, r)"></message-row>' +
           '</template>' +
@@ -9757,19 +9910,41 @@ export const ChatShell = {
           '</div>' +
           /* W23: ficha del archivo (nombre + tipo/tamaño); el texto del
              mensaje se escribe en el compositor de abajo */
-          '<div class="cap-strip" v-if="att || pendingAtts.length">' +
-            '<img v-if="att.thumb" class="cs-thumb" :src="att.thumb" alt="">' +
-            '<svg v-else class="ic cs-ic"><use href="#i-file"></use></svg>' +
-            '<span class="cs-col">' +
-              '<span class="cs-name">{{ pendingAtts.length > 1 ? pendingAtts.length + " archivos" : attName }}</span>' +
-              '<span class="cs-meta">' +
-                '<span class="cs-type">{{ attType }}</span>' +
-                '<span class="cs-size">{{ attSize }}</span>' +
+          '<div class="cap-strip" v-if="att || pendingAtts.length" :class="{ multi: pendingAtts.length > 1 }">' +
+            /* Cola con varios: lista REAL (cada archivo con su nombre,
+               tipo/tamaño y quitar individual). */
+            '<template v-if="pendingAtts.length > 1">' +
+              '<div class="cs-item" v-for="(p, i) in pendingAtts" :key="i">' +
+                '<img v-if="p.thumb" class="cs-thumb" :src="p.thumb" alt="">' +
+                '<svg v-else class="ic cs-ic"><use href="#i-file"></use></svg>' +
+                '<span class="cs-col">' +
+                  '<span class="cs-name">{{ p.file.name }}</span>' +
+                  '<span class="cs-meta">' +
+                    '<span class="cs-type">{{ typeLabel(p.file.type) }}</span>' +
+                    '<span class="cs-size">{{ sizeOf(p.file) }}</span>' +
+                  '</span>' +
+                '</span>' +
+                '<button class="icon-btn" type="button" :title="t(\'Quitar\')" @click="removeAtt(i)">' +
+                  '<svg class="ic ic-sm"><use href="#i-x"></use></svg>' +
+                '</button>' +
+              '</div>' +
+            '</template>' +
+            /* Un archivo: la ficha clásica (W23). att puede ser null con
+               la cola llena (MP3/PDF): la miniatura solo si existe. */
+            '<template v-else>' +
+              '<img v-if="att && att.thumb" class="cs-thumb" :src="att.thumb" alt="">' +
+              '<svg v-else class="ic cs-ic"><use href="#i-file"></use></svg>' +
+              '<span class="cs-col">' +
+                '<span class="cs-name">{{ attName }}</span>' +
+                '<span class="cs-meta">' +
+                  '<span class="cs-type">{{ attType }}</span>' +
+                  '<span class="cs-size">{{ attSize }}</span>' +
+                '</span>' +
               '</span>' +
-            '</span>' +
-            '<button class="icon-btn" type="button" :title="t(\'Quitar\')" @click="cancelAtt">' +
-              '<svg class="ic ic-sm"><use href="#i-x"></use></svg>' +
-            '</button>' +
+              '<button class="icon-btn" type="button" :title="t(\'Quitar\')" @click="cancelAtt">' +
+                '<svg class="ic ic-sm"><use href="#i-x"></use></svg>' +
+              '</button>' +
+            '</template>' +
           '</div>' +
           /* W61: texto de más de 3000 → se enviará como archivo. */
           '<div class="composer-long" v-if="draftLong">' +
@@ -9780,7 +9955,7 @@ export const ChatShell = {
             '<label class="icon-btn att-btn" :title="t(\'Adjuntar archivo\')">' +
               '<svg class="ic"><use href="#i-clip"></use></svg>' +
               '<input type="file" hidden multiple ref="fileInput" ' +
-                'accept="image/*,video/*,.pdf,.txt,.zip,.doc,.docx,.xls,.xlsx" @change="onAttach">' +
+                'accept="image/*,video/*,audio/*,.pdf,.txt,.zip,.doc,.docx,.xls,.xlsx" @change="onAttach">' +
             '</label>' +
             '<textarea class="composer-input" ref="input" rows="1" v-model="draft" ' +
               'inputmode="text" enterkeyhint="send" autocomplete="off" ' +
@@ -9970,9 +10145,24 @@ export const ChatShell = {
       '<main class="chat-pane people-pane" v-else>' +
         /* W54: título de pantalla en móvil (en escritorio Personas vive
            en el centro y no necesita app bar propia). */
-        '<header class="mobile-page-head"><svg class="mobile-page-logo" ' +
-          'viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>' +
-          '<b>{{ t(\'Personas\') }}</b></header>' +
+        /* W54: la MISMA barra del sidebar (logo + título + ＋ + perfil),
+           sólo cambia el título: en móvil Chats/Archivados comparten
+           .side-head y Personas repite aquí su estructura. */
+        '<header class="mobile-page-head">' +
+          '<svg class="side-logo side-logo-mark" viewBox="-7 -30 334 362" aria-hidden="true"><use href="#i-logo-mark"></use></svg>' +
+          '<span class="side-title">{{ t(\'Personas\') }}</span>' +
+          '<span class="ws-dot" v-if="store.ws !== \'on\'" :title="wsLabel"></span>' +
+          '<button class="icon-btn side-new" type="button" :title="t(\'Nuevo chat\')" @click="startNewChat">' +
+            '<svg class="ic"><use href="#i-plus"></use></svg>' +
+          '</button>' +
+          '<button class="icon-btn mobile-me" type="button" :title="t(\'Tu perfil\')" ' +
+            '@click="store.meProfileOpen = true">' +
+            '<span class="avatar av30" :class="{ \'has-photo\': !!(store.user && store.user.avatar_url) }">' +
+              '<img v-if="store.user && store.user.avatar_url" :src="mediaUrl(store.user.avatar_url)" alt="">' +
+              '<span v-else>{{ store.user ? (store.user.display_name || store.user.username).charAt(0).toUpperCase() : \'?\' }}</span>' +
+            '</span>' +
+          '</button>' +
+        '</header>' +
         /* W19: sin chat abierto también se puede devolver el sidebar */
         '<button class="icon-btn side-open" type="button" :title="t(\'Mostrar chats\')" ' +
           '@click="unfoldSide">' +
@@ -10008,7 +10198,7 @@ export const ChatShell = {
           '<span class="mt-label">{{ t(\'Personas\') }}</span>' +
         '</button>' +
         '<button class="mt-btn" type="button" :class="{ on: store.showArchived && !store.settingsOpen }" ' +
-          '@click="toggleArchived">' +
+          '@click="goArchived">' +
           '<span class="mt-ic-wrap">' +
             '<svg class="ic"><use href="#i-archive"></use></svg>' +
           '</span>' +
@@ -10132,11 +10322,12 @@ export const ChatShell = {
       '</div>' +
       /* W8: vista previa de imágenes con zoom (clic = 2.5x, rueda, arrastre) */
       '<div class="lightbox" v-if="lb" :class="{ \'lb-zoomed\': lbScale > 1 }" @click.self="closeLb">' +
-        '<button class="icon-btn lb-close" type="button" :title="t(\'Cerrar (Esc)\')" @click="closeLb">' +
+        '<button class="lb-btn lb-close" type="button" @click="closeLb">' +
           '<svg class="ic"><use href="#i-x"></use></svg>' +
         '</button>' +
-        '<button class="icon-btn lb-dl" type="button" :title="t(\'Descargar a la app\')" @click="lbDl">' +
-          '<svg class="ic"><use href="#i-download"></use></svg>' +
+        '<div class="lb-filename" v-if="lb.name">{{ lb.name }}</div>' +
+        '<button class="lb-btn lb-download" type="button" @click="lbDl">' +
+          '<svg class="ic ic-sm"><use href="#i-download"></use></svg>' +
         '</button>' +
         '<img class="lb-img" :src="lb.url" :style="lbStyle" ' +
           '@click="lbZoom" @wheel.prevent="lbWheel" @mousedown.prevent="lbDown" ' +
