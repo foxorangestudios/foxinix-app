@@ -25,8 +25,15 @@ def user_brief(
         avatar = medialink.media_url_by_id(u.get("avatar_media_id"), "profile")
         banner = medialink.media_url_by_id(u.get("banner_media_id"), "profile")
     else:
-        avatar = medialink.media_url(media.get(u.get("avatar_media_id")), "profile")
-        banner = medialink.media_url(media.get(u.get("banner_media_id")), "profile")
+        # W66: si el mapa precargado no trae la fila del avatar/banner
+        # (p. ej. listas que sólo pregraban adjuntos), no se pierde la
+        # foto: se resuelve puntual en vez de devolver None.
+        row = media.get(u.get("avatar_media_id")) if u.get("avatar_media_id") else None
+        avatar = (medialink.media_url(row, "profile") if row
+                  else medialink.media_url_by_id(u.get("avatar_media_id"), "profile"))
+        brow = media.get(u.get("banner_media_id")) if u.get("banner_media_id") else None
+        banner = (medialink.media_url(brow, "profile") if brow
+                  else medialink.media_url_by_id(u.get("banner_media_id"), "profile"))
     return {
         "id": u["id"],
         "username": u["username"],

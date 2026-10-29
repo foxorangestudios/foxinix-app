@@ -491,6 +491,14 @@ def _messages_out(rows: list[dict[str, Any]], chat_id: int) -> list[dict[str, An
         "SELECT * FROM users WHERE id IN ", user_ids
     )}
     media_ids = [m["media_id"] for m in rows if m.get("media_id")]
+    # W66: además de los adjuntos, los avatares/banners de los remitentes
+    # — user_brief(sender, medias) resuelve el avatar de ESTE mapa; si la
+    # fila no está, el sender salía sin foto (inicial) en el historial REST.
+    for u in users.values():
+        if u.get("avatar_media_id"):
+            media_ids.append(u["avatar_media_id"])
+        if u.get("banner_media_id"):
+            media_ids.append(u["banner_media_id"])
     medias = {md["id"]: md for md in _rows_in(
         "SELECT * FROM media WHERE id IN ", media_ids
     )}
