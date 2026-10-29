@@ -55,6 +55,8 @@ import {
   hydrateDownloads,
   /* W61 */
   charCount, MAX_TEXT_CHARS,
+  /* W66c */
+  isAnimWebp,
 } from '../actions.js';
 /* W15: descarga de archivos con progreso, cancelación y reintento. */
 import {
@@ -892,6 +894,12 @@ const gifFavFor = function (m) {
     }
   }
   return null;
+};
+/* W66c: para la burbuja, un "GIF" es un gif O un WebP animado (los dos
+   se guardan tal cual y el server marca animated=1). */
+const isGifMedia = function (m) {
+  return !!(m && (m.mime === 'image/gif'
+    || (m.mime === 'image/webp' && m.animated)));
 };
 const isGifFav = function (m) {
   return !!gifFavFor(m);
@@ -2193,6 +2201,8 @@ const MessageRow = {
     };
     return {
       store, emojis, rpEl, rpPos, avErr, spoilBg,
+      onAvatarError,   /* W66c: faltaba en el return; el @error del avatar
+                          reventaba en consola en vez de mostrar la inicial */
       bodySegs,
       /* W35a–c: enlaces, imagen inline y tarjetas */
       imgInline, linkCards,
@@ -2208,7 +2218,7 @@ const MessageRow = {
       /* W37d: velocidad de la nota de voz */
       aRate, aRateV,
       /* W36k: ★ favorito del GIF */
-      isGifFav, toggleFavGif,
+      isGifFav, toggleFavGif, isGifMedia,   /* W66c: gif o webp animado */
       isStkFav, toggleStkFav,   /* W60 */
       spoiled, spoilShow, spoilHide,   /* W29d */
       replyName, replyText, groupReactions, myReaction,
@@ -2246,7 +2256,7 @@ const MessageRow = {
         '<i v-else-if="row.avatar">{{ row.avatar.ini }}</i>' +
       '</span>' +
       '<div v-if="row.ref.kind === \'system\'" class="sys-msg">{{ row.ref.body }}</div>' +
-      '<div v-else class="bubble" :class="{ picking: pickerOpen(row), sticker: row.ref.kind === \'sticker\', \'emo-big\': emoBig(), \'is-spoiled\': spoiled, gif: !!(row.ref.kind === \'image\' && row.ref.media && row.ref.media.mime === \'image/gif\'), vid: !!(row.ref.kind === \'file\' && row.ref.media && isVideo(row.ref.media) && vidOk) }">' +
+      '<div v-else class="bubble" :class="{ picking: pickerOpen(row), sticker: row.ref.kind === \'sticker\', \'emo-big\': emoBig(), \'is-spoiled\': spoiled, gif: !!(row.ref.kind === \'image\' && row.ref.media && isGifMedia(row.ref.media)), vid: !!(row.ref.kind === \'file\' && row.ref.media && isVideo(row.ref.media) && vidOk) }">' +
         /* W29d: capa de spoiler — tapa TODO lo de adentro (texto,
            medios y acciones) hasta que se toque; al tocar se muestra
            y el puntito del pie lo vuelve a ocultar. Mientras está
@@ -2267,9 +2277,10 @@ const MessageRow = {
           '<button class="b-act" type="button" :title="t(\'Reaccionar\')" @click.stop="togglePicker">' +
             '<svg class="ic ic-sm"><use href="#i-smile"></use></svg>' +
           '</button>' +
-          /* W36k: ★ favorito — sólo para GIFs (biblioteca o subidos) */
+          /* W36k: ★ favorito — sólo para GIFs (biblioteca o subidos;
+             W66c: también WebP animados, que viajan como GIF) */
           '<button v-if="row.ref.kind === \'image\' && row.ref.media && ' +
-            'row.ref.media.mime === \'image/gif\'" class="b-act" type="button" ' +
+            'isGifMedia(row.ref.media)" class="b-act" type="button" ' +
             ':title="isGifFav(row.ref) ? t(\'Quitar de favoritos\') : t(\'Agregar a favoritos\')" ' +
             '@click.stop="toggleFavGif(row.ref)">' +
             '<svg class="ic ic-sm"><use :href="isGifFav(row.ref) ? \'#i-star-fill\' : \'#i-star\'"></use></svg>' +
@@ -4611,13 +4622,28 @@ const MeProfileEditModal = {
         (!avatarGone.value && !!(store.user && store.user.avatar_url));
     });
 
-    const pick = function (e) {
+    const pick = async function (e) {
       const f = e.target.files && e.target.files[0];
       e.target.value = '';
       if (!f) return;
       if (!/^image\//.test(f.type)) { err.value = 'Elige una imagen'; return; }
-      if (f.size > 15 * 1024 * 1024) { err.value = 'La imagen supera los 15 MB'; return; }
+      /* W66c: la foto de perfil pesa hasta 3 MB (el server también). */
+      if (f.size > 3 * 1024 * 1024) { err.value = 'La imagen supera los 3 MB'; return; }
       err.value = '';
+      /* W66c: GIF o WebP animado → se sube tal cual. El editor (canvas)
+         los dejaría quietos en el primer fotograma. rawFile queda para
+         que "Ajustar foto" abra este archivo (y aplicar lo aplane, si
+         el usuario lo pide). */
+      if (f.type === 'image/gif' || await isAnimWebp(f)) {
+        if (preview.value) URL.revokeObjectURL(preview.value);
+        if (edSrc.value) URL.revokeObjectURL(edSrc.value);
+        file.value = f;
+        rawFile.value = f;
+        edSrc.value = '';
+        preview.value = URL.createObjectURL(f);
+        avatarGone.value = false;
+        return;
+      }
       rawFile.value = f;
       if (edSrc.value) URL.revokeObjectURL(edSrc.value);
       edInitial.value = null;          // foto nueva: encuadre fresco
@@ -4652,7 +4678,9 @@ const MeProfileEditModal = {
       e.target.value = '';
       if (!f) return;
       if (!/^image\//.test(f.type)) { err.value = 'Elige una imagen'; return; }
-      if (f.size > 15 * 1024 * 1024) { err.value = 'La imagen supera los 15 MB'; return; }
+      /* W66c: la portada también pesa hasta 3 MB (GIF/WebP animados
+         se suben tal cual y se ven animados). */
+      if (f.size > 3 * 1024 * 1024) { err.value = 'La imagen supera los 3 MB'; return; }
       err.value = '';
       if (bannerPreview.value) URL.revokeObjectURL(bannerPreview.value);
       bannerFile.value = f;
@@ -8455,8 +8483,10 @@ export const ChatShell = {
       const f = ev.target.files && ev.target.files[0];
       ev.target.value = '';
       if (!f) return;
-      if (kind === 'gif' && f.type !== 'image/gif') {
-        toast(t('Elige un archivo GIF'), 'err');
+      /* W66c: como GIF vale el .gif o un WebP animado (viaja tal cual). */
+      if (kind === 'gif' && f.type !== 'image/gif' &&
+          !(f.type === 'image/webp' && await isAnimWebp(f))) {
+        toast(t('Elige un archivo GIF o WebP animado'), 'err');
         return;
       }
       if (kind === 'sticker' && !/^image\//.test(f.type || '')) {
@@ -10074,7 +10104,7 @@ export const ChatShell = {
                     ' <i class="st-count">{{ store.userAssets.gifs.length }}/10</i></span>' +
                   '<label class="st-up" :class="{ busy: assetBusy }" :title="t(\'Subir GIF\')">' +
                     '<svg class="ic ic-sm"><use href="#i-plus"></use></svg>' +
-                    '<input type="file" accept="image/gif" style="display:none" ' +
+                    '<input type="file" accept="image/gif,image/webp" style="display:none" ' +
                       '@change="onAssetUpload(\'gif\', $event)">' +
                   '</label>' +
                 '</div>' +

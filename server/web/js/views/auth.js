@@ -1,6 +1,8 @@
 /* Pantallas de autenticación (W1). Vue global build, setup() + template. */
 import { store, go, goReplace, toast } from '../store.js';
 import { api, applyAuth, bootstrap, logout, uploadMedia, session, saveSession } from '../api.js';
+/* W66c: GIF/WebP animados como foto de perfil (se suben tal cual) */
+import { isAnimWebp } from '../actions.js';
 import { AvatarEditor } from './avatar-editor.js';
 
 const { ref, computed, onMounted, onUnmounted } = Vue;
@@ -225,12 +227,25 @@ export const ProfileView = {
     const rawFile = ref(null);
     let crop = null;
 
-    function pick(e) {
+    async function pick(e) {
       const f = e.target.files && e.target.files[0];
+      e.target.value = '';
       if (!f) return;
       if (!/^image\//.test(f.type)) { err.value = 'Elige una imagen'; return; }
-      if (f.size > 15 * 1024 * 1024) { err.value = 'La imagen supera los 15 MB'; return; }
+      /* W66c: la foto de perfil pesa hasta 3 MB (el server también). */
+      if (f.size > 3 * 1024 * 1024) { err.value = 'La imagen supera los 3 MB'; return; }
       err.value = '';
+      /* W66c: GIF o WebP animado → se sube tal cual; el editor (canvas)
+         los dejaría quietos en el primer fotograma. */
+      if (f.type === 'image/gif' || await isAnimWebp(f)) {
+        if (preview.value) URL.revokeObjectURL(preview.value);
+        if (edSrc.value) URL.revokeObjectURL(edSrc.value);
+        file.value = f;
+        rawFile.value = f;
+        edSrc.value = '';
+        preview.value = URL.createObjectURL(f);
+        return;
+      }
       rawFile.value = f;
       if (edSrc.value) URL.revokeObjectURL(edSrc.value);
       edInitial.value = null;          // foto nueva: encuadre fresco

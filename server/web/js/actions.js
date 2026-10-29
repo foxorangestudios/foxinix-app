@@ -958,6 +958,23 @@ function probeImg(url, cb) {
   im.src = url;
 }
 
+/* W66c: ¿es un WebP animado? Mira solo la cabecera VP8X (bit de
+   animación) sin decodificar el archivo. Los GIF se detectan por el
+   type del File. Sirve para subirlos tal cual (el editor con canvas los
+   dejaría quietos) y para tratarlos como GIF. */
+export async function isAnimWebp(file) {
+  if (!file || file.type !== 'image/webp') return false;
+  try {
+    const buf = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+    const tag = function (o) {
+      return String.fromCharCode(buf[o], buf[o + 1], buf[o + 2], buf[o + 3]);
+    };
+    if (tag(0) !== 'RIFF' || tag(8) !== 'WEBP') return false;
+    if (tag(12) !== 'VP8X') return false;   // sin cabecera ext: 1 solo frame
+    return !!(buf[20] & 0x02);              // bit 1 del byte de flags = anim
+  } catch (e) { return false; }
+}
+
 function findPending(chatId, cid) {
   var arr = store.msgs[chatId];
   if (!arr) return null;

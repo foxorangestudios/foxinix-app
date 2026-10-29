@@ -343,6 +343,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE media ADD COLUMN width INTEGER")
     if "height" not in med:
         conn.execute("ALTER TABLE media ADD COLUMN height INTEGER")
+    # W66c: los WebP animados se guardan tal cual (como los GIF); esta marca
+    # permite que el cliente los trate como GIF (clase de burbuja, ★ favoritos).
+    if "animated" not in med:
+        conn.execute(
+            "ALTER TABLE media ADD COLUMN animated INTEGER NOT NULL DEFAULT 0")
 
 
 def init_db() -> None:

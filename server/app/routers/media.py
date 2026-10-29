@@ -119,6 +119,13 @@ def _to_webp(data: bytes) -> bytes | None:
     return conv[0] if conv else None
 
 
+def _is_anim_webp(data: bytes) -> bool:
+    """¿Es un WebP animado? Mira solo la cabecera VP8X (bit de animación):
+    no decodifica nada, así que no cuesta ni toca el resto del archivo."""
+    return (len(data) > 30 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+            and data[12:16] == b"VP8X" and bool(data[20] & 0x02))
+
+
 def image_size(data: bytes) -> tuple[int, int] | None:
     """W22: (ancho, alto) de una imagen, si Pillow está y la puede leer."""
     if not _HAVE_PIL:
@@ -502,11 +509,15 @@ async def upload(file: UploadFile, user: dict = Depends(pending_user)) -> dict[s
     # W8/P0: las imágenes se convierten a WebP en un HILO (no en el event
     # loop), con tope de 2560 px. SVG y lo que Pillow no pueda leer quedan
     # como están. W28g: los GIF se guardan tal cual — convertirlos a WebP
-    # los dejaría quietos en el primer fotograma.
+    # los dejaría quietos en el primer fotograma. W66c: los WebP animados
+    # se guardan igual (tal cual); recodificarlos costaría CPU y podría
+    # degradar la animación. La marca `animated` viaja en la fila.
     conv_mime = mime
     ext = Path(file.filename or "").suffix[:10].lower()
     w = h = None
-    if mime.startswith("image/") and mime not in ("image/svg+xml", "image/gif"):
+    anim = mime == "image/gif" or (mime == "image/webp" and _is_anim_webp(data))
+    if (mime.startswith("image/") and mime not in ("image/svg+xml", "image/gif")
+            and not (mime == "image/webp" and anim)):
         conv = await asyncio.to_thread(_encode_webp, data)
         if conv is not None:
             data, w, h = conv
@@ -556,10 +567,10 @@ async def upload(file: UploadFile, user: dict = Depends(pending_user)) -> dict[s
         if dims:
             w, h = dims
     media_id = db.execute(
-        "INSERT INTO media (owner_id, path, mime, size, name, slug, width, height, created_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO media (owner_id, path, mime, size, name, slug, width, height, animated, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (user["id"], rel, mime, len(data), (file.filename or "archivo")[:200],
-         slug, w, h, int(time.time())),
+         slug, w, h, int(anim), int(time.time())),
     )
     return {
         "id": media_id,
@@ -569,6 +580,7 @@ async def upload(file: UploadFile, user: dict = Depends(pending_user)) -> dict[s
         "name": file.filename or "archivo",
         "width": w,
         "height": h,
+        "animated": bool(anim),
     }
 
 
@@ -630,15 +642,19 @@ def quota_stats(user: dict = Depends(current_user)) -> dict[str, Any]:
 pub = APIRouter(tags=["media"])
 
 
-def _ensure_thumb(path: Path) -> Path | None:
+def _ensure_thumb(path: Path, anim: bool = False) -> Path | None:
     """Miniatura (máx. 480 px) generada UNA vez y cacheada al lado del original.
 
     W15: los avatares/imágenes se piden con ?thumb=1 para que carguen de
     una (el cliente difumina esta copia chica hasta descargar el original).
+    W66c: con `anim` no se genera nada — una miniatura estática dejaría
+    quieto un GIF/WebP animado (p. ej. avatar animado); se sirve el original.
     Escritura atómica (tmp + rename) para que dos primeras peticiones
     simultáneas no sirvan un archivo a medias.
     """
     if not _HAVE_PIL:
+        return None
+    if anim:
         return None
     t = path.with_name(path.stem + ".thumb.webp")
     if t.is_file():
@@ -706,7 +722,11 @@ def download_signed(kind: str, fname: str, exp: int | None = None,
         }[fmt]
         out_name = (Path(out_name).stem or "archivo") + "." + fmt
     elif thumb and mime.startswith("image/"):
-        t = _ensure_thumb(path)
+        # W66c: los archivos animados (GIF o WebP multi-foto) se sirven tal
+        # cual aunque se pida ?thumb=1 — una miniatura estática los dejaría
+        # quieto (p. ej. avatar/portada animados).
+        t = _ensure_thumb(path, anim=(mime == "image/gif"
+                                      or bool(row["animated"])))
         if t:
             path = t
     # W37f: igual que el endpoint legacy — MIME neutralizado y filename

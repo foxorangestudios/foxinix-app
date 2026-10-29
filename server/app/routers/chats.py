@@ -275,6 +275,8 @@ def message_out(
                 "name": row["name"],
                 # W22: resolución de la imagen ({} si no aplica/conocida)
                 **media_mod.row_dims(row),
+                # W66c: gif/webp animado → el cliente lo trata como GIF
+                "animated": bool(row["animated"]),
             }
     reply = None
     if m.get("reply_to"):
@@ -1315,6 +1317,7 @@ def chat_gallery(chat_id: int, user: dict = Depends(current_user)) -> dict[str, 
                 "size": r["size"],
                 "name": r["name"],
                 **media_mod.row_dims(r),
+                "animated": bool(r["animated"]),   # W66c
             },
         }
         if r["kind"] == "image":

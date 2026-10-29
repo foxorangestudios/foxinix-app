@@ -311,6 +311,10 @@ def update_profile(body: ProfileIn, user: dict = Depends(pending_user)) -> dict[
                 raise HTTPException(400, "Archivo de avatar inválido")
             if not (media["mime"] or "").startswith("image/"):
                 raise HTTPException(400, "El avatar debe ser una imagen")
+            # W66c: tope de 3 MB para la foto de perfil (GIF/WebP animados
+            # se guardan tal cual, así que el peso original es el que llega).
+            if (media["size"] or 0) > 3 * 1024 * 1024:
+                raise HTTPException(413, "La imagen de perfil supera los 3 MB")
             sets.append("avatar_media_id = ?")
             params.append(body.avatar_media_id)
     if "banner_media_id" in body.model_fields_set:
@@ -322,6 +326,9 @@ def update_profile(body: ProfileIn, user: dict = Depends(pending_user)) -> dict[
                 raise HTTPException(400, "Archivo de portada inválido")
             if not (media["mime"] or "").startswith("image/"):
                 raise HTTPException(400, "La portada debe ser una imagen")
+            # W66c: mismo tope de 3 MB que el avatar.
+            if (media["size"] or 0) > 3 * 1024 * 1024:
+                raise HTTPException(413, "La imagen de perfil supera los 3 MB")
             sets.append("banner_media_id = ?")
             params.append(body.banner_media_id)
     # W61: la posición se puede ajustar sin volver a subir la portada.

@@ -62,6 +62,7 @@ def _out(row: dict[str, Any]) -> dict[str, Any]:
         "size": row.get("size") or 0,
         "width": row.get("width"),
         "height": row.get("height"),
+        "animated": bool(row.get("animated")),   # W66c
         "created_at": row.get("added_at") or 0,
     }
 
@@ -86,7 +87,12 @@ def add_asset(body: AssetIn, user: dict = Depends(current_user)) -> dict[str, An
         raise HTTPException(404, "Archivo no encontrado")
     mime = _mime(media)
     if kind == "gif":
-        if mime != "image/gif":
+        # W66c: un WebP animado vale como GIF (viaja tal cual y se ve
+        # animado); los WebP estáticos no son GIFs.
+        if mime == "image/webp":
+            if not (media.get("animated") or 0):
+                raise HTTPException(400, "El GIF debe ser un archivo .gif o WebP animado")
+        elif mime != "image/gif":
             raise HTTPException(400, "El GIF debe ser un archivo .gif")
     else:
         if not mime.startswith("image/") or mime == "image/svg+xml":
