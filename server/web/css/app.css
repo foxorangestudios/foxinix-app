@@ -6636,3 +6636,96 @@ button.dl-group .dl-group-head { pointer-events: none; }
 
 .progress-bar { width: 100%; height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin: 12px 0; }
 .progress-fill { height: 100%; background: var(--accent); transition: width .2s; }
+
+/* ------------------------------------------------------------------
+   W68: IDs públicos + enlaces de invitación + logo con acento
+   ------------------------------------------------------------------ */
+
+/* Logo/icono inline (SVG con currentColor) siguen el acento elegido:
+   la palabra, la marca del zorro, el logo del arranque y el de auth. */
+.side-logo,
+.side-logo-mark,
+.fox,
+.bp-logo,
+.auth-logo-img { color: var(--accent); }
+
+/* Panel de info del grupo: enlace de invitación (solo owner/admin). */
+.gi-body { padding: 2px 6px 10px; }
+.gi-tgl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+.gi-tgl-row .st-col b { font-size: 13.5px; }
+.gi-tgl-row .st-col span { font-size: 12px; color: var(--t2); }
+.gi-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.gi-link-i {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-family: var(--mono, monospace);
+  color: var(--t2);
+}
+.gi-link-i:focus { outline: none; border-color: var(--accent); color: var(--t1); }
+
+/* Modal "unirse al grupo" (enlace /app/group/<id de 12 dígitos>). */
+.modal.join-group { width: min(360px, 100%); }
+.join-body {
+  padding: 20px 22px 6px;
+  text-align: center;
+}
+.join-av {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  margin: 0 auto 12px;
+}
+.join-av-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel2);
+  color: var(--t2);
+}
+.join-av-ph .ic { width: 30px; height: 30px; }
+.join-title { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: var(--t1); }
+.join-meta { font-size: 13px; color: var(--t2); margin: 0; }
+.join-err { font-size: 13px; color: var(--danger, #e5484d); margin: 10px 0 0; }
+.join-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 14px 16px 16px;
+}
+
+/* Fila de ID público copiable en perfiles (propio y ajeno). */
+.pf-pubid {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px 8px;
+  cursor: pointer;
+  color: var(--t2);
+  font-size: 12px;
+}
+.pf-pubid:hover { border-color: var(--accent); color: var(--t1); }
+.pf-pubid-l { font-weight: 600; }
+.pf-pubid-v { font-family: var(--mono, monospace); font-size: 12px; }
+.pf-pubid .ic { width: 14px; height: 14px; }

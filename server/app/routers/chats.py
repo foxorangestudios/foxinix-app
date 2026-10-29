@@ -319,6 +319,9 @@ def message_out(
         sender_out["role"] = sender_role
     return {
         "id": m["id"],
+        # W68: ID público de 20 dígitos: identificador estable del mensaje
+        # (dedup/keys del cliente) sin exponer el volumen real de tablas.
+        "pub_id": m.get("pub_id") or "",
         "seq": m["seq"],
         "chat_id": m["chat_id"],
         "kind": m["kind"],
@@ -422,6 +425,11 @@ def chat_brief(chat: dict[str, Any], me_id: int) -> dict[str, Any]:
     return {
         "id": chat["id"],
         "type": chat["type"],
+        # W68: ID público de 12 dígitos (enlaces /app/group/<id>).
+        "pub_id": chat.get("pub_id") or "",
+        # W68: ¿el owner/admin permite unirse por enlace? Para los
+        # miembros no es sensible (el enlace lo decide quien gestiona).
+        "invites_open": bool(chat.get("invites_open")),
         "title": title,
         "avatar_url": avatar,
         "member_count": len(cmembers),
@@ -673,6 +681,9 @@ def _chat_briefs(chats: list[dict[str, Any]], me_id: int) -> list[dict[str, Any]
         out.append({
             "id": chat["id"],
             "type": chat["type"],
+            # W68: mismos campos públicos que chat_brief (enlaces y ajustes).
+            "pub_id": chat.get("pub_id") or "",
+            "invites_open": bool(chat.get("invites_open")),
             "title": title,
             "avatar_url": avatar,
             "member_count": len(cmembers),
@@ -706,7 +717,10 @@ class CreateGroupIn(BaseModel):
 
 
 class RenameChatIn(BaseModel):
-    title: str = Field(min_length=1, max_length=60)
+    # W68: PATCH genérico del grupo: nombre y/o enlace de invitación.
+    # Cada campo es opcional; al menos uno debe venir (validado abajo).
+    title: str | None = Field(default=None, min_length=1, max_length=60)
+    invites_open: bool | None = None
 
 
 class SendIn(BaseModel):
@@ -955,6 +969,11 @@ def create_group(body: CreateGroupIn, user: dict = Depends(current_user)) -> dic
 @router.patch("/{chat_id}")
 def rename_chat(chat_id: int, body: RenameChatIn,
                 user: dict = Depends(current_user)) -> dict[str, Any]:
+    """W28/W68: ajustes del grupo (solo owner o admin).
+
+    Acepta `title` (renombrar) y `invites_open` (permitir unirse por
+    enlace, W68); cada uno opcional pero al menos uno obligatorio.
+    """
     chat = db.one("SELECT * FROM chats WHERE id = ?", (chat_id,))
     if not chat or chat["type"] != "group":
         raise HTTPException(404, "Grupo no encontrado")
@@ -962,13 +981,108 @@ def rename_chat(chat_id: int, body: RenameChatIn,
     if not mine:
         raise HTTPException(403, "No eres miembro del grupo")
     if mine.get("role") not in ("owner", "admin"):
-        raise HTTPException(403, "Solo el owner o un admin pueden cambiar el nombre")
-    title = body.title.strip()
-    if not title:
-        raise HTTPException(422, "El nombre no puede estar vacío")
-    db.run("UPDATE chats SET title = ? WHERE id = ?", (title, chat_id))
+        raise HTTPException(403, "Solo el owner o un admin pueden cambiar estos ajustes")
+    if body.title is None and body.invites_open is None:
+        raise HTTPException(422, "Nada que cambiar")
+    out: dict[str, Any] = {"chat_id": chat_id}
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(422, "El nombre no puede estar vacío")
+        db.run("UPDATE chats SET title = ? WHERE id = ?", (title, chat_id))
+        out["title"] = title
+    if body.invites_open is not None:
+        db.run("UPDATE chats SET invites_open = ? WHERE id = ?",
+               (1 if body.invites_open else 0, chat_id))
+        out["invites_open"] = bool(body.invites_open)
     hub.emit_to_chat(chat_id, {"type": "chat_updated", "chat_id": chat_id})
-    return {"chat_id": chat_id, "title": title}
+    return out
+
+
+# ------------------------------------------------- W68: grupos por ID público
+
+def _pub_group(pub_id: str) -> dict[str, Any]:
+    """Resuelve un grupo por su ID público de 12 dígitos (o 404)."""
+    if not re.fullmatch(r"\d{12}", pub_id or ""):
+        raise HTTPException(404, "Grupo no encontrado")
+    chat = db.one(
+        "SELECT * FROM chats WHERE pub_id = ? AND type = 'group'", (pub_id,)
+    )
+    if not chat:
+        raise HTTPException(404, "Grupo no encontrado")
+    return chat
+
+
+@router.get("/pub/{pub_id}")
+def group_by_pub(pub_id: str, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """W68: info pública del grupo por enlace (/app/group/<id>).
+
+    Miembros: siempre. No miembros: sólo si el grupo permite unirse por
+    enlace (invites_open); si no, 403 para no filtrar ni su existencia.
+    """
+    chat = _pub_group(pub_id)
+    mine = _member_row(chat["id"], user["id"])
+    member = bool(mine) and not mine.get("hidden_at")
+    if not member and not chat.get("invites_open"):
+        raise HTTPException(403, "Este grupo no permite unirse por enlace")
+    avatar = medialink.media_url_by_id(chat.get("avatar_media_id"), "profile")
+    n = db.one(
+        "SELECT COUNT(*) AS c FROM chat_members WHERE chat_id = ? AND hidden_at = 0",
+        (chat["id"],),
+    )["c"]
+    return {
+        "chat_id": chat["id"],
+        "is_member": member,
+        "title": chat["title"] or "Grupo",
+        "avatar_url": avatar,
+        "member_count": int(n),
+        "invites_open": bool(chat.get("invites_open")),
+    }
+
+
+@router.post("/pub/{pub_id}/join")
+def join_by_pub(pub_id: str, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """W68: unirse a un grupo por enlace (requiere invites_open=1).
+
+    Mismo patrón que add_member: ratelimit CREATIONS, mensaje system y
+    emits en vivo. Si el miembro existía con el chat oculto, se reabre.
+    """
+    chat = _pub_group(pub_id)
+    mine = _member_row(chat["id"], user["id"])
+    if mine:
+        if mine.get("hidden_at"):
+            db.execute(
+                "UPDATE chat_members SET hidden_at = 0 WHERE chat_id = ?"
+                " AND user_id = ?",
+                (chat["id"], user["id"]),
+            )
+            hub.emit_to_chat(chat["id"],
+                             {"type": "members_changed", "chat_id": chat["id"]})
+        return {"ok": True, "chat_id": chat["id"], "already": True}
+    if not chat.get("invites_open"):
+        raise HTTPException(403, "Este grupo no permite unirse por enlace")
+    espera = ratelimit.CREATIONS.take(user["id"])
+    if espera > 0:
+        raise HTTPException(429, detail={"retry_after": math.ceil(espera)})
+    db.execute(
+        "INSERT INTO chat_members (chat_id, user_id, joined_at) VALUES (?, ?, ?)",
+        (chat["id"], user["id"], int(time.time())),
+    )
+    who = user["display_name"] or user["username"]
+    with db.tx() as conn:
+        seq = _next_seq(conn, chat["id"])
+        cur = conn.execute(
+            "INSERT INTO messages (chat_id, seq, sender_id, kind, body, created_at)"
+            " VALUES (?, ?, ?, 'system', ?, ?)",
+            (chat["id"], seq, user["id"], f"{who} se unió al grupo",
+             int(time.time())),
+        )
+        sys_id = cur.lastrowid
+    hub.emit_to_chat(chat["id"], {"type": "members_changed", "chat_id": chat["id"]})
+    sys_row = db.one("SELECT * FROM messages WHERE id = ?", (sys_id,))
+    if sys_row:
+        hub.emit_to_chat(chat["id"], {"type": "message", "message": message_out(sys_row)})
+    return {"ok": True, "chat_id": chat["id"]}
 
 
 # W27: foto del grupo — solo owner o admin. El pipeline es el mismo que la

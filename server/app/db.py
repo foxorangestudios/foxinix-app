@@ -1,6 +1,7 @@
 """Esquema y acceso a SQLite (WAL, foreign keys activas)."""
 from __future__ import annotations
 
+import secrets
 import sqlite3
 import threading
 import unicodedata
@@ -44,6 +45,9 @@ PRAGMA journal_mode=WAL;
 
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- W68: ID público de 16 dígitos (enlaces /app/user/<id>). Aleatorio,
+    -- no expone el id interno. El trigger trg_* lo rellena si es NULL.
+    pub_id         TEXT,
     email          TEXT NOT NULL UNIQUE COLLATE NOCASE,
     username       TEXT NOT NULL UNIQUE COLLATE NOCASE,
     username_changed_at INTEGER NOT NULL DEFAULT 0,  -- W59: último cambio (12 h)
@@ -87,9 +91,13 @@ CREATE TABLE IF NOT EXISTS media (
 CREATE TABLE IF NOT EXISTS chats (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     type       TEXT NOT NULL,              -- 'dm' | 'group'
+    -- W68: ID público de 12 dígitos (enlaces /app/group/<id>).
+    pub_id     TEXT,
     title      TEXT NOT NULL DEFAULT '',
     avatar_media_id INTEGER,
     dm_key     TEXT UNIQUE,                -- p.ej. '7:12' ordenado para DMs
+    -- W68: 1 = el owner/admin permite unirse por enlace (default cerrado).
+    invites_open INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at INTEGER NOT NULL,
     -- W45: contador monótono por chat. MAX(seq) se reutilizaba al borrar
@@ -140,6 +148,9 @@ CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks(blocked_id);
 
 CREATE TABLE IF NOT EXISTS messages (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- W68: ID público de 20 dígitos: identificador estable del mensaje
+    -- (dedup/keys del cliente) que no expone el volumen real de tablas.
+    pub_id        TEXT,
     chat_id       INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     seq           INTEGER NOT NULL,        -- correlativo por chat
     sender_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -348,6 +359,66 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "animated" not in med:
         conn.execute(
             "ALTER TABLE media ADD COLUMN animated INTEGER NOT NULL DEFAULT 0")
+    # W68: IDs públicos numéricos (usuario 16, grupo 12, mensaje 20 dígitos)
+    # para enlaces /app/user/<id> y /app/group/<id>. Aleatorios y únicos;
+    # backfill idempotente para las filas viejas y triggers para las nuevas.
+    def _pub_backfill(table: str, digits: int) -> None:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if "pub_id" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN pub_id TEXT")
+        taken = {
+            r["pub_id"] for r in conn.execute(
+                f"SELECT pub_id FROM {table} WHERE pub_id IS NOT NULL")
+        }
+        pend = conn.execute(
+            f"SELECT id FROM {table} WHERE pub_id IS NULL").fetchall()
+        for r in pend:
+            while True:
+                # rango [10^(n-1), 10^n - 1] → exactamente `digits` dígitos.
+                n = str(secrets.randbelow(9 * 10 ** (digits - 1))
+                        + 10 ** (digits - 1))
+                if n not in taken:
+                    break
+            taken.add(n)
+            conn.execute(
+                f"UPDATE {table} SET pub_id = ? WHERE id = ?", (n, r["id"]))
+
+    _pub_backfill("users", 16)
+    _pub_backfill("chats", 12)
+    _pub_backfill("messages", 20)
+    # Tras el backfill (la columna ya existe en toda BD): unicidad de IDs.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_pub ON users(pub_id)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_chats_pub ON chats(pub_id)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_pub ON messages(pub_id)")
+    ccols = {r["name"] for r in conn.execute("PRAGMA table_info(chats)")}
+    if "invites_open" not in ccols:
+        conn.execute(
+            "ALTER TABLE chats ADD COLUMN invites_open INTEGER NOT NULL DEFAULT 0")
+    # Triggers: asignan el pub_id si un INSERT nuevo lo trae a NULL (los
+    # INSERT del código no lo pasan). La colisión práctica es nula
+    # (10^12..10^20 de espacio) y el índice único es la red de seguridad.
+    conn.executescript("""
+    CREATE TRIGGER IF NOT EXISTS trg_users_pubid AFTER INSERT ON users
+    WHEN NEW.pub_id IS NULL
+    BEGIN
+      UPDATE users SET pub_id = printf('%d%015d', 1 + abs(random()) % 9,
+        abs(random()) % 1000000000000000) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS trg_chats_pubid AFTER INSERT ON chats
+    WHEN NEW.pub_id IS NULL
+    BEGIN
+      UPDATE chats SET pub_id = printf('%d%011d', 1 + abs(random()) % 9,
+        abs(random()) % 100000000000) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS trg_messages_pubid AFTER INSERT ON messages
+    WHEN NEW.pub_id IS NULL
+    BEGIN
+      UPDATE messages SET pub_id = printf('%d%09d%010d', 1 + abs(random()) % 9,
+        abs(random()) % 1000000000, abs(random()) % 10000000000)
+      WHERE id = NEW.id;
+    END;
+    """)
 
 
 def init_db() -> None:

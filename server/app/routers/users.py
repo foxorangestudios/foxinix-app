@@ -1,6 +1,7 @@
 """Usuarios: perfiles públicos y búsqueda de contactos."""
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -49,6 +50,8 @@ def user_brief(
         "online": visible_online,
         "last_seen": u.get("last_seen", 0),
         "created_at": u.get("created_at", 0),
+        # W68: ID público de 16 dígitos (enlaces /app/user/<id>).
+        "pub_id": u.get("pub_id") or "",
     }
 
 
@@ -125,6 +128,25 @@ def profile_by_id(user_id: int, user: dict = Depends(current_user)) -> dict[str,
     u = db.one(
         "SELECT * FROM users WHERE id = ? AND email_verified = 1",
         (user_id,),
+    )
+    if not u:
+        raise HTTPException(404, "Usuario no encontrado")
+    return {"user": user_brief(u), "relation": _relation(user["id"], u["id"])}
+
+
+@router.get("/pub/{pub_id}")
+def profile_by_pub(pub_id: str, user: dict = Depends(current_user)) -> dict[str, Any]:
+    """W68: perfil por ID público de 16 dígitos (enlace /app/user/<id>).
+
+    El ID público es aleatorio (no expone el id interno) y sirve para
+    enviar solicitud/mensaje sin conocer @usuario. Mismo contrato que
+    /id/{user_id}: Relation para que el enlace pueda autoaccionar.
+    """
+    if not re.fullmatch(r"\d{16}", pub_id or ""):
+        raise HTTPException(404, "Usuario no encontrado")
+    u = db.one(
+        "SELECT * FROM users WHERE pub_id = ? AND email_verified = 1",
+        (pub_id,),
     )
     if not u:
         raise HTTPException(404, "Usuario no encontrado")

@@ -190,12 +190,21 @@ export function resolvePendingChat() {
   if (!ref) return false;
   if (!store.chatsReady) return false;      // la lista todavía no llegó
   store.pendingPath = null;
+  /* W68: el string crudo distingue ID público (16 dígitos usuario /
+     12 grupo) de id interno (enlaces viejos). */
+  const raw = String(ref.id || '');
+  const pubUser = /^\d{16}$/.test(raw);
+  const pubGroup = /^\d{12}$/.test(raw);
+  const num = (pubUser || pubGroup) ? 0 : (parseInt(raw, 10) || 0);
   let id = 0;
   for (let i = 0; i < store.chats.length; i++) {
     const c = store.chats[i];
     if (ref.kind === 'user') {
-      if (c.type === 'dm' && c.title && c.title.id === ref.id) { id = c.id; break; }
-    } else if (c.id === ref.id) {
+      if (c.type === 'dm' && c.title &&
+          (pubUser ? c.title.pub_id === raw : c.title.id === num)) {
+        id = c.id; break;
+      }
+    } else if (pubGroup ? c.pub_id === raw : c.id === num) {
       id = c.id;
       break;
     }
@@ -204,11 +213,17 @@ export function resolvePendingChat() {
     openChat(id, true);   // keepJump: el ?m= de la URL se aplica después
     return true;
   }
-  if (ref.kind === 'user' && ref.id) {
+  if (ref.kind === 'user' && raw) {
     /* W65: /app/user/<id> sin MD. El perfil por ID decide: amistad →
        abrir/crear el DM; sin relación → solicitud automática + modal. */
-    store.pendingUser = ref.id;
-    resolveUserDeepLink(ref.id);
+    store.pendingUser = raw;
+    resolveUserDeepLink(raw);
+    return true;
+  }
+  if (ref.kind === 'group' && pubGroup) {
+    /* W68: /app/group/<pub12> sin estar en mi lista → info pública
+       del grupo y, si permite enlaces, modal para unirse. */
+    resolveGroupDeepLink(raw);
     return true;
   }
   /* El chat no existe (o ya no está): volver al panel con la URL real. */
@@ -222,7 +237,9 @@ export function resolvePendingChat() {
    relación para no duplicar solicitudes ni abrir MD sin amistad. */
 async function resolveUserDeepLink(uid) {
   try {
-    const r = await api('GET', '/api/users/id/' + uid, undefined, { retry401: true });
+    const isPub = /^\d{16}$/.test(String(uid));
+    const r = await api('GET', (isPub ? '/api/users/pub/' : '/api/users/id/') + uid,
+                        undefined, { retry401: true });
     if (store.pendingUser !== uid) return;   // navegación nueva: descartar
     const u = r.user;
     if (r.relation === 'me') {
@@ -283,6 +300,53 @@ async function resolveUserDeepLink(uid) {
       store.pendingUser = 0;
       syncUrl();
     }
+  }
+}
+
+/* W68: resuelve /app/group/<pub12> para quien NO está en la lista de chats.
+   El endpoint público decide: miembro (abrir) / enlaces abiertos (modal de
+   unión) / cerrado (403). El resultado viaja a store.joinPrompt (modal). */
+let pendingGroupPub = '';   // token anti-carrera: navegación nueva lo cambia
+async function resolveGroupDeepLink(pub) {
+  pendingGroupPub = pub;
+  try {
+    const r = await api('GET', '/api/chats/pub/' + pub, undefined, { retry401: true });
+    if (pendingGroupPub !== pub) return;   // navegación nueva: descartar
+    if (r.is_member) {
+      /* Puede pasar si el chat quedó fuera de la lista (p. ej. recién
+         reabierto): refrescar y abrir por su id interno. */
+      await loadChats();
+      const c = store.chats.filter(function (x) { return x.id === r.chat_id; })[0];
+      if (c) { openChat(c.id, true); return; }
+    }
+    store.joinPrompt = {
+      pubId: pub, title: r.title, avatarUrl: r.avatar_url,
+      memberCount: r.member_count, joining: false, error: '',
+    };
+  } catch (e) {
+    if (pendingGroupPub !== pub) return;
+    if (e && e.status === 401) return;   // bootstrap se encarga
+    toast(e && e.status === 404 ? t('Grupo no encontrado')
+      : (e && e.detail) || t('No se pudo abrir el grupo'), 'err');
+    syncUrl();
+  }
+}
+
+/* W68: unirse a un grupo por enlace desde el modal (joinPrompt). */
+export async function joinGroupByPub() {
+  const p = store.joinPrompt;
+  if (!p || p.joining) return;
+  p.joining = true;
+  p.error = '';
+  try {
+    const r = await api('POST', '/api/chats/pub/' + p.pubId + '/join');
+    store.joinPrompt = null;
+    await loadChats();
+    const c = store.chats.filter(function (x) { return x.id === r.chat_id; })[0];
+    if (c) openChat(c.id, true);
+  } catch (e) {
+    p.joining = false;
+    p.error = (e && e.detail) || t('No se pudo unir al grupo');
   }
 }
 
@@ -749,7 +813,12 @@ export function upsertMessage(m) {
     if (old && old._in && fresh._in == null) fresh._in = old._in;
   };
   for (let i = 0; i < arr.length; i++) {
-    if (arr[i].id === m.id) { keepIn(arr[i], m); arr[i] = m; stored = arr[i]; break; }
+    /* W68: además del id interno, el ID público de 20 dígitos identifica
+       el mensaje en REST/WS (dedup estable sin depender del id). */
+    if (arr[i].id === m.id ||
+        (m.pub_id && arr[i].pub_id && arr[i].pub_id === m.pub_id)) {
+      keepIn(arr[i], m); arr[i] = m; stored = arr[i]; break;
+    }
   }
   if (!stored && m.client_msg_id) {
     for (let i = 0; i < arr.length; i++) {

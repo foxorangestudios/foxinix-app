@@ -80,11 +80,12 @@ export const store = reactive({
   versionUpdate: false,
   versionInfo: null,
   versionDownloading: false,
-  versionProgress: 0,\n  versionError: false,         // {kind, icon, title, text, state, index, total, busy, error}
+  versionProgress: 0,
+  versionError: false,         // {kind, icon, title, text, state, index, total, busy, error}
   permStates: {},         // kind → granted | denied | prompt | unavailable
   readSeqs: {},           // chatId → {userId: seq} (eventos 'read' recibidos)
   deliveredSeqs: {},      // chatId → {userId: seq} (eventos 'delivered', W12)
-  ws: 'off',              // off | connecting | on
+  ws: 'connecting',       // off | connecting | on
   call: null,             // W28h: llamada WebRTC 1:1 en curso | null
   /* W64: presencia de salas de grupo ajenas a mi llamada:
      chatId → {callId, count, video, host}. Permite el botón verde y el
@@ -121,6 +122,9 @@ export const store = reactive({
   /* W27b: foto de grupo en edición { chatId, src, initial } — vive en el
      panel de info del chat */
   grpEdit: { chatId: 0, src: '' },
+  /* W68: modal "unirse al grupo por enlace": {pubId, title, avatarUrl,
+     memberCount, joining, error} | null (lo abre resolvePendingChat) */
+  joinPrompt: null,
   profile: null,          // ventana flotante de perfil: {loading, user, error} | null
   confirmBox: null,       // {title, text, danger, requireUser, requirePassword, ...}
   /* W57: renombrar grupo (solo owner/admin) */
@@ -185,7 +189,7 @@ export const store = reactive({
      pantalla. Lo levanta api.js con el 429 {spam:true} del server. */
   spamUntil: 0,
 
-  online: navigator.onLine !== false,
+  online: typeof navigator !== 'undefined' ? navigator.onLine !== false : true,
   toasts: [],
 });
 
@@ -292,18 +296,19 @@ export function urlForState() {
   let path = '/app';
   const chat = chatById(store.activeChatId);
   if (chat) {
-    /* El DM se direcciona por el id del PEER (no el del chat) y el grupo
-       por el id del chat: la URL identifica por id exacto. */
+    /* W68: el DM se direcciona por el ID público del PEER (16 dígitos) y
+       el grupo por el suyo (12); el id interno queda como fallback para
+       datos aún no serializados. */
     if (chat.type === 'dm' && chat.title && chat.title.id) {
-      path = '/app/user/' + chat.title.id;
+      path = '/app/user/' + (chat.title.pub_id || chat.title.id);
     } else {
-      path = '/app/group/' + chat.id;
+      path = '/app/group/' + (chat.pub_id || chat.id);
     }
   } else if (store.profile && store.profile.user && store.profile.user.id) {
     /* W65: el perfil abierto sin chat también es una vista direccionable.
        Así un enlace directo a alguien sin amistad conserva su URL y al
        recargar se vuelve a resolver (sin duplicar solicitudes). */
-    path = '/app/user/' + store.profile.user.id;
+    path = '/app/user/' + (store.profile.user.pub_id || store.profile.user.id);
   }
   const q = [];
   if (store.settingsOpen) {
@@ -371,10 +376,14 @@ function applyState(p) {
     else route = 'login';
   } else if (seg[0] === 'app') {
     route = 'app';
+    /* W68: el segmento es el ID público (16 dígitos usuario / 12 grupo)
+       o, en enlaces viejos, el id interno. Se guarda el string CRUDO:
+       parseInt perdería precisión (>2^53) y el resolver distingue por
+       longitud de dígitos en actions.resolvePendingChat. */
     if (seg[1] === 'user' && seg[2]) {
-      chatRef = { kind: 'user', id: parseInt(seg[2], 10) || 0 };
+      chatRef = { kind: 'user', id: seg[2] };
     } else if (seg[1] === 'group' && seg[2]) {
-      chatRef = { kind: 'group', id: parseInt(seg[2], 10) || 0 };
+      chatRef = { kind: 'group', id: seg[2] };
     }
   } else if (KNOWN_ROUTES.indexOf(seg[0]) >= 0) {
     route = seg[0];
@@ -512,6 +521,8 @@ watch(
 let tid = 0;
 export function toast(msg, kind = 'info') {
   const id = ++tid;
+  /* Máximo 1 toast visible a la vez */
+  store.toasts.splice(0, store.toasts.length);
   store.toasts.push({ id, msg, kind });
   setTimeout(() => {
     const i = store.toasts.findIndex((t) => t.id === id);

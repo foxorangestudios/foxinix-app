@@ -4,6 +4,7 @@ import {
   setPrefStr,   /* W40: estilo de emojis (valor libre) */
   setWallImg, setWallDim, setWallBlur, setSideCollapsed, setMicDev,
   setArchiveLock, checkArchiveLock, clearArchiveLock, hasArchiveLock,
+  syncUrl,      /* W68: modal join vuelve a la URL real al cancelar */
 } from '../store.js';
 import { logout, api, session, saveSession, uploadMedia,
   uploadChatAvatar, ensurePreview } from '../api.js';
@@ -57,6 +58,8 @@ import {
   charCount, MAX_TEXT_CHARS,
   /* W66c */
   isAnimWebp,
+  /* W68: unirse a grupo por enlace */
+  joinGroupByPub,
 } from '../actions.js';
 /* W15: descarga de archivos con progreso, cancelación y reintento. */
 import {
@@ -4479,10 +4482,18 @@ const MeProfileModal = {
       statusDraft.value = '';
       saveStatus(myPreset.value, '');
     };
+    /* W68: copiar mi ID público (16 dígitos) para compartir el enlace
+       /app/user/<id> y que otra persona pueda enviar solicitud. */
+    const copyMyId = function () {
+      if (store.user && store.user.pub_id) {
+        copyText(store.user.pub_id);
+        toast(t('ID copiado'), 'ok');
+      }
+    };
     return {
       store, close, edit, myStatus, myPreset, presets: STATUS_PRESETS,
       menuOpen, statusDraft, statusBusy, statusErr,
-      toggleStatus, choosePreset, saveCustom, clearCustom,
+      toggleStatus, choosePreset, saveCustom, clearCustom, copyMyId,
       dotClass, statusOf, joinedLine, md: mdToHtml, mediaUrl,
       bannerStyle, viewMedia: openMediaViewer,
     };
@@ -4529,6 +4540,13 @@ const MeProfileModal = {
             <div class="pf-idbelow">
               <div class="pp-name">{{ store.user.display_name || store.user.username }}</div>
               <div class="pp-user">@{{ store.user.username }}</div>
+              <!-- W68: ID público copiable (enlace /app/user/<id>) -->
+              <button class="pf-pubid" type="button" v-if="store.user.pub_id"
+                :title="t('Copiar ID')" @click="copyMyId">
+                <span class="pf-pubid-l">{{ t('ID') }}</span>
+                <code class="pf-pubid-v">{{ store.user.pub_id }}</code>
+                <svg class="ic ic-sm"><use href="#i-copy"></use></svg>
+              </button>
             </div>
             <bio-text v-if="store.user.bio" :text="store.user.bio"></bio-text>
             <div class="pp-rows pf-rows">
@@ -6193,6 +6211,14 @@ const ProfilePanel = {
       store, close, startChat, friendState, inActiveDm, dotClass,
       statusOf, profileQuote, personMenu, joinedLine, md: mdToHtml,
       mediaUrl, bannerStyle, viewMedia: openMediaViewer,
+      /* W68: copiar el ID público del perfil abierto */
+      copyPubId: function () {
+        const p = store.profile;
+        if (p && p.user && p.user.pub_id) {
+          copyText(p.user.pub_id);
+          toast(t('ID copiado'), 'ok');
+        }
+      },
     };
   },
   components: { BioText },
@@ -6246,6 +6272,13 @@ const ProfilePanel = {
             <div class="pf-idbelow">
               <div class="pp-name">{{ store.profile.user.display_name }}</div>
               <div class="pp-user">@{{ store.profile.user.username }}</div>
+              <!-- W68: ID público copiable (enlace /app/user/<id>) -->
+              <button class="pf-pubid" type="button" v-if="store.profile.user.pub_id"
+                :title="t('Copiar ID')" @click="copyPubId">
+                <span class="pf-pubid-l">{{ t('ID') }}</span>
+                <code class="pf-pubid-v">{{ store.profile.user.pub_id }}</code>
+                <svg class="ic ic-sm"><use href="#i-copy"></use></svg>
+              </button>
             </div>
             <bio-text v-if="store.profile.user.bio" :text="store.profile.user.bio"></bio-text>
             <div class="pp-rows pf-rows">
@@ -6295,6 +6328,50 @@ const RequestSentModal = {
         </div>
         <div class="req-sent-foot">
           <button class="btn req-ok" type="button" @click="close">{{ t('Okey') }}</button>
+        </div>
+      </div>
+    </div>`,
+};
+
+/* ------------------------------------------- JoinGroupModal (W68) */
+
+/* Unirse a un grupo por enlace (/app/group/<id de 12 dígitos>). Muestra
+   la ficha pública (nombre, avatar, miembros) y pide confirmación; el
+   dueño del enlace no ve esto (los miembros abren el chat directo). */
+const JoinGroupModal = {
+  setup: function () {
+    const close = function () {
+      if (store.joinPrompt && store.joinPrompt.joining) return;
+      store.joinPrompt = null;
+      syncUrl();   // la URL vuelve a la real (no quedarse en el enlace)
+    };
+    const join = function () { joinGroupByPub(); };
+    return { store, close, join };
+  },
+  template: `
+    <div class="modal-veil" @click.self="close" role="dialog" aria-modal="true"
+      :aria-label="t('Unirse al grupo')">
+      <div class="modal join-group">
+        <header>
+          <span class="m-head-title"><b>{{ t('Unirse al grupo') }}</b></span>
+        </header>
+        <div class="join-body" v-if="store.joinPrompt">
+          <img v-if="store.joinPrompt.avatarUrl" class="join-av"
+            :src="store.joinPrompt.avatarUrl" alt="">
+          <span v-else class="join-av join-av-ph" aria-hidden="true">
+            <svg class="ic"><use href="#i-users"></use></svg>
+          </span>
+          <p class="join-title">{{ store.joinPrompt.title }}</p>
+          <p class="join-meta">{{ t('{n} miembros', { n: store.joinPrompt.memberCount }) }}</p>
+          <p v-if="store.joinPrompt.error" class="join-err">{{ store.joinPrompt.error }}</p>
+        </div>
+        <div class="join-foot">
+          <button class="btn ghost" type="button" @click="close"
+            :disabled="store.joinPrompt && store.joinPrompt.joining">{{ t('Cancelar') }}</button>
+          <button class="btn primary" type="button" @click="join"
+            :disabled="store.joinPrompt && store.joinPrompt.joining">{{
+            store.joinPrompt && store.joinPrompt.joining ? t('Uniéndote…')
+            : t('Unirse') }}</button>
         </div>
       </div>
     </div>`,
@@ -6501,6 +6578,42 @@ const ChatInfoPanel = {
     });
     const pickPhoto = function () { pickGroupPhoto(chat.value); };
 
+    /* W68: enlace de invitación (solo owner/admin gestiona; el resto
+       de miembros no ve la sección). El toggle hace PATCH invites_open. */
+    const canInvite = Vue.computed(function () {
+      const c = chat.value;
+      return !!(c && c.type === 'group' &&
+        (c.my_role === 'owner' || c.my_role === 'admin'));
+    });
+    const inviteLink = Vue.computed(function () {
+      const c = chat.value;
+      const id = c && (c.pub_id || '');
+      return id ? location.origin + '/app/group/' + id : '';
+    });
+    const toggleInvites = function (e) {
+      const c = chat.value;
+      if (!c) return;
+      const on = !!e.target.checked;
+      api('PATCH', '/api/chats/' + c.id, { invites_open: on }).then(function () {
+        c.invites_open = on;
+        toast(on ? t('Enlace de invitación activado')
+                 : t('Enlace de invitación desactivado'), 'ok');
+      }).catch(function (err) {
+        e.target.checked = !on;   // revertir el toggle visual
+        toast((err && err.detail) || t('No se pudo cambiar el ajuste'), 'err');
+      });
+    };
+    const copyInvite = function () {
+      const txt = inviteLink.value;
+      if (!txt) return;
+      copyText(txt);
+      toast(t('Enlace copiado'), 'ok');
+    };
+    const copyPubId = function () {
+      const c = chat.value;
+      if (c && c.pub_id) { copyText(c.pub_id); toast(t('ID copiado'), 'ok'); }
+    };
+
     /* W27b: mientras store.grpEdit apunte a ESTE chat, el panel muestra
        el editor de encuadre en lugar de la foto; al aplicar se sube el
        PNG compuesto y el encuadre queda guardado para reeditar. */
@@ -6638,6 +6751,8 @@ const ChatInfoPanel = {
       gal, galLoading, openGal, closeGal, goGal, galClick, galSpoiled, fmtSize,
       /* W29c */
       memberTyping,
+      /* W68: enlace de invitación del grupo */
+      canInvite, inviteLink, toggleInvites, copyInvite, copyPubId,
     };
   },
   components: { AvatarEditor, BioText },
@@ -6747,6 +6862,28 @@ const ChatInfoPanel = {
               </button>
             </div>
           </template>
+          <!-- W68: enlace de invitación (solo owner/admin): el ID
+               público de 12 dígitos permite unirse por /app/group/<id> -->
+          <div class="mi-sec gi-sec" v-if="canInvite">
+            <span>{{ t('Enlace de invitación') }}</span>
+          </div>
+          <div class="gi-body" v-if="canInvite">
+            <div class="gi-tgl-row">
+              <div class="st-col">
+                <b>{{ t('Permitir añadir por enlace') }}</b>
+                <span>{{ t('Cualquiera con el enlace puede unirse') }}</span>
+              </div>
+              <label class="tgl"><input type="checkbox" :checked="chat.invites_open"
+                @change="toggleInvites"><span class="tgl-track"><span class="tgl-knob"></span></span></label>
+            </div>
+            <div class="gi-link" v-if="chat.invites_open && inviteLink">
+              <input class="gi-link-i" type="text" readonly :value="inviteLink"
+                :aria-label="t('Enlace de invitación')" @focus="$event.target.select()">
+              <button class="icon-btn" type="button" :title="t('Copiar enlace')" @click="copyInvite">
+                <svg class="ic ic-sm"><use href="#i-copy"></use></svg>
+              </button>
+            </div>
+          </div>
         </div>
         <div class="pp-body pp-left" v-else>
           <div class="pp-loading">{{ t('Sin miembros') }}</div>
@@ -7049,13 +7186,22 @@ const PeoplePanel = {
     });
 
     /* Búsqueda de personas para enviar solicitud (mismo debounce que la
-       lupa de chats: 300 ms y mínimo 2 caracteres). */
+       lupa de chats: 300 ms y mínimo 2 caracteres).
+       W68: una query de EXACTAMENTE 16 dígitos busca por ID público. */
     let timer = 0;
     Vue.watch(q, function () {
       if (timer) clearTimeout(timer);
       timer = setTimeout(function () {
         const s = q.value.trim();
         if (s.length < 2) { results.value = []; return; }
+        if (/^\d{16}$/.test(s)) {
+          api('GET', '/api/users/pub/' + s).then(function (r) {
+            results.value = r && r.user ? [r.user] : [];
+          }).catch(function () {
+            results.value = [];
+          });
+          return;
+        }
         searchUsers(s).then(function (rs) {
           results.value = rs;
         }).catch(function () {
@@ -7283,7 +7429,7 @@ const PeoplePanel = {
 /* ------------------------------------------------------- ChatShell */
 
 export const ChatShell = {
-  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, UsernameModal, ArchiveLockModal, DownloadViewer, ConfirmBox, RequestSentModal, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
+  components: { MessageRow, NewChatModal, SettingsModal, MeProfileModal, MeProfileEditModal, UsernameModal, ArchiveLockModal, DownloadViewer, ConfirmBox, RequestSentModal, JoinGroupModal, PermissionGate, ReadsBox, CallBox, ProfilePanel, ChatInfoPanel, EmojiPicker, SpamBox, WallPanel, WallPreview, PeoplePanel, RenameGroupModal },
   setup: function () {
     const scroller = Vue.ref(null);
     const input = Vue.ref(null);
@@ -9979,7 +10125,7 @@ export const ChatShell = {
              recreaba el nodo y la animación de entrada se veía como
              "se borra y se reenvía"). Sin client_msg_id (mensajes de
              sistema) se usa el id. */
-          '<template v-for="r in rows" :key="r.ref.client_msg_id || r.ref.id">' +
+          '<template v-for="r in rows" :key="r.ref.client_msg_id || r.ref.pub_id || r.ref.id">' +
             '<div v-if="r.day" class="day-pill">{{ r.day }}</div>' +
             '<message-row :row="r" :data-mid="r.ref.id" @dblclick="quickReact($event, r)" ' +
               '@imgload="onImgLoad" @reply="startReply" ' +
@@ -10432,6 +10578,7 @@ export const ChatShell = {
       /* W65: confirmación de solicitud enviada (enlace directo o ＋). */
       '<transition name="veil">' +
       '<request-sent-modal v-if="store.requestSent"></request-sent-modal>' +
+      '<join-group-modal v-if="store.joinPrompt"></join-group-modal>' +
       '</transition>' +
       /* W11: soltar archivos sobre el chat */
       '<div class="drop-hint" v-if="dropping">' +

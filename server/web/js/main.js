@@ -35,6 +35,33 @@ const Root = {
   name: 'Root',
   setup() {
     const comp = Vue.computed(() => views[store.route] || LoginView);
+    const isOnline = () => typeof navigator !== 'undefined' && navigator.onLine !== false;
+    /* El overlay offline solo aparece si la conexión estuvo caída
+       5+ segundos seguidos, así una reconexión rápida no lo muestra. */
+    const offlineVisible = Vue.ref(false);
+    const offlineReason = Vue.ref('server'); // 'server' | 'internet'
+    let offlineTimer = null;
+    /* Distinguir "sin internet" de "servidor caído": si hay internet
+       (ping a Google responde), el problema es del servidor. */
+    const checkInternet = function () {
+      return fetch('https://www.google.com/favicon.ico', { mode: 'no-cors', cache: 'no-store' })
+        .then(() => true)
+        .catch(() => false);
+    };
+    Vue.watch(() => store.ws, (val) => {
+      if (val === 'on' || val === 'connecting') {
+        offlineVisible.value = false;
+        if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
+      } else if (!offlineTimer) {
+        offlineTimer = setTimeout(() => {
+          checkInternet().then(function (hasNet) {
+            offlineReason.value = hasNet ? 'server' : 'internet';
+            offlineVisible.value = true;
+          });
+          offlineTimer = null;
+        }, 5000);
+      }
+    });
     Vue.onMounted(() => {
       // Orden: sesión → URL inicial (deep links) → arranque.
       loadSession();
@@ -81,7 +108,7 @@ const Root = {
         const reader = res.body.getReader();
         let received = 0;
         const chunks = [];
-        while (True) {
+        while (true) {
           const {done, value} = await reader.read();
           if (done) break;
           chunks.push(value);
@@ -102,35 +129,36 @@ const Root = {
         store.toasts.push({id: Date.now(), kind: 'err', msg: 'Error al descargar actualización' });
       }
     };
-    return { comp, store, startApkDownload };
+    return { comp, store, startApkDownload, isOnline, t, offlineVisible, offlineReason };
   },
   template: `
     <transition name="fade" mode="out-in">
       <component :is="comp" :key="store.route"></component>
     </transition>
     <!-- W62: overlay sin conexión / servidor caído -->
-    <div v-if="store.ws !== 'on' && store.ws !== 'connecting'" class="offline-overlay">
-      <div class="offline-box">
-        <svg class="ic ic-lg"><use href="#i-wifi-off"></use></svg>
-        <h3>{{ navigator.onLine ? $t('Servidor caído') : $t('Sin conexión') }}</h3>
-        <p>{{ navigator.onLine ? $t('No se puede conectar con el servidor. Reintentando...') : $t('Comprueba tu conexión a Internet.') }}</p>
-        <button class="btn" type="button" @click="store.ws = 'connecting'">{{ $t('Reintentar') }}</button>
+    <div v-if="offlineVisible" class="offline-overlay">
+      <div class="offline-box offline-warning">
+        <svg class="ic ic-lg" v-if="offlineReason === 'internet'"><use href="#i-wifi-off"></use></svg>
+        <svg class="ic ic-lg" v-else><use href="#i-alert"></use></svg>
+        <h3>{{ offlineReason === 'internet' ? t('Sin conexión a internet') : t('Servidor caído') }}</h3>
+        <p>{{ offlineReason === 'internet' ? t('Comprueba tu conexión a Internet.') : t('Conéctate más tarde, puede que estemos resolviendo un problema.') }}</p>
+        <button class="btn" type="button" @click="store.ws = 'connecting'">{{ t('Reintentar') }}</button>
       </div>
     </div>
     <div v-if="store.versionUpdate" class="version-overlay">
       <div class="version-box">
         <svg class="ic ic-lg"><use href="#i-update"></use></svg>
-        <h3>{{$t('Actualización disponible')}}</h3>
-        <p v-if="!store.versionDownloading && !store.versionError">{{$t('Hay una nueva versión de Foxinix.')}}</p>
-        <p v-if="store.versionError" class="err">{{$t('La instalación fue cancelada o falló.')}}</p>
+        <h3>{{t('Actualización disponible')}}</h3>
+        <p v-if="!store.versionDownloading && !store.versionError">{{t('Hay una nueva versión de Foxinix.')}}</p>
+        <p v-if="store.versionError" class="err">{{t('La instalación fue cancelada o falló.')}}</p>
         <div v-if="store.versionDownloading">
-          <p>{{$t('Descargando...')}} {{store.versionProgress}}%</p>
+          <p>{{t('Descargando...')}} {{store.versionProgress}}%</p>
           <div class="progress-bar"><div class="progress-fill" :style="{width: store.versionProgress + '%'}"></div></div>
         </div>
         <div class="version-actions">
-          <button v-if="!store.versionDownloading" class="btn btn-primary" type="button" @click="startApkDownload()">{{$t('Actualizar ahora')}}</button>
-          <button v-if="store.versionError" class="btn btn-primary" type="button" @click="store.versionError=false; startApkDownload()">{{$t('Reintentar')}}</button>
-          <button class="btn btn-ghost" type="button" @click="store.versionUpdate = null; store.versionError = false">{{$t('Recordar más tarde')}}</button>
+          <button v-if="!store.versionDownloading" class="btn btn-primary" type="button" @click="startApkDownload()">{{t('Actualizar ahora')}}</button>
+          <button v-if="store.versionError" class="btn btn-primary" type="button" @click="store.versionError=false; startApkDownload()">{{t('Reintentar')}}</button>
+          <button class="btn btn-ghost" type="button" @click="store.versionUpdate = null; store.versionError = false">{{t('Recordar más tarde')}}</button>
         </div>
       </div>
     </div>
@@ -171,8 +199,7 @@ function refreshTitle() {
   let n = 0;
   const chats = store.chats || [];
   for (let i = 0; i < chats.length; i++) n += chats[i].unread || 0;
-  const hidden = document.hidden;
-  document.title = (n > 0 && hidden)
+  document.title = n > 0
     ? '(' + (n > 999 ? '999+' : n) + ') Foxinix'
     : 'Foxinix';
 }

@@ -11,25 +11,25 @@ import { store } from './store.js';
 export const MESSAGE_TONES = [
   { id: 'default', name: 'Predeterminado', file: null },
   { id: 'beep', name: 'Beep', file: '/tonos/Mensaje/Beep.mp3' },
-  { id: 'maullido', name: 'Maullido Saturado', file: '/tonos/Mensaje/Maullido Saturado.mp3' },
-  { id: 'notif2', name: 'Notificación 2', file: '/tonos/Mensaje/Notificación 2.mp3' },
   { id: 'notifdefault', name: 'Notificación predeterminada', file: '/tonos/Mensaje/Notificación predeterminada.mp3' },
+  { id: 'notif2', name: 'Notificación 2', file: '/tonos/Mensaje/Notificación 2.mp3' },
   { id: 'discord', name: 'Sonido de Discord', file: '/tonos/Mensaje/Sonido de Discord.mp3' },
+  { id: 'maullido', name: 'Maullido Saturado', file: '/tonos/Mensaje/Maullido Saturado.mp3' },
+  { id: 'silbido', name: 'Silbido WhatsApp', file: '/tonos/Llamada/Silbido-Whatsapp.mp3' },
 ];
 
 export const CALL_TONES = [
   { id: 'default', name: 'Predeterminado', file: null },
-  { id: 'discord', name: 'Discord Calling', file: '/tonos/Llamada/Discord Calling.mp3' },
-  { id: 'iphone', name: 'iPhone-SE', file: '/tonos/Llamada/iPhone-SE.mp3' },
+  { id: 'iphone', name: 'iPhone SE', file: '/tonos/Llamada/iPhone-SE.mp3' },
+  { id: 'discord', name: 'Discord', file: '/tonos/Llamada/Discord Calling.mp3' },
+  { id: 'skype', name: 'Skype', file: '/tonos/Llamada/Skype.mp3' },
   { id: 'nokia1994', name: 'Nokia 1994', file: '/tonos/Llamada/Nokia 1994.mp3' },
   { id: 'nokiasaul', name: 'Nokia Saul', file: '/tonos/Llamada/Nokia Saul.mp3' },
-  { id: 'skype', name: 'Skype', file: '/tonos/Llamada/Skype.mp3' },
-  { id: 'silbido', name: 'Silbido-Whatsapp', file: '/tonos/Llamada/Silbido-Whatsapp.mp3' },
   { id: 'saul', name: 'Saul', file: '/tonos/Llamada/Saul.mp3' },
   { id: 'pedro', name: 'Pedro Pedro Pe', file: '/tonos/Llamada/Pedro Pedro Pe.mp3' },
-  { id: 'sacame', name: 'Sacame del bolsillo', file: '/tonos/Llamada/Sacame del bolsillo.mp3' },
+  { id: 'sacame', name: 'Sácame del bolsillo', file: '/tonos/Llamada/Sacame del bolsillo.mp3' },
   { id: 'thunderstruck', name: 'Thunderstruck', file: '/tonos/Llamada/Thunderstruck.mp3' },
-  { id: 'nya', name: 'Nya Music (Para otakus)', file: '/tonos/Llamada/Nya Music (Para otakus).mp3' },
+  { id: 'nya', name: 'Nya Music (Otakus)', file: '/tonos/Llamada/Nya Music (Para otakus).mp3' },
 ];
 
 export function customTone(kind) {

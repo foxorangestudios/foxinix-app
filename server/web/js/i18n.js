@@ -22,6 +22,7 @@ const EN = {
   'en línea': 'online',
   'Desconectado': 'Disconnected',
   'Sin conexión': 'Offline',
+  'Conéctate más tarde, puede que estemos resolviendo un problema.': 'Check back later, we may be fixing an issue.',
   'Conectando…': 'Connecting…',
   'Error {n}': 'Error {n}',
   'Espera {n}s antes de reintentar': 'Wait {n}s before retrying',
@@ -821,6 +822,24 @@ const EN = {
     'If you want more funny call ringtones you can download at: https://tonosdellamada.es',
   'Tono guardado': 'Tone saved',
   'No se pudo subir el tono': 'Could not upload the tone',
+  /* ---------- W68: IDs públicos, enlaces de invitación ---------- */
+  'Unirse al grupo': 'Join group',
+  '{n} miembros': '{n} members',
+  'Unirse': 'Join',
+  'Uniéndote…': 'Joining…',
+  'Grupo no encontrado': 'Group not found',
+  'No se pudo abrir el grupo': 'Could not open the group',
+  'No se pudo unir al grupo': 'Could not join the group',
+  'Enlace de invitación': 'Invite link',
+  'Permitir añadir por enlace': 'Allow adding via link',
+  'Cualquiera con el enlace puede unirse': 'Anyone with the link can join',
+  'Copiar enlace': 'Copy link',
+  'No se pudo copiar el enlace': 'Could not copy the link',
+  'Enlace de invitación activado': 'Invite link enabled',
+  'Enlace de invitación desactivado': 'Invite link disabled',
+  'No se pudo cambiar el ajuste': 'Could not change the setting',
+  'ID copiado': 'ID copied',
+  'Copiar ID': 'Copy ID',
 };
 
 /**

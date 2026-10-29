@@ -81,6 +81,10 @@
   var mq = window.matchMedia('(max-width: 760px)');
   var timer = 0;
   var update = function () {
+    /* Chrome avisa "El diseño se forzó antes de que la página se cargara
+       completamente" si medimos el viewport en mitad de la carga (el
+       destello de contenido sin estilo); hasta 'complete' no medimos. */
+    if (document.readyState !== 'complete') return;
     var vv = window.visualViewport;
     if (!mq.matches || !vv || vv.scale > 1.05) {
       root.classList.remove('kb-open');
@@ -108,7 +112,8 @@
   }
   if (mq.addEventListener) mq.addEventListener('change', schedule);
   else if (mq.addListener) mq.addListener(schedule);
-  update();
+  if (document.readyState === 'complete') update();
+  else window.addEventListener('load', update);
 })();
 
 /* W56: el WebView de Android no rellena env(safe-area-inset-bottom), así

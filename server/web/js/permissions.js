@@ -304,6 +304,9 @@ export async function bootPermissions() {
   const missing = [];
   for (let i = 0; i < PERMISSIONS.length; i++) {
     const id = PERMISSIONS[i].id;
+    /* NO pedir mic/cámara al arranque: getUserMedia enciende el LED
+       y asusta al usuario. Se piden solo al hacer llamadas. */
+    if (id === 'mic' || id === 'camera') continue;
     const st = states[id];
     if (st === 'prompt' || st === 'denied') missing.push(id);
   }

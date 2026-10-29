@@ -85,15 +85,16 @@ async def reject_big_bodies(request, call_next):
 
 
 # W14: cabeceras de seguridad en TODA respuesta.
-# Nota: 'unsafe-eval' en script-src es necesario porque el build global de
-# Vue compila los templates en runtime (new Function). Se MANTIENE sin
-# 'unsafe-inline': los scripts inline siguen bloqueados (el vector XSS
-# principal) y el resto del CSP endurece el resto de recursos.
+# 'unsafe-eval' en script-src es necesario porque el build global de
+# Vue compila los templates en runtime (new Function).
+# 'unsafe-inline' se añade porque Vue y el código de actualización
+# (blob URLs para descarga de APK, modales dinámicos) generan
+# ejecución de scripts inline.
 _CSP = (
-    "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+    "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline';"
     # W45f: las tarjetas de enlace muestran portadas externas; sin https:
     # el navegador las bloqueaba y la tarjeta quedaba sin imagen.
-    " img-src 'self' data: blob: https:; media-src 'self' blob:;"
+    " img-src 'self' data: blob: https:; media-src 'self' data: blob:;"
     # blob: en connect-src: resolveDur (notas de voz viejas, W13) hace fetch
     # del src; W15 sirve el audio como blob, y sin blob: el CSP lo bloqueaba.
     " connect-src 'self' ws: wss: blob:; worker-src 'self' blob:;"
