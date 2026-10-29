@@ -2234,7 +2234,7 @@ const MessageRow = {
     };
   },
   template:
-    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in, has-av: row.avCol && row.showTime }" @animationend="animEnd">' +
+    '<div class="msg" :data-msg-id="row.ref.id" :class="{ mine: row.mine, tight: row.tight, system: row.ref.kind === \'system\', reacts: !!(row.ref.reactions && row.ref.reactions.length), anim: !!row.ref._in, \'has-av\': row.avCol && row.showTime }" @animationend="animEnd">' +
       /* W66: avatar del remitente junto a cada mensaje (propios y ajenos,
          grupos y MDs). Solo se muestra cuando hay hora (no en mensajes
          continuos del mismo remitente sin hora). Para los entrantes va a
