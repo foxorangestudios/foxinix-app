@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -95,7 +96,7 @@ async def reject_big_bodies(request, call_next):
 # (blob URLs para descarga de APK, modales dinámicos) generan
 # ejecución de scripts inline.
 _CSP = (
-    "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline';"
+    "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self';"
     # W45f: las tarjetas de enlace muestran portadas externas; sin https:
     # el navegador las bloqueaba y la tarjeta quedaba sin imagen.
     " img-src 'self' data: blob: https:; media-src 'self' data: blob:;"
@@ -160,11 +161,23 @@ if TONES_DIR.is_dir():
 
 
 @app.get("/")
-def index() -> FileResponse:
-    """SPA: el shell de la app web (rutas por hash, sin catch-all)."""
+def index() -> Response:
+    """SPA: el shell de la app web (rutas por hash, sin catch-all).
+
+    Inyecta `?v=<hash>` en cada referencia estática para que, al desplegar
+    archivos nuevos, el navegador los descargue de nuevo en lugar de usar
+    la copia en caché (Cloudflare max-age=14400 o service worker).
+    """
     if not INDEX_HTML.is_file():
         return Response(status_code=404, media_type="text/plain", content="web no desplegado")
-    return FileResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    for rel, h in STATIC_HASHES.items():
+        html = html.replace(f'/static/{rel}', f'/static/{rel}?v={h}')
+    return Response(
+        content=html,
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/sw.js")
@@ -197,12 +210,34 @@ def favicon() -> Response:
 
 _started_at = int(time.time())
 
+# Hashes de archivos estáticos para cache-busting: al servir index.html se
+# inyecta `?v=<hash>` en cada referencia, así que cuando un archivo cambia
+# su URL cambia y el navegador lo descarga de nuevo (no depende de caché
+# HTTP ni del service worker).
+STATIC_HASHES: dict[str, str] = {}
+_STATIC_FILES = (
+    "css/app.css",
+    "js/boot.js",
+    "js/theme-detect.js",
+    "js/main.js",
+    "vendor/vue.global.prod.js",
+)
+
+
+def _file_hash(rel: str) -> str:
+    p = WEB_DIR / rel
+    if not p.is_file():
+        return "0"
+    return hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+
 
 @app.on_event("startup")
 async def _startup() -> None:
     db.init_db()
     hub.bind_loop()
     asyncio.create_task(cleanup.cleanup_loop())
+    for rel in _STATIC_FILES:
+        STATIC_HASHES[rel] = _file_hash(rel)
 
 
 @app.get("/api/health")
@@ -218,12 +253,15 @@ def health() -> dict:
 @app.get("/api/version")
 def version_info() -> dict:
     # W62: información de versión de la app web y del APK
-    # apk_version y apk_url se leen de variables de entorno
+    # web_version incluye el hash de los estáticos para que el cliente
+    # detecte cambios de CSS/JS y recargue automáticamente.
     import os
     apk_version = os.getenv("FOXMSG_APK_VERSION", app.version)
     apk_url = os.getenv("FOXMSG_APK_URL", "")
+    static_hash = "+".join(f"{k}={v}" for k, v in sorted(STATIC_HASHES.items()))
+    web_version = f"{app.version}+{static_hash}"
     return {
-        "web_version": app.version,
+        "web_version": web_version,
         "apk_version": apk_version,
         "apk_url": apk_url,
         "min_version": os.getenv("FOXMSG_MIN_VERSION", app.version),

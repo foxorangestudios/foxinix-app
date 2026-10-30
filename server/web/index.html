@@ -5,19 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0b141a">
-  <!-- Detección temprana del tema del sistema para evitar parpadeo de
-       pantalla clara al iniciar el APK en modo oscuro del teléfono. -->
-  <script>
-    (function () {
-      try {
-        var root = document.documentElement;
-        var sys = window.matchMedia('(prefers-color-scheme: light)');
-        root.setAttribute('data-theme', sys.matches ? 'light' : 'dark');
-        var meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.setAttribute('content', sys.matches ? '#f5f5f5' : '#0b141a');
-      } catch (e) {}
-    })();
-  </script>
+  <script src="/static/js/theme-detect.js"></script>
   <title>Foxinix</title>
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
@@ -30,7 +18,7 @@
   <div id="app" v-cloak></div>
 
   <!-- Sprite de iconos: SVG inline = cero peticiones extra, trazo con currentColor -->
-  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <svg xmlns="http://www.w3.org/2000/svg" class="svg-sprite" aria-hidden="true">
     <!-- W57: logos inline (marca + palabra) para que el arranque
          no dependa de peticiones aparte. -->
     <!-- W68: el color vive en CSS (--accent vía color: currentColor);

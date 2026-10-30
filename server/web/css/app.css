@@ -6736,3 +6736,6 @@ button.dl-group .dl-group-head { pointer-events: none; }
 .pf-pubid-l { font-weight: 600; }
 .pf-pubid-v { font-family: var(--mono, monospace); font-size: 12px; }
 .pf-pubid .ic { width: 14px; height: 14px; }
+
+/* SVG sprite: oculto, solo se usa como referencia de <use> */
+.svg-sprite { display: none !important; }
