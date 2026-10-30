@@ -137,7 +137,7 @@ def _set_refresh_cookie(
         refresh,
         max_age=config.REFRESH_TTL,
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         secure=secure,
         path="/api/auth",
     )

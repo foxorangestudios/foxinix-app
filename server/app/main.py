@@ -33,7 +33,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # cliente desktop; la auth es por Bearer (sin cookies)
+    allow_origins=[
+        "https://chat.foxinix.qzz.io",
+        "http://localhost:8899",
+        "http://127.0.0.1:8899",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

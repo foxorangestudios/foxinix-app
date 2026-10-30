@@ -10,8 +10,34 @@ Item {
 
     // subvista: "login" | "register" | "profile"
     property string sub: "login"
+    // true entre que se pulsa "Crear cuenta" y el servidor confirma el registro
+    property bool registering: false
+
+    function doLogin() {
+        if (loginId.text.length > 0 && loginPw.text.length > 0) {
+            bridge.login(loginId.text, loginPw.text)
+        }
+    }
 
     Rectangle { anchors.fill: parent; color: Theme.bg }
+
+    // -------------------------------------------------- puente con bridge
+    Connections {
+        target: bridge
+        function onVerificationRequired(masked, resendAfter) {
+            if (registering) {
+                registering = false
+                // el servidor confirmó el registro: pasar al paso de perfil
+                flow.sub = "profile"
+            }
+        }
+        function onToast(msg, type) {
+            if (registering && type === "error") {
+                registering = false
+                // se queda en register para reintentar
+            }
+        }
+    }
 
     // ---------------------------------------------- layout split
     RowLayout {
@@ -296,8 +322,8 @@ Item {
                             color: regBtn.enabled ? Theme.accent : Theme.border
                         }
                         onClicked: {
+                            flow.registering = true
                             bridge.register(regEmail.text, regUser.text, regPw.text)
-                            flow.sub = "profile"
                         }
                     }
 
@@ -422,7 +448,6 @@ Item {
                         onClicked: {
                             bridge.setup_profile(profName.text, profBio.text,
                                                  avatarPreview.src.toString())
-                            flow.sub = "login"
                         }
                     }
                     LinkLabel {

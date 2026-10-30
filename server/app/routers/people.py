@@ -209,6 +209,8 @@ def accept_request(rid: int, user: dict = Depends(current_user)) -> dict[str, An
         raise HTTPException(404, "Solicitud no encontrada")
     if req["status"] != "pending":
         raise HTTPException(409, "La solicitud ya fue respondida")
+    if _blocked_pair(user["id"], req["from_user"]):
+        raise HTTPException(403, "Usuario bloqueado")
     db.run(
         "UPDATE friend_requests SET status = 'accepted', answered_at = ?"
         " WHERE id = ? AND status = 'pending'",
@@ -293,10 +295,21 @@ def block_user(body: BlockIn, user: dict = Depends(current_user)) -> dict[str, A
         " VALUES (?, ?, ?)",
         (user["id"], peer["id"], int(time.time())),
     )
+    # W28e: romper también la amistad aceptada si existe — mientras hay
+    # bloqueo no puede haber amistad ni MD entre ellos.
     db.run(
         "DELETE FROM friend_requests"
-        " WHERE (from_user = ? AND to_user = ?)"
-        "    OR (from_user = ? AND to_user = ?)",
+        " WHERE status = 'accepted'"
+        " AND ((from_user = ? AND to_user = ?)"
+        "    OR (from_user = ? AND to_user = ?))",
+        (user["id"], peer["id"], peer["id"], user["id"]),
+    )
+    # y cualquier solicitud pendiente entre ambos
+    db.run(
+        "DELETE FROM friend_requests"
+        " WHERE status = 'pending'"
+        " AND ((from_user = ? AND to_user = ?)"
+        "    OR (from_user = ? AND to_user = ?))",
         (user["id"], peer["id"], peer["id"], user["id"]),
     )
     for uid in (user["id"], peer["id"]):

@@ -113,6 +113,7 @@ Item {
                   + (verifyPage.emailMasked || "tu correo") + "</b>"
             color: Theme.textSec
             font.pixelSize: Theme.fsBody
+            textFormat: Text.RichText
         }
 
         // -------- 6 casilleros
