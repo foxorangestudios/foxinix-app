@@ -10,6 +10,19 @@
     var t = localStorage.getItem('fm.theme');
     if (t === 'light' || t === 'dark' || t === 'black') {
       document.documentElement.setAttribute('data-theme', t);
+    } else {
+      /* Sin preferencia guardada: detectar el tema del sistema/navegador
+         para no mostrar pantalla clara al iniciar en modo oscuro del teléfono. */
+      try {
+        var sys = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)');
+        if (sys.matches) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        } else {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
     }
     var a = localStorage.getItem('fm.accent');
     if (a && /^#[0-9a-fA-F]{6}$/.test(a)) {

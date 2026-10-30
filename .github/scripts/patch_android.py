@@ -182,15 +182,22 @@ for themes_path in (
         print(f"Aviso: no se encontró <style> en {themes_path.name}")
         continue
     insert_at = style_match.end()
+    # Tema claro (values): fondo blanco/gris claro, barra de estado clara.
+    # Tema oscuro (values-night): fondo oscuro #1e1f22, barra de estado oscura.
+    is_night = "values-night" in str(themes_path)
+    bg = "#1e1f22" if is_night else "#fafafa"
+    sb = "#1e1f22" if is_night else "#fafafa"
+    nb = "#1e1f22" if is_night else "#fafafa"
     themes = (
         themes[:insert_at]
-        + '\n        <item name="android:windowBackground">#1e1f22</item>'
-        + '\n        <item name="android:statusBarColor">#1e1f22</item>'
-        + '\n        <item name="android:navigationBarColor">#1e1f22</item>'
+        + f'\n        <item name="android:windowBackground">{bg}</item>'
+        + f'\n        <item name="android:statusBarColor">{sb}</item>'
+        + f'\n        <item name="android:navigationBarColor">{nb}</item>'
         + themes[insert_at:]
     )
     themes_path.write_text(themes, encoding="utf-8")
-    print(f"windowBackground/statusBarColor/navigationBarColor=#1e1f22 agregado a {themes_path.name}")
+    modo = "noche" if is_night else "claro"
+    print(f"windowBackground/statusBarColor/navigationBarColor={bg} ({modo}) agregado a {themes_path.name}")
 
 # W54d: con edge-to-edge (Android 15+) adjustResize no achica el WebView.
 # Aplicamos el inset del teclado al contenedor para que la página reciba
@@ -218,7 +225,6 @@ if main_activity:
             print("Aviso: no se encontró onCreate en MainActivity.kt")
         else:
             inset_code = (
-                "    AndroidNotifier.startPersistent(this)\n"
                 "    val content = findViewById<View>(android.R.id.content)\n"
                 "    ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->\n"
                 "      val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom\n"
@@ -1502,26 +1508,6 @@ class AndroidNotifier(private val activity: Activity) {
   }
 
   companion object {
-    /* W62: notificación persistente para mantener la app viva y recibir avisos.
-       Se llama como AndroidNotifier.startPersistent(activity) desde MainActivity
-       antes de que exista una instancia de AndroidNotifier, por eso va acá. */
-    fun startPersistent(activity: Activity) {
-      val channelId = "foxinix_persistent"
-      val nm = activity.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-        val ch = android.app.NotificationChannel(channelId, "Foxinix", android.app.NotificationManager.IMPORTANCE_LOW)
-        ch.description = "Mantiene la conexión y las notificaciones activas"
-        nm.createNotificationChannel(ch)
-      }
-      val nb = androidx.core.app.NotificationCompat.Builder(activity, channelId)
-        .setSmallIcon(R.drawable.ic_stat_foxinix)
-        .setContentTitle("Foxinix")
-        .setContentText("Conectado")
-        .setOngoing(true)
-        .setOnlyAlertOnce(true)
-      nm.notify(9999, nb.build())
-    }
-
     /* W57: MainActivity guarda acá el aviso tocado; la web lo consume
        cuando termina de arrancar, incluso en arranque frío. */
     @Volatile
