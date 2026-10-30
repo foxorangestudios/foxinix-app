@@ -12,6 +12,9 @@ import jwt
 from . import config
 
 _SCRYPT_N = 2**14
+# W??: scrypt N=2^16 recomendado para 2026, pero requiere >=33 MB de RAM
+# para OpenSSL. En este entorno (límite ~16 MB) se mantiene en 2^14.
+# Subir a 2^16 al desplegar en un host con más memoria disponible.
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 

@@ -6,7 +6,7 @@ set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-1}"
 REMOTE_DIR="/home/FoxOrange/chat-server"
-PASS="${PASS:-123}"
+PASS="${PASS:?PASS no definida. Exporta PASS antes de ejecutar (ej: PASS=tu-clave bash scripts/install-server.sh)}"
 SSHPASS="$PASS"
 
 run_remote() {  # run_remote <comando-bash-en-una-linea>

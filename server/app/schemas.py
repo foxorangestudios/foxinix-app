@@ -38,6 +38,14 @@ class RegisterIn(BaseModel):
             raise ValueError("la contraseña debe tener al menos 8 caracteres")
         if len(v) > 200:
             raise ValueError("contraseña demasiado larga")
+        if not any(c.isupper() for c in v):
+            raise ValueError("la contraseña debe tener al menos una letra mayúscula")
+        if not any(c.islower() for c in v):
+            raise ValueError("la contraseña debe tener al menos una letra minúscula")
+        if not any(c.isdigit() for c in v):
+            raise ValueError("la contraseña debe tener al menos un número")
+        if not any(not c.isalnum() for c in v):
+            raise ValueError("la contraseña debe tener al menos un símbolo (!@#$%^&* etc.)")
         return v
 
 

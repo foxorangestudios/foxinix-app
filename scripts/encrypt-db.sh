@@ -10,7 +10,7 @@ set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-1}"
 REMOTE_DIR="/home/FoxOrange/chat-server"
-PASS="${PASS:-123}"
+PASS="${PASS:?PASS no definida. Exporta PASS antes de ejecutar (ej: PASS=tu-clave bash scripts/encrypt-db.sh)}"
 export SSHPASS="$PASS"
 
 KEY="$(openssl rand -hex 32)"

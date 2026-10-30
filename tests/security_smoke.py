@@ -88,7 +88,7 @@ def wait_code(email, timeout=8):
 
 def signup(uname, email):
     st, b, _ = http("POST", "/api/auth/register",
-                    {"email": email, "username": uname, "password": "foxpass12345"})
+                    {"email": email, "username": uname, "password": "FoxPass123!"})
     assert st == 201, (st, b, "¿cooldown de registro por IP? Espera ~1 min")
     pending = json.loads(b)["tokens"]["access"]
     code = wait_code(email)
@@ -116,10 +116,11 @@ def multipart_post(path, token, filename, content, mime):
 
 
 # --------------------------------------------------------------- usuarios
-u = str(int(time.time()))
-A_user, A = signup(f"seca{u}", f"seca{u}@example.com")
-B_user, B = signup(f"secb{u}", f"secb{u}@example.com")
-C_user, C = signup(f"secc{u}", f"secc{u}@example.com")   # no miembro del dm
+import uuid as _uuid_mod
+u = _uuid_mod.uuid4().hex[:8]
+A_user, A = signup(f"secx{u}", f"secx{u}@example.com")
+B_user, B = signup(f"secy{u}", f"secy{u}@example.com")
+C_user, C = signup(f"secz{u}", f"secz{u}@example.com")   # no miembro del dm
 print("registro+verify de A, B y C ok")
 
 # Nueva regla: antes de abrir el MD hay que aceptar la solicitud de amistad.
