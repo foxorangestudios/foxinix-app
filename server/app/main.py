@@ -92,11 +92,13 @@ async def reject_big_bodies(request, call_next):
 # W14: cabeceras de seguridad en TODA respuesta.
 # 'unsafe-eval' en script-src es necesario porque el build global de
 # Vue compila los templates en runtime (new Function).
-# 'unsafe-inline' se añade porque Vue y el código de actualización
-# (blob URLs para descarga de APK, modales dinámicos) generan
-# ejecución de scripts inline.
+# Sin 'unsafe-inline' ni hashes de script: la app NO genera scripts
+# inline (todos son externos con src=), así que no hace falta permitir
+# ninguno. Un aviso de script inline con hash DINÁMICO no es de la app:
+# lo inyecta el entorno del navegador (extensión/userscript), no se
+# reproduce con Firefox limpio y no debe resolverse aflojando la CSP.
 _CSP = (
-    "default-src 'self'; script-src 'self' 'unsafe-eval' blob: 'sha256-eQz6T6By+p0nomqOZdigUwfx3o9mbyTuYsY0UQO47no='; style-src 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self';"
     # W45f: las tarjetas de enlace muestran portadas externas; sin https:
     # el navegador las bloqueaba y la tarjeta quedaba sin imagen.
     " img-src 'self' data: blob: https:; media-src 'self' data: blob:;"
