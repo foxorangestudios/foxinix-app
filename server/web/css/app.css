@@ -1342,6 +1342,10 @@ audio.b-audio { display: none; }
 .wave {
   position: relative;
   flex: 1;
+  /* En celular (vertical) la burbuja es 88% y la onda con sus 34 barras
+     empujaba el botón de velocidad fuera de la burbuja. min-width: 0 deja
+     que la onda se encoja dentro del jugador cuando falta espacio. */
+  min-width: 0;
   display: flex;
   align-items: center;
   height: 26px;
@@ -1352,7 +1356,9 @@ audio.b-audio { display: none; }
 }
 .wave i {
   flex: 1;
-  min-width: 2px;
+  /* 1px (antes 2px): en pantallas angostas la onda no debe forzar un
+     ancho mínimo que desborde el botón de velocidad de la nota de voz. */
+  min-width: 1px;
   margin: 0 1px;
   border-radius: 1px;
   background: currentColor;
@@ -1662,6 +1668,11 @@ audio.b-audio { display: none; }
   .side-head .side-fold { display: none; }
   .msgs { padding: 14px 12px 10px; }
   .bubble { max-width: 88%; }
+  /* Nota de voz: márgenes compactos para que play + onda + tiempo + botón
+     de velocidad quepan SIEMPRE dentro de la burbuja (≤360px de ancho). */
+  .wave { margin: 0 4px; }
+  .wave i { margin: 0 0.5px; }
+  .b-player .au-rate { margin-left: 3px; padding: 0 5px; min-width: 30px; }
   /* W51: notch/barra del móvil. env() cae a 0 en navegadores viejos. */
   .chat-head {
     height: calc(48px + env(safe-area-inset-top, 0px));
