@@ -96,7 +96,7 @@ async def reject_big_bodies(request, call_next):
 # (blob URLs para descarga de APK, modales dinámicos) generan
 # ejecución de scripts inline.
 _CSP = (
-    "default-src 'self'; script-src 'self' 'unsafe-eval' blob:; style-src 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-eval' blob: 'sha256-eQz6T6By+p0nomqOZdigUwfx3o9mbyTuYsY0UQO47no='; style-src 'self';"
     # W45f: las tarjetas de enlace muestran portadas externas; sin https:
     # el navegador las bloqueaba y la tarjeta quedaba sin imagen.
     " img-src 'self' data: blob: https:; media-src 'self' data: blob:;"
